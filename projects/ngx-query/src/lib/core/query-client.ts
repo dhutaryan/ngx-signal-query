@@ -33,21 +33,11 @@ export class QueryClient {
   }
 
   setQueryData<TData>(key: QueryKey, data: TData): void {
-    const query = this.#cache.getOrCreate<TData>(key)
-    query.state.update((state) => ({
-      ...state,
-      data,
-      status: 'success',
-      updatedAt: Date.now(),
-    }))
+    this.#cache.getOrCreate<TData>(key).setData(data)
   }
 
   invalidateQueries(key: QueryKey): void {
-    const query = this.#cache.get(key)
-
-    if (!query) return
-
-    query.state.update((state) => ({ ...state, updatedAt: 0 }))
+    this.#cache.get(key)?.invalidate()
   }
 
   getDefaultOptions() {

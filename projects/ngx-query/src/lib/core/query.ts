@@ -1,4 +1,4 @@
-import { signal, WritableSignal } from '@angular/core'
+import { signal } from '@angular/core'
 import { Observable, Subscription, take } from 'rxjs'
 
 import { QueryKey, QueryStatus } from './types'
@@ -12,13 +12,15 @@ export interface QueryState<TData, TError = Error> {
 }
 
 export class Query<TData, TError = Error> {
-  readonly state = signal<QueryState<TData, TError>>({
+  readonly #state = signal<QueryState<TData, TError>>({
     data: undefined,
     status: 'pending',
     error: null,
     isFetching: false,
     updatedAt: 0,
   })
+  readonly state = this.#state.asReadonly()
+
   #subscription: Subscription | null = null
 
   constructor(
@@ -29,13 +31,13 @@ export class Query<TData, TError = Error> {
   fetch(queryFn: () => Observable<TData>): void {
     if (this.#subscription && !this.#subscription.closed) return
 
-    this.state.update((state) => ({ ...state, isFetching: true }))
+    this.#state.update((state) => ({ ...state, isFetching: true }))
 
     this.#subscription = queryFn()
       .pipe(take(1))
       .subscribe({
         next: (data) =>
-          this.state.set({
+          this.#state.set({
             data,
             status: 'success',
             error: null,
@@ -43,13 +45,26 @@ export class Query<TData, TError = Error> {
             updatedAt: Date.now(),
           }),
         error: (err) =>
-          this.state.update((state) => ({
+          this.#state.update((state) => ({
             ...state,
             status: 'error',
             error: err,
             isFetching: false,
           })),
       })
+  }
+
+  setData(data: TData): void {
+    this.#state.update((state) => ({
+      ...state,
+      data,
+      status: 'success',
+      updatedAt: Date.now(),
+    }))
+  }
+
+  invalidate(): void {
+    this.#state.update((state) => ({ ...state, updatedAt: 0 }))
   }
 
   isStale(staleTime: number): boolean {
