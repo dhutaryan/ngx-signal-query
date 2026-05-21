@@ -1,40 +1,55 @@
-import { computed, effect, inject, untracked } from '@angular/core'
+import {
+  assertInInjectionContext,
+  computed,
+  effect,
+  inject,
+  Injector,
+  runInInjectionContext,
+  untracked,
+} from '@angular/core'
 
 import { QueryClient } from './query-client'
 import { QueryOptions, QueryResult } from './types'
 
 export function injectQuery<TData, TError = Error>(
   optionsFn: () => QueryOptions<TData, TError>,
+  options?: { injector?: Injector },
 ): QueryResult<TData, TError> {
-  const client = inject(QueryClient)
+  if (!options?.injector) assertInInjectionContext(injectQuery)
 
-  const query = computed(() => {
-    const { queryKey } = optionsFn()
+  const injector = options?.injector ?? inject(Injector)
 
-    return client.getOrCreateQuery<TData, TError>(queryKey)
+  return runInInjectionContext(injector, () => {
+    const client = inject(QueryClient)
+
+    const query = computed(() => {
+      const { queryKey } = optionsFn()
+
+      return client.getOrCreateQuery<TData, TError>(queryKey)
+    })
+
+    effect((cleanup) => {
+      const q = query()
+      q.addObserver()
+      cleanup(() => q.removeObserver())
+    })
+
+    effect(() => {
+      const { queryKey, queryFn, staleTime, enabled } = optionsFn()
+
+      if (enabled === false) return
+
+      untracked(() => client.fetchQuery(queryKey, queryFn, staleTime))
+    })
+
+    return {
+      data: computed(() => query().state().data),
+      status: computed(() => query().state().status),
+      error: computed(() => query().state().error as TError | null),
+      isFetching: computed(() => query().state().isFetching),
+      isPending: computed(() => query().state().status === 'pending'),
+      isSuccess: computed(() => query().state().status === 'success'),
+      isError: computed(() => query().state().status === 'error'),
+    }
   })
-
-  effect((cleanup) => {
-    const q = query()
-    q.addObserver()
-    cleanup(() => q.removeObserver())
-  })
-
-  effect(() => {
-    const { queryKey, queryFn, staleTime, enabled } = optionsFn()
-
-    if (enabled === false) return
-
-    untracked(() => client.fetchQuery(queryKey, queryFn, staleTime))
-  })
-
-  return {
-    data: computed(() => query().state().data),
-    status: computed(() => query().state().status),
-    error: computed(() => query().state().error as TError | null),
-    isFetching: computed(() => query().state().isFetching),
-    isPending: computed(() => query().state().status === 'pending'),
-    isSuccess: computed(() => query().state().status === 'success'),
-    isError: computed(() => query().state().status === 'error'),
-  }
 }
