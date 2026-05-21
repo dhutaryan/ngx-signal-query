@@ -14,6 +14,12 @@ export function injectQuery<TData, TError = Error>(
     return client.getOrCreateQuery<TData, TError>(queryKey)
   })
 
+  effect((cleanup) => {
+    const q = query()
+    q.addObserver()
+    cleanup(() => q.removeObserver())
+  })
+
   effect(() => {
     const { queryKey, queryFn, staleTime, enabled } = optionsFn()
 

@@ -22,11 +22,30 @@ export class Query<TData, TError = Error> {
   readonly state = this.#state.asReadonly()
 
   #subscription: Subscription | null = null
+  #observers = 0
 
   constructor(
     readonly key: QueryKey,
     readonly serializedKey: string,
   ) {}
+
+  get observerCount(): number {
+    return this.#observers
+  }
+
+  addObserver(): void {
+    this.#observers++
+  }
+
+  removeObserver(): void {
+    if (this.#observers === 0) return
+
+    this.#observers--
+
+    if (this.#observers === 0) {
+      this.cancel()
+    }
+  }
 
   fetch(queryFn: () => Observable<TData>): void {
     if (this.#subscription && !this.#subscription.closed) return
