@@ -4,6 +4,7 @@ export interface QueryClientConfig {
   defaultOptions?: {
     queries?: {
       staleTime?: number
+      gcTime?: number
       retry?: number
     }
   }

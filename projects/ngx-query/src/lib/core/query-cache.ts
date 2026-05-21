@@ -12,10 +12,10 @@ export class QueryCache extends Cache<Query<unknown, unknown>> {
 
     if (exist) return exist as Query<TData, TError>
 
-    return this.addEntry(serializedKey, new Query(key, serializedKey)) as Query<
-      TData,
-      TError
-    >
+    return this.addEntry(
+      serializedKey,
+      new Query(serializedKey, this),
+    ) as Query<TData, TError>
   }
 
   get<TData, TError = Error>(key: QueryKey): Query<TData, TError> | undefined {
@@ -24,8 +24,12 @@ export class QueryCache extends Cache<Query<unknown, unknown>> {
       | undefined
   }
 
+  remove(query: Query<unknown, unknown>): void {
+    this.removeEntry(query.serializedKey)
+  }
+
   override clear(): void {
-    this.getAll().forEach((query) => query.cancel())
+    this.getAll().forEach((query) => query.destroy())
     super.clear()
   }
 }

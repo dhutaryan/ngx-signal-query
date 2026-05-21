@@ -1,7 +1,10 @@
 import { signal } from '@angular/core'
 import { Observable, Subscription, take } from 'rxjs'
 
-import { QueryKey, QueryStatus } from './types'
+import { QueryCache } from './query-cache'
+import { QueryStatus } from './types'
+
+const DEFAULT_GC_TIME = 5 * 60 * 1000
 
 export interface QueryState<TData, TError = Error> {
   data: TData | undefined
@@ -23,18 +26,28 @@ export class Query<TData, TError = Error> {
 
   #subscription: Subscription | null = null
   #observers = 0
+  #gcTime = DEFAULT_GC_TIME
+  #gcTimer: ReturnType<typeof setTimeout> | null = null
+  readonly #cache: QueryCache
 
   constructor(
-    readonly key: QueryKey,
     readonly serializedKey: string,
-  ) {}
+    cache: QueryCache,
+  ) {
+    this.#cache = cache
+  }
 
   get observerCount(): number {
     return this.#observers
   }
 
+  setGcTime(ms: number): void {
+    this.#gcTime = ms
+  }
+
   addObserver(): void {
     this.#observers++
+    this.#clearGcTimer()
   }
 
   removeObserver(): void {
@@ -44,6 +57,7 @@ export class Query<TData, TError = Error> {
 
     if (this.#observers === 0) {
       this.cancel()
+      this.#scheduleGc()
     }
   }
 
@@ -93,5 +107,26 @@ export class Query<TData, TError = Error> {
   cancel(): void {
     this.#subscription?.unsubscribe()
     this.#subscription = null
+  }
+
+  destroy(): void {
+    this.cancel()
+    this.#clearGcTimer()
+  }
+
+  #scheduleGc(): void {
+    this.#clearGcTimer()
+
+    this.#gcTimer = setTimeout(() => {
+      this.#gcTimer = null
+      this.#cache.remove(this)
+    }, this.#gcTime)
+  }
+
+  #clearGcTimer(): void {
+    if (this.#gcTimer === null) return
+
+    clearTimeout(this.#gcTimer)
+    this.#gcTimer = null
   }
 }

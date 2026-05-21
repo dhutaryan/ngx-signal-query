@@ -7,6 +7,7 @@ import {
 
 export interface DefaultQueryOptions {
   staleTime?: number
+  gcTime?: number
 }
 
 export interface DefaultOptions {

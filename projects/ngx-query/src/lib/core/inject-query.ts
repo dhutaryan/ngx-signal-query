@@ -30,6 +30,14 @@ export function injectQuery<TData, TError = Error>(
 
     effect((cleanup) => {
       const q = query()
+      const gcTime = untracked(
+        () => optionsFn().gcTime ?? client.getDefaultOptions()?.queries?.gcTime,
+      )
+
+      if (gcTime !== undefined) {
+        q.setGcTime(gcTime)
+      }
+
       q.addObserver()
       cleanup(() => q.removeObserver())
     })
