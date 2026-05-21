@@ -31,7 +31,7 @@ export class Query<TData, TError = Error> {
   readonly #cache: QueryCache
 
   constructor(
-    readonly serializedKey: string,
+    readonly queryHash: string,
     cache: QueryCache,
   ) {
     this.#cache = cache
