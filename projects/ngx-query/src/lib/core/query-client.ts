@@ -6,15 +6,6 @@ import { QueryKey } from './types'
 import { QUERY_CLIENT_CONFIG } from './injection-tokens'
 import { Query } from './query'
 
-export interface QueryClientConfig {
-  defaultOptions?: {
-    queries?: {
-      staleTime?: number
-      retry?: number
-    }
-  }
-}
-
 @Injectable()
 export class QueryClient {
   readonly #cache = inject(QueryCache)
