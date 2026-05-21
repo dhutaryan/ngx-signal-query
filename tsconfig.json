@@ -8,9 +8,7 @@
     "noPropertyAccessFromIndexSignature": true,
     "noImplicitReturns": true,
     "paths": {
-      "ngx-query": [
-        "./dist/ngx-query"
-      ]
+      "ngx-query": ["./dist/ngx-query"]
     },
     "noFallthroughCasesInSwitch": true,
     "skipLibCheck": true,
