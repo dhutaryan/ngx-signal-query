@@ -1,5 +1,5 @@
 import { signal } from '@angular/core'
-import { Observable, Subscription, take } from 'rxjs'
+import { Observable, take, throwIfEmpty, type Subscription } from 'rxjs'
 
 import { QueryCache } from './query-cache'
 import { QueryStatus } from './types'
@@ -67,7 +67,12 @@ export class Query<TData, TError = Error> {
     this.#state.update((state) => ({ ...state, isFetching: true }))
 
     this.#subscription = queryFn()
-      .pipe(take(1))
+      .pipe(
+        take(1),
+        throwIfEmpty(
+          () => new Error('Query function completed without emitting a value'),
+        ),
+      )
       .subscribe({
         next: (data) =>
           this.#state.set({
@@ -100,7 +105,11 @@ export class Query<TData, TError = Error> {
     this.#state.update((state) => ({ ...state, updatedAt: 0 }))
   }
 
-  isStale(staleTime: number): boolean {
+  shouldFetch(staleTime: number): boolean {
+    return this.state().status !== 'success' || this.#isStale(staleTime)
+  }
+
+  #isStale(staleTime: number): boolean {
     return Date.now() - this.state().updatedAt > staleTime
   }
 

@@ -21,11 +21,8 @@ export class QueryClient {
     staleTime = this.#config.defaultOptions?.queries?.staleTime ?? 0,
   ): void {
     const query = this.#cache.getOrCreate<TData>(key)
-    const state = query.state()
 
-    if (state.status === 'success' && !query.isStale(staleTime)) return
-
-    query.fetch(queryFn)
+    if (query.shouldFetch(staleTime)) query.fetch(queryFn)
   }
 
   getQueryData<TData>(key: QueryKey): TData | undefined {

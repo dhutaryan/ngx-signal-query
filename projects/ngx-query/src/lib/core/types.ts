@@ -10,7 +10,6 @@ export interface QueryOptions<TData, TError = Error> {
   queryFn: () => Observable<TData>
   staleTime?: number
   gcTime?: number
-  retry?: number
   enabled?: boolean
 }
 

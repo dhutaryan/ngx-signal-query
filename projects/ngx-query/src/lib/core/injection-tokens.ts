@@ -5,7 +5,6 @@ export interface QueryClientConfig {
     queries?: {
       staleTime?: number
       gcTime?: number
-      retry?: number
     }
   }
 }
