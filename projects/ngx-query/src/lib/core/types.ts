@@ -5,6 +5,11 @@ export type QueryKey = ReadonlyArray<unknown>
 
 export type QueryStatus = 'pending' | 'success' | 'error'
 
+export type QueryFilters = {
+  queryKey?: QueryKey
+  exact?: boolean
+}
+
 export type QueryOptions<TData, TError = Error> = {
   queryKey: QueryKey
   queryFn: () => Observable<TData>

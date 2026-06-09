@@ -2,7 +2,12 @@ import { inject, Injectable } from '@angular/core'
 import { Observable } from 'rxjs'
 
 import { QueryCache } from './query-cache'
-import { DefaultedQueryOptions, QueryKey, QueryOptions } from './types'
+import {
+  DefaultedQueryOptions,
+  QueryFilters,
+  QueryKey,
+  QueryOptions,
+} from './types'
 import { QUERY_CLIENT_CONFIG } from './injection-tokens'
 import { Query } from './query'
 
@@ -45,7 +50,7 @@ export class QueryClient {
     this.#cache.getOrCreate<TData>(key).setData(data)
   }
 
-  invalidateQueries(key: QueryKey): void {
-    this.#cache.get(key)?.invalidate()
+  invalidateQueries(filters?: QueryFilters): void {
+    this.#cache.findAll(filters).forEach((query) => query.invalidate())
   }
 }

@@ -2,7 +2,7 @@ import { signal } from '@angular/core'
 import { Observable, take, throwIfEmpty, type Subscription } from 'rxjs'
 
 import { QueryCache } from './query-cache'
-import { QueryStatus } from './types'
+import { QueryKey, QueryStatus } from './types'
 
 const DEFAULT_GC_TIME = 5 * 60 * 1000
 
@@ -33,6 +33,7 @@ export class Query<TData, TError = Error> {
   readonly #cache: QueryCache
 
   constructor(
+    readonly key: QueryKey,
     readonly queryHash: string,
     cache: QueryCache,
   ) {

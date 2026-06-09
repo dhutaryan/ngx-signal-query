@@ -1,5 +1,27 @@
 import { QueryKey } from './types'
 
+// True when `filter` is a (deep) prefix of `key`, e.g. ['app'] matches
+// ['app', 1]. Used to invalidate/find groups of queries by partial key.
+export function partialMatchKey(key: QueryKey, filter: QueryKey): boolean {
+  return partialDeepEqual(key, filter)
+}
+
+function partialDeepEqual(a: unknown, b: unknown): boolean {
+  if (a === b) return true
+  if (typeof a !== typeof b) return false
+
+  if (a && b && typeof a === 'object' && typeof b === 'object') {
+    return Object.keys(b).every((key) =>
+      partialDeepEqual(
+        (a as Record<string, unknown>)[key],
+        (b as Record<string, unknown>)[key],
+      ),
+    )
+  }
+
+  return false
+}
+
 export function hashKey(key: QueryKey): string {
   return JSON.stringify(key, (_, value) =>
     isPlainObject(value)

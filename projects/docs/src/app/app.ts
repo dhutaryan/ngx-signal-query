@@ -12,7 +12,8 @@ import { JsonPipe } from '@angular/common'
     <h1>Welcome to {{ title() }}!</h1>
 
     <button (click)="loadRandom()">Load random</button>
-    <button (click)="invalidate()">Invalidate current</button>
+    <button (click)="invalidateCurrent()">Invalidate current</button>
+    <button (click)="invalidateAll()">Invalidate all</button>
 
     <p>
       id: {{ recipeId() }} | status: {{ query.status() }} | fetching:
@@ -40,7 +41,11 @@ export class App {
     this.recipeId.set(Math.floor(Math.random() * 5) + 1)
   }
 
-  protected invalidate(): void {
-    this._client.invalidateQueries(['app', this.recipeId()])
+  protected invalidateCurrent(): void {
+    this._client.invalidateQueries({ queryKey: ['app', this.recipeId()] })
+  }
+
+  protected invalidateAll(): void {
+    this._client.invalidateQueries({ queryKey: ['app'] })
   }
 }
