@@ -1,6 +1,6 @@
-import { Component, effect, inject, signal } from '@angular/core'
+import { Component, inject, signal } from '@angular/core'
 import { RouterOutlet } from '@angular/router'
-import { injectQuery } from 'ngx-query'
+import { injectQuery, injectQueryClient } from 'ngx-query'
 
 import { AppQueries } from './app-queries'
 import { JsonPipe } from '@angular/common'
@@ -11,10 +11,15 @@ import { JsonPipe } from '@angular/common'
   template: `
     <h1>Welcome to {{ title() }}!</h1>
 
-    <pre>
-      {{ query.data() | json }}
-    </pre
-    >
+    <button (click)="loadRandom()">Load random</button>
+    <button (click)="invalidate()">Invalidate current</button>
+
+    <p>
+      id: {{ recipeId() }} | status: {{ query.status() }} | fetching:
+      {{ query.isFetching() }}
+    </p>
+
+    <pre>{{ query.data() | json }}</pre>
 
     <router-outlet />
   `,
@@ -22,14 +27,20 @@ import { JsonPipe } from '@angular/common'
 })
 export class App {
   protected readonly title = signal('docs')
+  protected readonly recipeId = signal(1)
 
   private readonly _queries = inject(AppQueries)
+  private readonly _client = injectQueryClient()
 
-  protected readonly query = injectQuery(() => this._queries.recipe())
+  protected readonly query = injectQuery(() =>
+    this._queries.recipe(this.recipeId()),
+  )
 
-  constructor() {
-    effect(() => {
-      console.log(this.query.data())
-    })
+  protected loadRandom(): void {
+    this.recipeId.set(Math.floor(Math.random() * 5) + 1)
+  }
+
+  protected invalidate(): void {
+    this._client.invalidateQueries(['app', this.recipeId()])
   }
 }

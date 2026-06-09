@@ -2,7 +2,7 @@ import { inject, Injectable } from '@angular/core'
 import { Observable } from 'rxjs'
 
 import { QueryCache } from './query-cache'
-import { QueryKey } from './types'
+import { DefaultedQueryOptions, QueryKey, QueryOptions } from './types'
 import { QUERY_CLIENT_CONFIG } from './injection-tokens'
 import { Query } from './query'
 
@@ -10,6 +10,18 @@ import { Query } from './query'
 export class QueryClient {
   readonly #cache = inject(QueryCache)
   readonly #config = inject(QUERY_CLIENT_CONFIG, { optional: true }) ?? {}
+
+  defaultQueryOptions<TData, TError = Error>(
+    options: QueryOptions<TData, TError>,
+  ): DefaultedQueryOptions<TData, TError> {
+    const defaults = this.#config.defaultOptions?.queries
+
+    return {
+      ...options,
+      staleTime: options.staleTime ?? defaults?.staleTime ?? 0,
+      gcTime: options.gcTime ?? defaults?.gcTime,
+    }
+  }
 
   getOrCreateQuery<TData, TError = Error>(key: QueryKey): Query<TData, TError> {
     return this.#cache.getOrCreate<TData, TError>(key)
@@ -35,9 +47,5 @@ export class QueryClient {
 
   invalidateQueries(key: QueryKey): void {
     this.#cache.get(key)?.invalidate()
-  }
-
-  getDefaultOptions() {
-    return this.#config.defaultOptions
   }
 }

@@ -11,6 +11,7 @@ export interface QueryState<TData, TError = Error> {
   status: QueryStatus
   error: TError | null
   isFetching: boolean
+  isInvalidated: boolean
   updatedAt: number
 }
 
@@ -20,6 +21,7 @@ export class Query<TData, TError = Error> {
     status: 'pending',
     error: null,
     isFetching: false,
+    isInvalidated: false,
     updatedAt: 0,
   })
   readonly state = this.#state.asReadonly()
@@ -55,6 +57,8 @@ export class Query<TData, TError = Error> {
 
     this.#observers--
 
+    // No observers left: cancel any in-flight fetch (nobody is waiting for it)
+    // and schedule gc to dispose the query if no observer returns.
     if (this.#observers === 0) {
       this.cancel()
       this.#scheduleGc()
@@ -80,6 +84,7 @@ export class Query<TData, TError = Error> {
             status: 'success',
             error: null,
             isFetching: false,
+            isInvalidated: false,
             updatedAt: Date.now(),
           }),
         error: (err) =>
@@ -97,16 +102,23 @@ export class Query<TData, TError = Error> {
       ...state,
       data,
       status: 'success',
+      error: null,
+      isInvalidated: false,
       updatedAt: Date.now(),
     }))
   }
 
   invalidate(): void {
-    this.#state.update((state) => ({ ...state, updatedAt: 0 }))
+    this.#state.update((state) => ({ ...state, isInvalidated: true }))
   }
 
   shouldFetch(staleTime: number): boolean {
-    return this.state().status !== 'success' || this.#isStale(staleTime)
+    const state = this.state()
+    return (
+      state.status !== 'success' ||
+      state.isInvalidated ||
+      this.#isStale(staleTime)
+    )
   }
 
   #isStale(staleTime: number): boolean {

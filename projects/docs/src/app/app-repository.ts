@@ -6,7 +6,7 @@ import { Observable } from 'rxjs'
 export class AppRepository {
   private readonly _http = inject(HttpClient)
 
-  public get(): Observable<unknown> {
-    return this._http.get('https://dummyjson.com/recipes/1')
+  public get(id: number): Observable<unknown> {
+    return this._http.get(`https://dummyjson.com/recipes/${id}`)
   }
 }

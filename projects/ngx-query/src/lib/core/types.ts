@@ -5,7 +5,7 @@ export type QueryKey = ReadonlyArray<unknown>
 
 export type QueryStatus = 'pending' | 'success' | 'error'
 
-export interface QueryOptions<TData, TError = Error> {
+export type QueryOptions<TData, TError = Error> = {
   queryKey: QueryKey
   queryFn: () => Observable<TData>
   staleTime?: number
@@ -13,7 +13,14 @@ export interface QueryOptions<TData, TError = Error> {
   enabled?: boolean
 }
 
-export interface QueryResult<TData, TError = Error> {
+export type DefaultedQueryOptions<TData, TError = Error> = QueryOptions<
+  TData,
+  TError
+> & {
+  staleTime: number
+}
+
+export type QueryResult<TData, TError = Error> = {
   data: Signal<TData | undefined>
   status: Signal<QueryStatus>
   error: Signal<TError | null>

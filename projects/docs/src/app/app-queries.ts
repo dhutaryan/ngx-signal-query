@@ -7,10 +7,11 @@ import { AppRepository } from './app-repository'
 export class AppQueries {
   private readonly _repository = inject(AppRepository)
 
-  public recipe() {
+  public recipe(id: number) {
     return queryOptions({
-      queryKey: ['app'],
-      queryFn: () => this._repository.get(),
+      queryKey: ['app', id],
+      queryFn: () => this._repository.get(id),
+      staleTime: 60_000,
     })
   }
 }

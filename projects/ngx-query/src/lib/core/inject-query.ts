@@ -22,17 +22,23 @@ export function injectQuery<TData, TError = Error>(
   return runInInjectionContext(injector, () => {
     const client = inject(QueryClient)
 
-    const query = computed(() => {
-      const { queryKey } = optionsFn()
+    // Single source of truth for defaulted options; resolves config defaults
+    // (staleTime, gcTime) once instead of scattering the logic across effects.
+    const defaultedOptions = computed(() =>
+      client.defaultQueryOptions(optionsFn()),
+    )
 
-      return client.getOrCreateQuery<TData, TError>(queryKey)
-    })
+    const query = computed(() =>
+      client.getOrCreateQuery<TData, TError>(defaultedOptions().queryKey),
+    )
+
+    // Memoized: only emits when the flag itself flips, so ordinary data
+    // updates don't wake the fetch effect (no refetch loop).
+    const isInvalidated = computed(() => query().state().isInvalidated)
 
     effect((cleanup) => {
       const q = query()
-      const gcTime = untracked(
-        () => optionsFn().gcTime ?? client.getDefaultOptions()?.queries?.gcTime,
-      )
+      const { gcTime } = untracked(defaultedOptions)
 
       if (gcTime !== undefined) {
         q.setGcTime(gcTime)
@@ -43,7 +49,10 @@ export function injectQuery<TData, TError = Error>(
     })
 
     effect(() => {
-      const { queryKey, queryFn, staleTime, enabled } = optionsFn()
+      const { queryKey, queryFn, staleTime, enabled } = defaultedOptions()
+
+      // Track invalidation so invalidateQueries() re-triggers a refetch.
+      isInvalidated()
 
       if (enabled === false) return
 
