@@ -9,4 +9,8 @@ export class AppRepository {
   public get(id: number): Observable<unknown> {
     return this._http.get(`https://dummyjson.com/recipes/${id}`)
   }
+
+  public add(name: string): Observable<unknown> {
+    return this._http.post('https://dummyjson.com/recipes/add', { name })
+  }
 }

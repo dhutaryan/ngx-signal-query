@@ -1,6 +1,6 @@
 import { Component, inject, signal } from '@angular/core'
 import { RouterOutlet } from '@angular/router'
-import { injectQuery, injectQueryClient } from 'ngx-query'
+import { injectMutation, injectQuery, injectQueryClient } from 'ngx-query'
 
 import { AppQueries } from './app-queries'
 import { JsonPipe } from '@angular/common'
@@ -22,6 +22,17 @@ import { JsonPipe } from '@angular/common'
 
     <pre>{{ query.data() | json }}</pre>
 
+    <hr />
+
+    <button (click)="addRecipe.mutate('New recipe')" [disabled]="addRecipe.isPending()">
+      Add recipe
+    </button>
+    <button (click)="addRecipe.reset()">Reset</button>
+
+    <p>mutation status: {{ addRecipe.status() }}</p>
+
+    <pre>{{ addRecipe.data() | json }}</pre>
+
     <router-outlet />
   `,
   styles: [],
@@ -36,6 +47,8 @@ export class App {
   protected readonly query = injectQuery(() =>
     this._queries.recipe(this.recipeId()),
   )
+
+  protected readonly addRecipe = injectMutation(() => this._queries.addRecipe())
 
   protected loadRandom(): void {
     this.recipeId.set(Math.floor(Math.random() * 5) + 1)

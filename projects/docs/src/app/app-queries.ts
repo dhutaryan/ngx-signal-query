@@ -1,5 +1,5 @@
 import { inject, Injectable } from '@angular/core'
-import { queryOptions } from 'ngx-query'
+import { mutationOptions, queryOptions } from 'ngx-query'
 
 import { AppRepository } from './app-repository'
 
@@ -12,6 +12,12 @@ export class AppQueries {
       queryKey: ['app', id],
       queryFn: () => this._repository.get(id),
       staleTime: 60_000,
+    })
+  }
+
+  public addRecipe() {
+    return mutationOptions({
+      mutationFn: (name: string) => this._repository.add(name),
     })
   }
 }

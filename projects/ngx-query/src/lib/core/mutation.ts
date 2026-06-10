@@ -1,4 +1,4 @@
-import { signal } from '@angular/core'
+import { signal, Signal } from '@angular/core'
 import { Observable, take, throwIfEmpty, type Subscription } from 'rxjs'
 
 export type MutationStatus = 'idle' | 'pending' | 'success' | 'error'
@@ -13,6 +13,19 @@ export type MutationState<TData, TError, TVariables> = {
 
 export type MutationOptions<TData, TError, TVariables> = {
   mutationFn: (variables: TVariables) => Observable<TData>
+}
+
+export type MutationResult<TData, TError, TVariables> = {
+  mutate: (variables: TVariables) => void
+  reset: () => void
+  data: Signal<TData | undefined>
+  error: Signal<TError | null>
+  variables: Signal<TVariables | undefined>
+  status: Signal<MutationStatus>
+  isIdle: Signal<boolean>
+  isPending: Signal<boolean>
+  isSuccess: Signal<boolean>
+  isError: Signal<boolean>
 }
 
 function getInitialState<TData, TError, TVariables>(): MutationState<

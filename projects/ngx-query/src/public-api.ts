@@ -7,7 +7,15 @@ export * from './lib/core/provider'
 export * from './lib/core/inject-query-client'
 export * from './lib/core/types'
 export * from './lib/core/inject-query'
+export * from './lib/core/inject-mutation'
 export * from './lib/core/query-options'
+export * from './lib/core/mutation-options'
+export type {
+  MutationOptions,
+  MutationResult,
+  MutationState,
+  MutationStatus,
+} from './lib/core/mutation'
 export { QueryClientFeatureKind } from './lib/features/feature'
 export type { QueryClientFeature } from './lib/features/feature'
 export { withDefaultOptions } from './lib/features/with-default-options'

@@ -18,7 +18,9 @@ export class MutationCache extends Cache<Mutation<unknown, unknown, unknown>> {
     return mutation
   }
 
-  remove(mutation: Mutation<unknown, unknown, unknown>): void {
+  remove<TData, TError, TVariables>(
+    mutation: Mutation<TData, TError, TVariables>,
+  ): void {
     this.removeEntry(String(mutation.mutationId))
   }
 
