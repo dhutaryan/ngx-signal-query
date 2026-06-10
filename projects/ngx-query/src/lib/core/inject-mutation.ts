@@ -10,8 +10,13 @@ import {
 import { MutationCache } from './mutation-cache'
 import { MutationOptions, MutationResult } from './mutation'
 
-export function injectMutation<TData, TError = Error, TVariables = void>(
-  optionsFn: () => MutationOptions<TData, TError, TVariables>,
+export function injectMutation<
+  TData,
+  TError = Error,
+  TVariables = void,
+  TContext = unknown,
+>(
+  optionsFn: () => MutationOptions<TData, TError, TVariables, TContext>,
   options?: { injector?: Injector },
 ): MutationResult<TData, TError, TVariables> {
   if (!options?.injector) assertInInjectionContext(injectMutation)

@@ -1,37 +1,36 @@
 import { Component, inject, signal } from '@angular/core'
 import { RouterOutlet } from '@angular/router'
-import { injectMutation, injectQuery, injectQueryClient } from 'ngx-query'
+import { injectMutation, injectQuery } from 'ngx-query'
 
 import { AppQueries } from './app-queries'
-import { JsonPipe } from '@angular/common'
 
 @Component({
   selector: 'app-root',
-  imports: [RouterOutlet, JsonPipe],
+  imports: [RouterOutlet],
   template: `
     <h1>Welcome to {{ title() }}!</h1>
 
-    <button (click)="loadRandom()">Load random</button>
-    <button (click)="invalidateCurrent()">Invalidate current</button>
-    <button (click)="invalidateAll()">Invalidate all</button>
-
     <p>
-      id: {{ recipeId() }} | status: {{ query.status() }} | fetching:
-      {{ query.isFetching() }}
+      recipes status: {{ recipes.status() }} | fetching:
+      {{ recipes.isFetching() }}
     </p>
 
-    <pre>{{ query.data() | json }}</pre>
+    <ul>
+      @for (recipe of recipes.data(); track recipe.id) {
+        <li>{{ recipe.name }}</li>
+      }
+    </ul>
 
     <hr />
 
-    <button (click)="addRecipe.mutate('New recipe')" [disabled]="addRecipe.isPending()">
-      Add recipe
+    <button
+      (click)="addRecipe.mutate('New recipe')"
+      [disabled]="addRecipe.isPending()"
+    >
+      Add recipe (optimistic)
     </button>
-    <button (click)="addRecipe.reset()">Reset</button>
 
     <p>mutation status: {{ addRecipe.status() }}</p>
-
-    <pre>{{ addRecipe.data() | json }}</pre>
 
     <router-outlet />
   `,
@@ -39,26 +38,9 @@ import { JsonPipe } from '@angular/common'
 })
 export class App {
   protected readonly title = signal('docs')
-  protected readonly recipeId = signal(1)
 
   private readonly _queries = inject(AppQueries)
-  private readonly _client = injectQueryClient()
 
-  protected readonly query = injectQuery(() =>
-    this._queries.recipe(this.recipeId()),
-  )
-
+  protected readonly recipes = injectQuery(() => this._queries.recipes())
   protected readonly addRecipe = injectMutation(() => this._queries.addRecipe())
-
-  protected loadRandom(): void {
-    this.recipeId.set(Math.floor(Math.random() * 5) + 1)
-  }
-
-  protected invalidateCurrent(): void {
-    this._client.invalidateQueries({ queryKey: ['app', this.recipeId()] })
-  }
-
-  protected invalidateAll(): void {
-    this._client.invalidateQueries({ queryKey: ['app'] })
-  }
 }
