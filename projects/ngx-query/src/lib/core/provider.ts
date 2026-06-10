@@ -2,6 +2,7 @@ import { EnvironmentProviders, makeEnvironmentProviders } from '@angular/core'
 
 import { QueryClient } from './query-client'
 import { QueryCache } from './query-cache'
+import { MutationCache } from './mutation-cache'
 import { QueryClientFeature, QueryClientFeatureKind } from '../features/feature'
 
 export function provideQueryClient(
@@ -20,6 +21,7 @@ export function provideQueryClient(
 
   return makeEnvironmentProviders([
     QueryCache,
+    MutationCache,
     QueryClient,
     ...features.flatMap((feature) => feature.ɵproviders),
   ])
