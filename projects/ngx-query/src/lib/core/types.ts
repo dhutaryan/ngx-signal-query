@@ -43,6 +43,7 @@ export type QueryResult<TData, TError = Error> = {
   status: Signal<QueryStatus>
   error: Signal<TError | null>
   isFetching: Signal<boolean>
+  isLoading: Signal<boolean>
   isPending: Signal<boolean>
   isSuccess: Signal<boolean>
   isError: Signal<boolean>

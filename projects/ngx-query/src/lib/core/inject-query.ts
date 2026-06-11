@@ -77,6 +77,11 @@ export function injectQuery<TData, TError = Error>(
       status: computed(() => query().state().status),
       error: computed(() => query().state().error as TError | null),
       isFetching: computed(() => query().state().isFetching),
+      // First fetch in-flight: fetching with no resolved data yet.
+      isLoading: computed(() => {
+        const state = query().state()
+        return state.isFetching && state.status === 'pending'
+      }),
       isPending: computed(() => query().state().status === 'pending'),
       isSuccess: computed(() => query().state().status === 'success'),
       isError: computed(() => query().state().status === 'error'),
