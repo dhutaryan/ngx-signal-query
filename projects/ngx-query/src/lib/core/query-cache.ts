@@ -26,16 +26,17 @@ export class QueryCache extends Cache<Query<unknown, unknown>> {
   findAll(filters: QueryFilters = {}): Query<unknown, unknown>[] {
     const { queryKey, exact } = filters
 
-    if (!queryKey) return this.getAll()
+    // Reads the reactive `entries()` so findAll() works inside computed().
+    const all = this.entries()
+
+    if (!queryKey) return all
 
     if (exact) {
-      const query = this.getEntry(hashKey(queryKey))
-      return query ? [query] : []
+      const queryHash = hashKey(queryKey)
+      return all.filter((query) => query.queryHash === queryHash)
     }
 
-    return this.getAll().filter((query) =>
-      partialMatchKey(query.key, queryKey),
-    )
+    return all.filter((query) => partialMatchKey(query.key, queryKey))
   }
 
   remove(query: Query<unknown, unknown>): void {

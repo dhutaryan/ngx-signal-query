@@ -2,6 +2,7 @@ import { inject, Injectable } from '@angular/core'
 import { Observable } from 'rxjs'
 
 import { QueryCache } from './query-cache'
+import { MutationCache } from './mutation-cache'
 import {
   DefaultedQueryOptions,
   QueryFilters,
@@ -14,7 +15,16 @@ import { Query } from './query'
 @Injectable()
 export class QueryClient {
   readonly #cache = inject(QueryCache)
+  readonly #mutationCache = inject(MutationCache)
   readonly #config = inject(QUERY_CLIENT_CONFIG, { optional: true }) ?? {}
+
+  getQueryCache(): QueryCache {
+    return this.#cache
+  }
+
+  getMutationCache(): MutationCache {
+    return this.#mutationCache
+  }
 
   defaultQueryOptions<TData, TError = Error>(
     options: QueryOptions<TData, TError>,
@@ -52,5 +62,14 @@ export class QueryClient {
 
   invalidateQueries(filters?: QueryFilters): void {
     this.#cache.findAll(filters).forEach((query) => query.invalidate())
+  }
+
+  isFetching(filters?: QueryFilters): number {
+    return this.#cache.findAll(filters).filter((query) => query.state().isFetching)
+      .length
+  }
+
+  isMutating(): number {
+    return this.#mutationCache.findAll({ status: 'pending' }).length
   }
 }

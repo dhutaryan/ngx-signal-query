@@ -1,28 +1,45 @@
+import { signal } from '@angular/core'
+
 export abstract class Cache<TEntry> {
-  readonly #entries = new Map<string, TEntry>()
+  readonly #entries = signal<TEntry[]>([])
+
+  // Reactive snapshot of all entries; updated on add/remove/clear so that
+  // findAll() (and its computed consumers like isFetching) react to the
+  // collection. Protected: only subclasses read it, never external code.
+  protected readonly entries = this.#entries.asReadonly()
+
+  readonly #entriesMap = new Map<string, TEntry>()
 
   protected addEntry(key: string, entry: TEntry): TEntry {
-    this.#entries.set(key, entry)
+    this.#entriesMap.set(key, entry)
+    this.#sync()
     return entry
   }
 
   protected getEntry(key: string): TEntry | undefined {
-    return this.#entries.get(key)
+    return this.#entriesMap.get(key)
   }
 
   protected hasEntry(key: string): boolean {
-    return this.#entries.has(key)
+    return this.#entriesMap.has(key)
   }
 
   protected removeEntry(key: string): boolean {
-    return this.#entries.delete(key)
+    const removed = this.#entriesMap.delete(key)
+    if (removed) this.#sync()
+    return removed
   }
 
   getAll(): TEntry[] {
-    return Array.from(this.#entries.values())
+    return Array.from(this.#entriesMap.values())
   }
 
   clear(): void {
-    this.#entries.clear()
+    this.#entriesMap.clear()
+    this.#sync()
+  }
+
+  #sync(): void {
+    this.#entries.set(Array.from(this.#entriesMap.values()))
   }
 }

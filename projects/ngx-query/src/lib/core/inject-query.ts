@@ -5,6 +5,7 @@ import {
   inject,
   Injector,
   runInInjectionContext,
+  signal,
   untracked,
 } from '@angular/core'
 
@@ -28,9 +29,19 @@ export function injectQuery<TData, TError = Error>(
       client.defaultQueryOptions(optionsFn()),
     )
 
-    const query = computed(() =>
-      client.getOrCreateQuery<TData, TError>(defaultedOptions().queryKey),
+    // getOrCreateQuery mutates the cache (a side effect), so it must not run
+    // inside a computed. Resolve the query in a signal: seed it synchronously
+    // and update it from an effect whenever the key changes.
+    const query = signal(
+      client.getOrCreateQuery<TData, TError>(
+        untracked(defaultedOptions).queryKey,
+      ),
     )
+
+    effect(() => {
+      const key = defaultedOptions().queryKey
+      query.set(untracked(() => client.getOrCreateQuery<TData, TError>(key)))
+    })
 
     // Memoized: only emits when the flag itself flips, so ordinary data
     // updates don't wake the fetch effect (no refetch loop).

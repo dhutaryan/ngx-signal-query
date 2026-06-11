@@ -3,6 +3,10 @@ import { Observable, take, throwIfEmpty, type Subscription } from 'rxjs'
 
 export type MutationStatus = 'idle' | 'pending' | 'success' | 'error'
 
+export type MutationFilters = {
+  status?: MutationStatus
+}
+
 export type MutationState<TData, TError, TVariables, TContext> = {
   status: MutationStatus
   data: TData | undefined

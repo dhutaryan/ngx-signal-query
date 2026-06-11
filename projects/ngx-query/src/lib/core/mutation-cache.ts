@@ -1,7 +1,7 @@
 import { Injectable } from '@angular/core'
 
 import { Cache } from './cache'
-import { Mutation, MutationOptions } from './mutation'
+import { Mutation, MutationFilters, MutationOptions } from './mutation'
 
 @Injectable()
 export class MutationCache extends Cache<
@@ -18,6 +18,17 @@ export class MutationCache extends Cache<
       mutation as Mutation<unknown, unknown, unknown, unknown>,
     )
     return mutation
+  }
+
+  findAll(
+    filters: MutationFilters = {},
+  ): Mutation<unknown, unknown, unknown, unknown>[] {
+    // Reads the reactive `entries()` so findAll() works inside computed().
+    const all = this.entries()
+
+    if (!filters.status) return all
+
+    return all.filter((mutation) => mutation.state().status === filters.status)
   }
 
   remove<TData, TError, TVariables, TContext>(

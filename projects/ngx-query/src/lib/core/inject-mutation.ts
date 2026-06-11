@@ -7,7 +7,7 @@ import {
   runInInjectionContext,
 } from '@angular/core'
 
-import { MutationCache } from './mutation-cache'
+import { QueryClient } from './query-client'
 import { MutationOptions, MutationResult } from './mutation'
 
 export function injectMutation<
@@ -24,7 +24,7 @@ export function injectMutation<
   const injector = options?.injector ?? inject(Injector)
 
   return runInInjectionContext(injector, () => {
-    const cache = inject(MutationCache)
+    const cache = inject(QueryClient).getMutationCache()
     const mutation = cache.build(optionsFn())
 
     inject(DestroyRef).onDestroy(() => {

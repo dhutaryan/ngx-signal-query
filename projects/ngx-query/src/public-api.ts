@@ -8,9 +8,12 @@ export * from './lib/core/inject-query-client'
 export * from './lib/core/types'
 export * from './lib/core/inject-query'
 export * from './lib/core/inject-mutation'
+export * from './lib/core/inject-is-fetching'
+export * from './lib/core/inject-is-mutating'
 export * from './lib/core/query-options'
 export * from './lib/core/mutation-options'
 export type {
+  MutationFilters,
   MutationOptions,
   MutationResult,
   MutationState,

@@ -1,6 +1,11 @@
 import { Component, inject, signal } from '@angular/core'
 import { RouterOutlet } from '@angular/router'
-import { injectMutation, injectQuery } from 'ngx-query'
+import {
+  injectIsFetching,
+  injectIsMutating,
+  injectMutation,
+  injectQuery,
+} from 'ngx-query'
 
 import { AppQueries } from './app-queries'
 
@@ -9,6 +14,8 @@ import { AppQueries } from './app-queries'
   imports: [RouterOutlet],
   template: `
     <h1>Welcome to {{ title() }}!</h1>
+
+    <p>global — fetching: {{ isFetching() }} | mutating: {{ isMutating() }}</p>
 
     <p>
       recipes status: {{ recipes.status() }} | fetching:
@@ -43,4 +50,7 @@ export class App {
 
   protected readonly recipes = injectQuery(() => this._queries.recipes())
   protected readonly addRecipe = injectMutation(() => this._queries.addRecipe())
+
+  protected readonly isFetching = injectIsFetching()
+  protected readonly isMutating = injectIsMutating()
 }
