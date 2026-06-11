@@ -1,8 +1,25 @@
 import { signal } from '@angular/core'
-import { Observable, take, throwIfEmpty, type Subscription } from 'rxjs'
+import {
+  Observable,
+  retry as retryOperator,
+  take,
+  throwIfEmpty,
+  timer,
+  type Subscription,
+} from 'rxjs'
 
 import { QueryCache } from './query-cache'
-import { QueryKey, QueryStatus } from './types'
+import {
+  defaultRetryDelay,
+  resolveRetryDelay,
+  shouldRetry,
+} from './retryer'
+import {
+  QueryKey,
+  QueryStatus,
+  RetryDelayValue,
+  RetryValue,
+} from './types'
 
 const DEFAULT_GC_TIME = 5 * 60 * 1000
 
@@ -12,6 +29,8 @@ export interface QueryState<TData, TError = Error> {
   error: TError | null
   isFetching: boolean
   isInvalidated: boolean
+  failureCount: number
+  failureReason: TError | null
   updatedAt: number
 }
 
@@ -22,6 +41,8 @@ export class Query<TData, TError = Error> {
     error: null,
     isFetching: false,
     isInvalidated: false,
+    failureCount: 0,
+    failureReason: null,
     updatedAt: 0,
   })
   readonly state = this.#state.asReadonly()
@@ -66,14 +87,40 @@ export class Query<TData, TError = Error> {
     }
   }
 
-  fetch(queryFn: () => Observable<TData>): void {
+  fetch(
+    queryFn: () => Observable<TData>,
+    retry: RetryValue<TError> = 0,
+    retryDelay: RetryDelayValue<TError> = defaultRetryDelay,
+  ): void {
     if (this.#subscription && !this.#subscription.closed) return
 
-    this.#state.update((state) => ({ ...state, isFetching: true }))
+    this.#state.update((state) => ({
+      ...state,
+      isFetching: true,
+      failureCount: 0,
+      failureReason: null,
+    }))
 
     this.#subscription = queryFn()
       .pipe(
         take(1),
+        retryOperator({
+          delay: (error, retryCount) => {
+            // retryCount (1-based) is the number of failures so far; the retry
+            // predicate/delay take a 0-based attempt index (0 = first retry).
+            this.#state.update((state) => ({
+              ...state,
+              failureCount: retryCount,
+              failureReason: error as TError,
+            }))
+
+            const attemptIndex = retryCount - 1
+            if (!shouldRetry(retry, attemptIndex, error as TError)) throw error
+            return timer(
+              resolveRetryDelay(retryDelay, attemptIndex, error as TError),
+            )
+          },
+        }),
         throwIfEmpty(
           () => new Error('Query function completed without emitting a value'),
         ),
@@ -86,6 +133,8 @@ export class Query<TData, TError = Error> {
             error: null,
             isFetching: false,
             isInvalidated: false,
+            failureCount: 0,
+            failureReason: null,
             updatedAt: Date.now(),
           }),
         error: (err) =>
@@ -105,6 +154,8 @@ export class Query<TData, TError = Error> {
       status: 'success',
       error: null,
       isInvalidated: false,
+      failureCount: 0,
+      failureReason: null,
       updatedAt: Date.now(),
     }))
   }

@@ -1,10 +1,14 @@
 import { InjectionToken } from '@angular/core'
 
+import { RetryDelayValue, RetryValue } from './types'
+
 export interface QueryClientConfig {
   defaultOptions?: {
     queries?: {
       staleTime?: number
       gcTime?: number
+      retry?: RetryValue<unknown>
+      retryDelay?: RetryDelayValue<unknown>
     }
   }
 }

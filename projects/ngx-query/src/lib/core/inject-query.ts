@@ -59,14 +59,17 @@ export function injectQuery<TData, TError = Error>(
     })
 
     effect(() => {
-      const { queryKey, queryFn, staleTime, enabled } = defaultedOptions()
+      const { queryKey, queryFn, staleTime, retry, retryDelay, enabled } =
+        defaultedOptions()
 
       // Track invalidation so invalidateQueries() re-triggers a refetch.
       isInvalidated()
 
       if (enabled === false) return
 
-      untracked(() => client.fetchQuery(queryKey, queryFn, staleTime))
+      untracked(() =>
+        client.fetchQuery(queryKey, queryFn, { staleTime, retry, retryDelay }),
+      )
     })
 
     return {
@@ -77,6 +80,10 @@ export function injectQuery<TData, TError = Error>(
       isPending: computed(() => query().state().status === 'pending'),
       isSuccess: computed(() => query().state().status === 'success'),
       isError: computed(() => query().state().status === 'error'),
+      failureCount: computed(() => query().state().failureCount),
+      failureReason: computed(
+        () => query().state().failureReason as TError | null,
+      ),
     }
   })
 }

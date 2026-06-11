@@ -19,7 +19,7 @@ import { AppQueries } from './app-queries'
 
     <p>
       recipes status: {{ recipes.status() }} | fetching:
-      {{ recipes.isFetching() }}
+      {{ recipes.isFetching() }} | failures: {{ recipes.failureCount() }}
     </p>
 
     <ul>

@@ -1,4 +1,5 @@
 import { QUERY_CLIENT_CONFIG } from '../core/injection-tokens'
+import { RetryDelayValue, RetryValue } from '../core/types'
 import {
   QueryClientFeature,
   QueryClientFeatureKind,
@@ -8,6 +9,8 @@ import {
 export interface DefaultQueryOptions {
   staleTime?: number
   gcTime?: number
+  retry?: RetryValue<unknown>
+  retryDelay?: RetryDelayValue<unknown>
 }
 
 export interface DefaultOptions {

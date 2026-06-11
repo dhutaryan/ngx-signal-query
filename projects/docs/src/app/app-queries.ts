@@ -12,6 +12,7 @@ export class AppQueries {
     return queryOptions({
       queryKey: ['recipes'],
       queryFn: () => this._repository.list(),
+      retry: (failureCount) => failureCount < 2,
     })
   }
 
