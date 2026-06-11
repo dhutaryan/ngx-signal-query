@@ -22,6 +22,7 @@ export function injectQuery<TData, TError = Error>(
 
   return runInInjectionContext(injector, () => {
     const client = inject(QueryClient)
+    const cache = client.getQueryCache()
 
     // Single source of truth for defaulted options; resolves config defaults
     // (staleTime, gcTime) once instead of scattering the logic across effects.
@@ -29,18 +30,16 @@ export function injectQuery<TData, TError = Error>(
       client.defaultQueryOptions(optionsFn()),
     )
 
-    // getOrCreateQuery mutates the cache (a side effect), so it must not run
-    // inside a computed. Resolve the query in a signal: seed it synchronously
-    // and update it from an effect whenever the key changes.
+    // getOrCreate mutates the cache (a side effect), so it must not run inside
+    // a computed. Resolve the query in a signal: seed it synchronously and
+    // update it from an effect whenever the key changes.
     const query = signal(
-      client.getOrCreateQuery<TData, TError>(
-        untracked(defaultedOptions).queryKey,
-      ),
+      cache.getOrCreate<TData, TError>(untracked(defaultedOptions).queryKey),
     )
 
     effect(() => {
       const key = defaultedOptions().queryKey
-      query.set(untracked(() => client.getOrCreateQuery<TData, TError>(key)))
+      query.set(untracked(() => cache.getOrCreate<TData, TError>(key)))
     })
 
     // Memoized: only emits when the flag itself flips, so ordinary data

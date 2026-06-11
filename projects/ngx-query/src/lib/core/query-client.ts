@@ -10,7 +10,6 @@ import {
   QueryOptions,
 } from './types'
 import { QUERY_CLIENT_CONFIG } from './injection-tokens'
-import { Query } from './query'
 
 @Injectable()
 export class QueryClient {
@@ -36,10 +35,6 @@ export class QueryClient {
       staleTime: options.staleTime ?? defaults?.staleTime ?? 0,
       gcTime: options.gcTime ?? defaults?.gcTime,
     }
-  }
-
-  getOrCreateQuery<TData, TError = Error>(key: QueryKey): Query<TData, TError> {
-    return this.#cache.getOrCreate<TData, TError>(key)
   }
 
   fetchQuery<TData>(
