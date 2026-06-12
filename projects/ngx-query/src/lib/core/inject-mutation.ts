@@ -43,6 +43,10 @@ export function injectMutation<
       isPending: computed(() => mutation.state().status === 'pending'),
       isSuccess: computed(() => mutation.state().status === 'success'),
       isError: computed(() => mutation.state().status === 'error'),
+      failureCount: computed(() => mutation.state().failureCount),
+      failureReason: computed(
+        () => mutation.state().failureReason as TError | null,
+      ),
     }
   })
 }
