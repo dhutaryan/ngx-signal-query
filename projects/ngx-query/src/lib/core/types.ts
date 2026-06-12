@@ -70,4 +70,5 @@ export type QueryResult<TData, TError = Error> = {
   isError: Signal<boolean>
   failureCount: Signal<number>
   failureReason: Signal<TError | null>
+  refetch: () => void
 }

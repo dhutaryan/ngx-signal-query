@@ -89,7 +89,11 @@ export function injectQuery<TData, TError = Error>(
       if (!interval) return
 
       const id = setInterval(() => {
-        client.fetchQuery(queryKey, queryFn, { staleTime: 0, retry, retryDelay })
+        client.fetchQuery(queryKey, queryFn, {
+          staleTime: 0,
+          retry,
+          retryDelay,
+        })
       }, interval)
 
       onCleanup(() => clearInterval(id))
@@ -112,6 +116,17 @@ export function injectQuery<TData, TError = Error>(
       failureReason: computed(
         () => query().state().failureReason as TError | null,
       ),
+      // Force a refetch regardless of staleTime (staleTime: 0).
+      refetch: () => {
+        const { queryKey, queryFn, retry, retryDelay } =
+          untracked(defaultedOptions)
+
+        client.fetchQuery(queryKey, queryFn, {
+          staleTime: 0,
+          retry,
+          retryDelay,
+        })
+      },
     }
   })
 }

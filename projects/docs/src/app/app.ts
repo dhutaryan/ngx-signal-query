@@ -17,6 +17,8 @@ import { AppQueries } from './app-queries'
 
     <p>global — fetching: {{ isFetching() }} | mutating: {{ isMutating() }}</p>
 
+    <button (click)="recipes.refetch()">Refetch</button>
+
     <p>
       recipes status: {{ recipes.status() }} | fetching:
       {{ recipes.isFetching() }} | failures: {{ recipes.failureCount() }}
