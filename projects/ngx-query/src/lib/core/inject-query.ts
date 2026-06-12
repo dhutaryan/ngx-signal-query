@@ -72,6 +72,21 @@ export function injectQuery<TData, TError = Error>(
       )
     })
 
+    // Polling: refetch on an interval, independent of staleTime (staleTime: 0
+    // forces the fetch). Re-created whenever the interval or options change.
+    effect((onCleanup) => {
+      const { queryKey, queryFn, retry, retryDelay, refetchInterval, enabled } =
+        defaultedOptions()
+
+      if (enabled === false || !refetchInterval) return
+
+      const id = setInterval(() => {
+        client.fetchQuery(queryKey, queryFn, { staleTime: 0, retry, retryDelay })
+      }, refetchInterval)
+
+      onCleanup(() => clearInterval(id))
+    })
+
     return {
       data: computed(() => query().state().data),
       status: computed(() => query().state().status),

@@ -26,6 +26,7 @@ export type QueryOptions<TData, TError = Error> = {
   gcTime?: number
   retry?: RetryValue<TError>
   retryDelay?: RetryDelayValue<TError>
+  refetchInterval?: number | false
   enabled?: boolean
 }
 

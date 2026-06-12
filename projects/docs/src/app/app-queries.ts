@@ -13,6 +13,7 @@ export class AppQueries {
       queryKey: ['recipes'],
       queryFn: () => this._repository.list(),
       retry: (failureCount) => failureCount < 2,
+      refetchInterval: 5000,
     })
   }
 
