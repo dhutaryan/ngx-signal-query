@@ -73,16 +73,24 @@ export function injectQuery<TData, TError = Error>(
     })
 
     // Polling: refetch on an interval, independent of staleTime (staleTime: 0
-    // forces the fetch). Re-created whenever the interval or options change.
+    // forces the fetch). The function form is reactive — reading state() makes
+    // the effect re-run when data changes, so returning false stops polling.
     effect((onCleanup) => {
       const { queryKey, queryFn, retry, retryDelay, refetchInterval, enabled } =
         defaultedOptions()
 
-      if (enabled === false || !refetchInterval) return
+      if (enabled === false) return
+
+      const interval =
+        typeof refetchInterval === 'function'
+          ? refetchInterval({ state: query().state() })
+          : refetchInterval
+
+      if (!interval) return
 
       const id = setInterval(() => {
         client.fetchQuery(queryKey, queryFn, { staleTime: 0, retry, retryDelay })
-      }, refetchInterval)
+      }, interval)
 
       onCleanup(() => clearInterval(id))
     })

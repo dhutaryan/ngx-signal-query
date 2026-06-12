@@ -16,23 +16,12 @@ import {
 } from './retryer'
 import {
   QueryKey,
-  QueryStatus,
+  QueryState,
   RetryDelayValue,
   RetryValue,
 } from './types'
 
 const DEFAULT_GC_TIME = 5 * 60 * 1000
-
-export interface QueryState<TData, TError = Error> {
-  data: TData | undefined
-  status: QueryStatus
-  error: TError | null
-  isFetching: boolean
-  isInvalidated: boolean
-  failureCount: number
-  failureReason: TError | null
-  updatedAt: number
-}
 
 export class Query<TData, TError = Error> {
   readonly #state = signal<QueryState<TData, TError>>({

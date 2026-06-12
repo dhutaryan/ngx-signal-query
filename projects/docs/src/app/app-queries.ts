@@ -13,7 +13,8 @@ export class AppQueries {
       queryKey: ['recipes'],
       queryFn: () => this._repository.list(),
       retry: (failureCount) => failureCount < 2,
-      refetchInterval: 5000,
+      // Poll every 5s, but stop once a fetch ends in error.
+      refetchInterval: (query) => (query.state.status === 'error' ? false : 5000),
     })
   }
 

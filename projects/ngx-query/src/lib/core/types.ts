@@ -5,10 +5,30 @@ export type QueryKey = ReadonlyArray<unknown>
 
 export type QueryStatus = 'pending' | 'success' | 'error'
 
+export interface QueryState<TData, TError = Error> {
+  data: TData | undefined
+  status: QueryStatus
+  error: TError | null
+  isFetching: boolean
+  isInvalidated: boolean
+  failureCount: number
+  failureReason: TError | null
+  updatedAt: number
+}
+
 export type QueryFilters = {
   queryKey?: QueryKey
   exact?: boolean
 }
+
+// Receives a snapshot of the query (state as a plain object, TanStack-style)
+// and returns the next interval, or false to stop polling.
+export type RefetchIntervalValue<TData, TError> =
+  | number
+  | false
+  | ((query: {
+      state: QueryState<TData, TError>
+    }) => number | false | undefined)
 
 export type RetryValue<TError> =
   | boolean
@@ -26,7 +46,7 @@ export type QueryOptions<TData, TError = Error> = {
   gcTime?: number
   retry?: RetryValue<TError>
   retryDelay?: RetryDelayValue<TError>
-  refetchInterval?: number | false
+  refetchInterval?: RefetchIntervalValue<TData, TError>
   enabled?: boolean
 }
 
