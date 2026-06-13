@@ -6,7 +6,9 @@
     "start": "ng serve",
     "build": "ng build",
     "watch": "ng build --watch --project ngx-query --configuration development",
-    "test": "ng test"
+    "test": "ng test",
+    "test:ci": "ng test --watch=false --browsers=ChromeHeadless",
+    "test:coverage": "ng test --watch=false --browsers=ChromeHeadless --code-coverage"
   },
   "private": true,
   "dependencies": {
