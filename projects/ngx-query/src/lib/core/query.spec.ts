@@ -286,6 +286,38 @@ describe('Query', () => {
       expect(cache.remove).toHaveBeenCalledWith(query)
     }))
 
+    it('removes immediately when gcTime is 0 and the last observer leaves', fakeAsync(() => {
+      const { query, cache } = createQuery<number>()
+      query.setGcTime(0)
+      query.addObserver()
+
+      query.removeObserver()
+      tick(0)
+
+      expect(cache.remove).toHaveBeenCalledWith(query)
+    }))
+
+    it('schedules gc for an orphaned setData write (no observers)', fakeAsync(() => {
+      const { query, cache } = createQuery<number>()
+      query.setGcTime(1000)
+
+      query.setData(1) // no observer → orphaned, must still be collected
+
+      tick(1000)
+      expect(cache.remove).toHaveBeenCalledWith(query)
+    }))
+
+    it('does not gc a setData write while it has observers', fakeAsync(() => {
+      const { query, cache } = createQuery<number>()
+      query.setGcTime(1000)
+      query.addObserver()
+
+      query.setData(1)
+
+      tick(1000)
+      expect(cache.remove).not.toHaveBeenCalled()
+    }))
+
     it('cancels a scheduled gc when an observer returns', fakeAsync(() => {
       const { query, cache } = createQuery<number>()
       query.setGcTime(1000)

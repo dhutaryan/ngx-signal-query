@@ -157,6 +157,10 @@ export class Query<TData, TError = Error> {
       failureReason: null,
       updatedAt: Date.now(),
     }))
+
+    // Keep an orphaned query (no observers) alive for another gcTime so a
+    // setQueryData write isn't collected before anyone subscribes.
+    if (this.#observers === 0) this.#scheduleGc()
   }
 
   invalidate(): void {
