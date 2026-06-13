@@ -207,6 +207,27 @@ describe('Query', () => {
     })
   })
 
+  describe('setData with explicit updatedAt (initialData)', () => {
+    it('seeds success state with the given updatedAt', () => {
+      const { query } = createQuery<number>()
+
+      query.setData(1, 0)
+
+      expect(query.state().status).toBe('success')
+      expect(query.state().data).toBe(1)
+      expect(query.state().updatedAt).toBe(0)
+    })
+
+    it('is immediately stale when seeded with updatedAt 0', () => {
+      const { query } = createQuery<number>()
+
+      query.setData(1, 0)
+
+      // updatedAt 0 → stale for any finite staleTime → background refetch.
+      expect(query.shouldFetch(1000)).toBe(true)
+    })
+  })
+
   describe('invalidate / shouldFetch', () => {
     it('fetches while pending', () => {
       const { query } = createQuery<number>()

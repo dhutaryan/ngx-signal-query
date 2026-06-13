@@ -10,6 +10,7 @@ import {
 } from '@angular/core'
 
 import { QueryClient } from './query-client'
+import { Query } from './query'
 import { QueryOptions, QueryResult } from './types'
 
 export function injectQuery<TData, TError = Error>(
@@ -30,16 +31,39 @@ export function injectQuery<TData, TError = Error>(
       client.defaultQueryOptions(optionsFn()),
     )
 
+    // Seed a fresh query (status 'pending', no data yet) with initialData so
+    // it renders immediately as 'success'. updatedAt defaults to 0 → stale →
+    // background refetch.
+    const applyInitialData = (q: Query<TData, TError>): void => {
+      const { initialData, initialDataUpdatedAt } = untracked(defaultedOptions)
+      if (initialData === undefined || q.state().status !== 'pending') return
+
+      const data =
+        typeof initialData === 'function'
+          ? (initialData as () => TData)()
+          : initialData
+      const updatedAt =
+        typeof initialDataUpdatedAt === 'function'
+          ? initialDataUpdatedAt()
+          : (initialDataUpdatedAt ?? 0)
+
+      q.setData(data, updatedAt)
+    }
+
     // getOrCreate mutates the cache (a side effect), so it must not run inside
     // a computed. Resolve the query in a signal: seed it synchronously and
     // update it from an effect whenever the key changes.
-    const query = signal(
-      cache.getOrCreate<TData, TError>(untracked(defaultedOptions).queryKey),
+    const seed = cache.getOrCreate<TData, TError>(
+      untracked(defaultedOptions).queryKey,
     )
+    applyInitialData(seed)
+    const query = signal(seed)
 
     effect(() => {
       const key = defaultedOptions().queryKey
-      query.set(untracked(() => cache.getOrCreate<TData, TError>(key)))
+      const q = untracked(() => cache.getOrCreate<TData, TError>(key))
+      untracked(() => applyInitialData(q))
+      query.set(q)
     })
 
     // Memoized: only emits when the flag itself flips, so ordinary data

@@ -146,7 +146,7 @@ export class Query<TData, TError = Error> {
       })
   }
 
-  setData(data: TData): void {
+  setData(data: TData, updatedAt: number = Date.now()): void {
     this.#state.update((state) => ({
       ...state,
       data,
@@ -155,7 +155,7 @@ export class Query<TData, TError = Error> {
       isInvalidated: false,
       failureCount: 0,
       failureReason: null,
-      updatedAt: Date.now(),
+      updatedAt,
     }))
 
     // Keep an orphaned query (no observers) alive for another gcTime so a

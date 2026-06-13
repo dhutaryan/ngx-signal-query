@@ -51,6 +51,8 @@ export type QueryOptions<TData, TError = Error> = {
   retry?: RetryValue<TError>
   retryDelay?: RetryDelayValue<TError>
   refetchInterval?: RefetchIntervalValue<TData, TError>
+  initialData?: TData | (() => TData)
+  initialDataUpdatedAt?: number | (() => number)
   enabled?: boolean
 }
 
