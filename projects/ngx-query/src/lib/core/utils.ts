@@ -1,4 +1,15 @@
-import { QueryKey } from './types'
+import { QueryKey, Updater } from './types'
+
+// Resolves an updater: calls it with the previous value if it's a function,
+// otherwise uses it as the value directly.
+export function functionalUpdate<TInput, TOutput>(
+  updater: Updater<TInput, TOutput>,
+  input: TInput,
+): TOutput {
+  return typeof updater === 'function'
+    ? (updater as (input: TInput) => TOutput)(input)
+    : updater
+}
 
 // True when `filter` is a (deep) prefix of `key`, e.g. ['app'] matches
 // ['app', 1]. Used to invalidate/find groups of queries by partial key.

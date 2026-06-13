@@ -21,6 +21,10 @@ export type QueryFilters = {
   exact?: boolean
 }
 
+export type Updater<TInput, TOutput> =
+  | TOutput
+  | ((input: TInput) => TOutput)
+
 // Receives a snapshot of the query (state as a plain object, TanStack-style)
 // and returns the next interval, or false to stop polling.
 export type RefetchIntervalValue<TData, TError> =

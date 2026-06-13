@@ -24,8 +24,8 @@ export class AppQueries {
       onMutate: (name) => {
         const previous = this._client.getQueryData<Recipe[]>(['recipes']) ?? []
         const tempId = Date.now()
-        this._client.setQueryData<Recipe[]>(['recipes'], [
-          ...previous,
+        this._client.setQueryData<Recipe[]>(['recipes'], (prev = []) => [
+          ...prev,
           { id: tempId, name },
         ])
         return { previous, tempId }
@@ -33,10 +33,8 @@ export class AppQueries {
       // dummyjson /add is a stub (doesn't persist), so instead of
       // invalidating + refetching we swap the temp row for the server reply.
       onSuccess: (created, _name, context) => {
-        const current = this._client.getQueryData<Recipe[]>(['recipes']) ?? []
-        this._client.setQueryData<Recipe[]>(
-          ['recipes'],
-          current.map((recipe) =>
+        this._client.setQueryData<Recipe[]>(['recipes'], (prev = []) =>
+          prev.map((recipe) =>
             recipe.id === context?.tempId ? created : recipe,
           ),
         )

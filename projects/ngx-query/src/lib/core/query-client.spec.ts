@@ -93,6 +93,26 @@ describe('QueryClient', () => {
 
       expect(client.getQueryData(['user', 1])).toEqual({ name: 'Ann' })
     })
+
+    it('updates with a function receiving the previous value', () => {
+      client.setQueryData<number[]>(['list'], [1, 2])
+      client.setQueryData<number[]>(['list'], (prev) => [...(prev ?? []), 3])
+
+      expect(client.getQueryData(['list'])).toEqual([1, 2, 3])
+    })
+
+    it('passes undefined to the updater when no data exists yet', () => {
+      client.setQueryData<number[]>(['list'], (prev) => [...(prev ?? []), 1])
+
+      expect(client.getQueryData(['list'])).toEqual([1])
+    })
+
+    it('is a no-op when the updater returns undefined', () => {
+      client.setQueryData<number>(['n'], 5)
+      client.setQueryData<number>(['n'], () => undefined as unknown as number)
+
+      expect(client.getQueryData(['n'])).toBe(5)
+    })
   })
 
   describe('fetchQuery', () => {

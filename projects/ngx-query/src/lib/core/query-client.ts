@@ -4,6 +4,7 @@ import { Observable } from 'rxjs'
 import { QueryCache } from './query-cache'
 import { MutationCache } from './mutation-cache'
 import { defaultRetryDelay } from './retryer'
+import { functionalUpdate } from './utils'
 import {
   DefaultedQueryOptions,
   QueryFilters,
@@ -11,6 +12,7 @@ import {
   QueryOptions,
   RetryDelayValue,
   RetryValue,
+  Updater,
 } from './types'
 import { QUERY_CLIENT_CONFIG } from './injection-tokens'
 
@@ -70,8 +72,17 @@ export class QueryClient {
     return this.#cache.get<TData>(key)?.state().data
   }
 
-  setQueryData<TData>(key: QueryKey, data: TData): void {
-    this.#cache.getOrCreate<TData>(key).setData(data)
+  setQueryData<TData>(
+    key: QueryKey,
+    updater: Updater<TData | undefined, TData>,
+  ): void {
+    const query = this.#cache.getOrCreate<TData>(key)
+    const data = functionalUpdate(updater, query.state().data)
+
+    // Matches TanStack: an updater returning undefined is a no-op.
+    if (data === undefined) return
+
+    query.setData(data)
   }
 
   invalidateQueries(filters?: QueryFilters): void {
