@@ -141,6 +141,60 @@ describe('Query', () => {
     expect(state.failureReason).toBe(err)
   }))
 
+  describe('cancelRefetch', () => {
+    it('dedupes a concurrent fetch by default (cancelRefetch = false)', fakeAsync(() => {
+      const { query } = createQuery<number>()
+      const first = jasmine
+        .createSpy('first')
+        .and.returnValue(new Promise<number>(() => {})) // never resolves
+      const second = jasmine.createSpy('second')
+
+      query.fetch(first)
+      query.fetch(second) // no cancelRefetch → ignored
+
+      expect(first).toHaveBeenCalledTimes(1)
+      expect(second).not.toHaveBeenCalled()
+    }))
+
+    it('cancels the in-flight fetch and starts a fresh one when cancelRefetch = true', fakeAsync(() => {
+      const { query } = createQuery<number>()
+      const first = jasmine
+        .createSpy('first')
+        .and.returnValue(new Promise<number>(() => {})) // never resolves
+      const second = jasmine
+        .createSpy('second')
+        .and.returnValue(Promise.resolve(2))
+
+      query.fetch(first)
+      query.fetch(second, 0, undefined, true) // force: cancel first, run second
+      tick()
+
+      expect(first).toHaveBeenCalledTimes(1)
+      expect(second).toHaveBeenCalledTimes(1)
+      expect(query.state().data).toBe(2)
+    }))
+
+    it('a late result from a cancelled fetch does not overwrite the new one', fakeAsync(() => {
+      const { query } = createQuery<number>()
+      let resolveFirst!: (value: number) => void
+      const first = () =>
+        new Promise<number>((resolve) => {
+          resolveFirst = resolve
+        })
+      const second = () => Promise.resolve(2)
+
+      query.fetch(first)
+      query.fetch(second, 0, undefined, true) // cancel first, start second
+      tick()
+      expect(query.state().data).toBe(2)
+
+      // The cancelled first fetch resolves late — it must not win.
+      resolveFirst(1)
+      tick()
+      expect(query.state().data).toBe(2)
+    }))
+  })
+
   describe('setData', () => {
     it('writes data and marks the query successful', () => {
       const { query } = createQuery<number>()

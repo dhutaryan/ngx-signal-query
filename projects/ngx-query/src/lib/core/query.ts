@@ -82,8 +82,14 @@ export class Query<TData, TError = Error> {
     queryFn: () => Observable<TData> | Promise<TData>,
     retry: RetryValue<TError> = 0,
     retryDelay: RetryDelayValue<TError> = defaultRetryDelay,
+    cancelRefetch = false,
   ): void {
-    if (this.#subscription && !this.#subscription.closed) return
+    if (this.#subscription && !this.#subscription.closed) {
+      // Already in-flight: dedupe unless the caller explicitly wants a fresh
+      // fetch (e.g. invalidate/refetch) — then cancel the old one and restart.
+      if (!cancelRefetch) return
+      this.cancel()
+    }
 
     this.#state.update((state) => ({
       ...state,

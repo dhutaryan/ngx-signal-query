@@ -1,4 +1,4 @@
-import { TestBed } from '@angular/core/testing'
+import { fakeAsync, TestBed, tick } from '@angular/core/testing'
 import { of } from 'rxjs'
 
 import { withDefaultOptions } from '../features/with-default-options'
@@ -109,6 +109,35 @@ describe('QueryClient', () => {
 
       expect(queryFn).toHaveBeenCalledTimes(1)
     })
+
+    it('dedupes an in-flight fetch without cancelRefetch', () => {
+      const first = jasmine
+        .createSpy('first')
+        .and.returnValue(new Promise<number>(() => {})) // never resolves
+      const second = jasmine.createSpy('second')
+
+      client.fetchQuery(['n'], first)
+      client.fetchQuery(['n'], second, { staleTime: 0 })
+
+      expect(second).not.toHaveBeenCalled()
+    })
+
+    it('cancelRefetch restarts an in-flight fetch with a fresh queryFn', fakeAsync(() => {
+      const first = jasmine
+        .createSpy('first')
+        .and.returnValue(new Promise<number>(() => {})) // never resolves
+      const second = jasmine
+        .createSpy('second')
+        .and.returnValue(Promise.resolve(2))
+
+      client.fetchQuery(['n'], first)
+      client.fetchQuery(['n'], second, { staleTime: 0, cancelRefetch: true })
+      tick()
+
+      expect(first).toHaveBeenCalledTimes(1)
+      expect(second).toHaveBeenCalledTimes(1)
+      expect(client.getQueryData(['n'])).toBe(2)
+    }))
   })
 
   describe('invalidateQueries', () => {

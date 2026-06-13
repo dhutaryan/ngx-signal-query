@@ -51,6 +51,7 @@ export class QueryClient {
       retry?: RetryValue<any>
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       retryDelay?: RetryDelayValue<any>
+      cancelRefetch?: boolean
     } = {},
   ): void {
     const defaults = this.#config.defaultOptions?.queries
@@ -60,7 +61,9 @@ export class QueryClient {
 
     const query = this.#cache.getOrCreate<TData>(key)
 
-    if (query.shouldFetch(staleTime)) query.fetch(queryFn, retry, retryDelay)
+    if (query.shouldFetch(staleTime)) {
+      query.fetch(queryFn, retry, retryDelay, options.cancelRefetch)
+    }
   }
 
   getQueryData<TData>(key: QueryKey): TData | undefined {

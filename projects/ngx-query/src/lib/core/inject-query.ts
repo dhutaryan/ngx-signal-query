@@ -63,12 +63,19 @@ export function injectQuery<TData, TError = Error>(
         defaultedOptions()
 
       // Track invalidation so invalidateQueries() re-triggers a refetch.
-      isInvalidated()
+      // When invalidated, cancel any in-flight fetch and start a fresh one
+      // (otherwise the stale in-flight result would clear isInvalidated).
+      const invalidated = isInvalidated()
 
       if (enabled === false) return
 
       untracked(() =>
-        client.fetchQuery(queryKey, queryFn, { staleTime, retry, retryDelay }),
+        client.fetchQuery(queryKey, queryFn, {
+          staleTime,
+          retry,
+          retryDelay,
+          cancelRefetch: invalidated,
+        }),
       )
     })
 
@@ -116,7 +123,8 @@ export function injectQuery<TData, TError = Error>(
       failureReason: computed(
         () => query().state().failureReason as TError | null,
       ),
-      // Force a refetch regardless of staleTime (staleTime: 0).
+      // Force a fresh fetch regardless of staleTime, cancelling any in-flight
+      // request (explicit user intent — get current data).
       refetch: () => {
         const { queryKey, queryFn, retry, retryDelay } =
           untracked(defaultedOptions)
@@ -125,6 +133,7 @@ export function injectQuery<TData, TError = Error>(
           staleTime: 0,
           retry,
           retryDelay,
+          cancelRefetch: true,
         })
       },
     }
