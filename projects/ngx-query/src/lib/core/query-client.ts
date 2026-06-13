@@ -44,7 +44,7 @@ export class QueryClient {
 
   fetchQuery<TData>(
     key: QueryKey,
-    queryFn: () => Observable<TData>,
+    queryFn: () => Observable<TData> | Promise<TData>,
     options: {
       staleTime?: number
       // eslint-disable-next-line @typescript-eslint/no-explicit-any

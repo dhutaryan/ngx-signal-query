@@ -41,7 +41,7 @@ export type RetryDelayValue<TError> =
 
 export type QueryOptions<TData, TError = Error> = {
   queryKey: QueryKey
-  queryFn: () => Observable<TData>
+  queryFn: () => Observable<TData> | Promise<TData>
   staleTime?: number
   gcTime?: number
   retry?: RetryValue<TError>

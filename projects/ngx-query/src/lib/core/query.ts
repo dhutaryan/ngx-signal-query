@@ -1,5 +1,7 @@
 import { signal } from '@angular/core'
 import {
+  defer,
+  from,
   Observable,
   retry as retryOperator,
   take,
@@ -77,7 +79,7 @@ export class Query<TData, TError = Error> {
   }
 
   fetch(
-    queryFn: () => Observable<TData>,
+    queryFn: () => Observable<TData> | Promise<TData>,
     retry: RetryValue<TError> = 0,
     retryDelay: RetryDelayValue<TError> = defaultRetryDelay,
   ): void {
@@ -90,7 +92,9 @@ export class Query<TData, TError = Error> {
       failureReason: null,
     }))
 
-    this.#subscription = queryFn()
+    // defer + from: normalize Observable/Promise and re-invoke queryFn on each
+    // retry (a Promise is one-shot, so retry must produce a fresh one).
+    this.#subscription = defer(() => from(queryFn()))
       .pipe(
         take(1),
         retryOperator({

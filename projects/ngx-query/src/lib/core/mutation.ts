@@ -1,5 +1,7 @@
 import { signal, Signal } from '@angular/core'
 import {
+  defer,
+  from,
   Observable,
   retry as retryOperator,
   take,
@@ -33,7 +35,7 @@ export type MutationState<TData, TError, TVariables, TContext> = {
 }
 
 export type MutationOptions<TData, TError, TVariables, TContext> = {
-  mutationFn: (variables: TVariables) => Observable<TData>
+  mutationFn: (variables: TVariables) => Observable<TData> | Promise<TData>
   retry?: RetryValue<TError>
   retryDelay?: RetryDelayValue<TError>
   onMutate?: (variables: TVariables) => TContext | undefined
@@ -127,8 +129,9 @@ export class Mutation<
       submittedAt: Date.now(),
     })
 
-    this.#subscription = this.#options
-      .mutationFn(variables)
+    // defer + from: normalize Observable/Promise and re-invoke mutationFn on
+    // each retry (a Promise is one-shot, so retry must produce a fresh one).
+    this.#subscription = defer(() => from(this.#options.mutationFn(variables)))
       .pipe(
         take(1),
         retryOperator({
