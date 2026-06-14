@@ -20,10 +20,6 @@ export abstract class Cache<TEntry> {
     return this.#entriesMap.get(key)
   }
 
-  protected hasEntry(key: string): boolean {
-    return this.#entriesMap.has(key)
-  }
-
   protected removeEntry(key: string): boolean {
     const removed = this.#entriesMap.delete(key)
     if (removed) this.#sync()

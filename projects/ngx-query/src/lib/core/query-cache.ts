@@ -40,7 +40,11 @@ export class QueryCache extends Cache<Query<unknown, unknown>> {
   }
 
   remove(query: Query<unknown, unknown>): void {
-    this.removeEntry(query.queryHash)
+    // Guard on identity, not just the hash: a stale instance (already removed
+    // and recreated under the same key) must not evict the current query.
+    if (this.getEntry(query.queryHash) === query) {
+      this.removeEntry(query.queryHash)
+    }
   }
 
   override clear(): void {
