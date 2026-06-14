@@ -89,6 +89,17 @@ export class QueryClient {
     this.#cache.findAll(filters).forEach((query) => query.invalidate())
   }
 
+  cancelQueries(filters?: QueryFilters): void {
+    this.#cache.findAll(filters).forEach((query) => query.cancel())
+  }
+
+  removeQueries(filters?: QueryFilters): void {
+    this.#cache.findAll(filters).forEach((query) => {
+      query.destroy()
+      this.#cache.remove(query)
+    })
+  }
+
   isFetching(filters?: QueryFilters): number {
     return this.#cache.findAll(filters).filter((query) => query.state().isFetching)
       .length

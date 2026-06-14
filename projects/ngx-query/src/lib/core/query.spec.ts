@@ -54,6 +54,8 @@ describe('Query', () => {
 
     expect(query.state().status).toBe('pending')
     expect(query.state().data).toBeUndefined()
+    // isFetching must not stay stuck true after cancel.
+    expect(query.state().isFetching).toBe(false)
   }))
 
   it('resolves a Promise queryFn to success', fakeAsync(() => {

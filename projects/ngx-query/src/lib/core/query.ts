@@ -183,6 +183,12 @@ export class Query<TData, TError = Error> {
   cancel(): void {
     this.#subscription?.unsubscribe()
     this.#subscription = null
+
+    // The fetch is no longer running; clear the in-flight flag so isFetching
+    // doesn't stay stuck true after a cancellation.
+    if (this.state().isFetching) {
+      this.#state.update((state) => ({ ...state, isFetching: false }))
+    }
   }
 
   destroy(): void {

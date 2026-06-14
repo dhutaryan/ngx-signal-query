@@ -197,6 +197,52 @@ describe('QueryClient', () => {
     })
   })
 
+  describe('cancelQueries', () => {
+    it('cancels in-flight queries matching the filter', () => {
+      client.fetchQuery(['todos', 1], () => new Promise<number>(() => {}))
+      client.fetchQuery(['other'], () => new Promise<number>(() => {}))
+      expect(client.isFetching()).toBe(2)
+
+      client.cancelQueries({ queryKey: ['todos'] })
+
+      expect(client.isFetching()).toBe(1)
+      expect(client.isFetching({ queryKey: ['other'] })).toBe(1)
+    })
+
+    it('cancels all in-flight queries with no filter', () => {
+      client.fetchQuery(['a'], () => new Promise<number>(() => {}))
+      client.fetchQuery(['b'], () => new Promise<number>(() => {}))
+
+      client.cancelQueries()
+
+      expect(client.isFetching()).toBe(0)
+    })
+  })
+
+  describe('removeQueries', () => {
+    it('removes matching queries from the cache', () => {
+      client.setQueryData(['todos', 1], 'a')
+      client.setQueryData(['todos', 2], 'b')
+      client.setQueryData(['other'], 'c')
+
+      client.removeQueries({ queryKey: ['todos'] })
+
+      const cache = client.getQueryCache()
+      expect(cache.get(['todos', 1])).toBeUndefined()
+      expect(cache.get(['todos', 2])).toBeUndefined()
+      expect(cache.get(['other'])).toBeDefined()
+    })
+
+    it('removes everything with no filter', () => {
+      client.setQueryData(['a'], 1)
+      client.setQueryData(['b'], 2)
+
+      client.removeQueries()
+
+      expect(client.getQueryCache().getAll().length).toBe(0)
+    })
+  })
+
   describe('isFetching', () => {
     it('returns 0 when nothing is fetching', () => {
       expect(client.isFetching()).toBe(0)
