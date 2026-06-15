@@ -1,5 +1,5 @@
 import { inject, Injectable } from '@angular/core'
-import { injectQueryClient, mutationOptions, queryOptions } from 'ngx-query'
+import { injectQueryClient, mutationOptions, queryOptions } from 'ngx-signal-query'
 
 import { AppRepository, Recipe } from './app-repository'
 

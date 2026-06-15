@@ -5,7 +5,7 @@ import {
 } from '@angular/core'
 import { provideRouter } from '@angular/router'
 import { provideHttpClient } from '@angular/common/http'
-import { provideQueryClient } from 'ngx-query'
+import { provideQueryClient } from 'ngx-signal-query'
 
 import { routes } from './app.routes'
 

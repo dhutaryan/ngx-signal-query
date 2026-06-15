@@ -1,6 +1,6 @@
 {
   "$schema": "../../node_modules/ng-packagr/ng-package.schema.json",
-  "dest": "../../dist/ngx-query",
+  "dest": "../../dist/ngx-signal-query",
   "lib": {
     "entryFile": "src/public-api.ts"
   }

@@ -6,20 +6,20 @@
   },
   "newProjectRoot": "projects",
   "projects": {
-    "ngx-query": {
+    "ngx-signal-query": {
       "projectType": "library",
-      "root": "projects/ngx-query",
-      "sourceRoot": "projects/ngx-query/src",
+      "root": "projects/ngx-signal-query",
+      "sourceRoot": "projects/ngx-signal-query/src",
       "prefix": "ngq",
       "architect": {
         "build": {
           "builder": "@angular/build:ng-packagr",
           "configurations": {
             "production": {
-              "tsConfig": "projects/ngx-query/tsconfig.lib.prod.json"
+              "tsConfig": "projects/ngx-signal-query/tsconfig.lib.prod.json"
             },
             "development": {
-              "tsConfig": "projects/ngx-query/tsconfig.lib.json"
+              "tsConfig": "projects/ngx-signal-query/tsconfig.lib.json"
             }
           },
           "defaultConfiguration": "production"
@@ -27,7 +27,7 @@
         "test": {
           "builder": "@angular/build:karma",
           "options": {
-            "tsConfig": "projects/ngx-query/tsconfig.spec.json",
+            "tsConfig": "projects/ngx-signal-query/tsconfig.spec.json",
             "polyfills": ["zone.js", "zone.js/testing"]
           }
         }

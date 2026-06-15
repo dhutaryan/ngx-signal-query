@@ -8,7 +8,7 @@
     "noPropertyAccessFromIndexSignature": true,
     "noImplicitReturns": true,
     "paths": {
-      "ngx-query": ["./dist/ngx-query"]
+      "ngx-signal-query": ["./dist/ngx-signal-query"]
     },
     "noFallthroughCasesInSwitch": true,
     "skipLibCheck": true,
@@ -28,10 +28,10 @@
   "files": [],
   "references": [
     {
-      "path": "./projects/ngx-query/tsconfig.lib.json"
+      "path": "./projects/ngx-signal-query/tsconfig.lib.json"
     },
     {
-      "path": "./projects/ngx-query/tsconfig.spec.json"
+      "path": "./projects/ngx-signal-query/tsconfig.spec.json"
     },
     {
       "path": "./projects/docs/tsconfig.app.json"

@@ -1,11 +1,11 @@
 {
-  "name": "ngx-query",
+  "name": "ngx-signal-query",
   "version": "0.0.0",
   "scripts": {
     "ng": "ng",
     "start": "ng serve",
     "build": "ng build",
-    "watch": "ng build --watch --project ngx-query --configuration development",
+    "watch": "ng build --watch --project ngx-signal-query --configuration development",
     "test": "ng test",
     "test:ci": "ng test --watch=false --browsers=ChromeHeadless",
     "test:coverage": "ng test --watch=false --browsers=ChromeHeadless --code-coverage"

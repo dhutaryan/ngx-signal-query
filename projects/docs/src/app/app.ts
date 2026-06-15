@@ -5,7 +5,7 @@ import {
   injectIsMutating,
   injectMutation,
   injectQuery,
-} from 'ngx-query'
+} from 'ngx-signal-query'
 
 import { AppQueries } from './app-queries'
 
