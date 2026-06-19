@@ -1,7 +1,29 @@
 {
   "name": "ngx-signal-query",
-  "version": "0.0.1",
+  "version": "0.0.0",
+  "description": "Signal-first data fetching, caching, and mutations for Angular — inspired by TanStack Query.",
+  "keywords": [
+    "angular",
+    "signals",
+    "query",
+    "tanstack",
+    "tanstack-query",
+    "data-fetching",
+    "cache",
+    "mutations",
+    "async-state"
+  ],
   "license": "MIT",
+  "author": "Dzmitry Hutaryan",
+  "homepage": "https://github.com/dhutaryan/ngx-signal-query#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/dhutaryan/ngx-signal-query.git",
+    "directory": "projects/ngx-signal-query"
+  },
+  "bugs": {
+    "url": "https://github.com/dhutaryan/ngx-signal-query/issues"
+  },
   "peerDependencies": {
     "@angular/common": "^20.3.0",
     "@angular/core": "^20.3.0"
