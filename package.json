@@ -5,6 +5,7 @@
     "ng": "ng",
     "start": "ng serve",
     "build": "ng build",
+    "build:lib": "ng build ngx-signal-query && cp README.md LICENSE dist/ngx-signal-query/",
     "watch": "ng build --watch --project ngx-signal-query --configuration development",
     "test": "ng test",
     "test:ci": "ng test --watch=false --browsers=ChromeHeadless",
