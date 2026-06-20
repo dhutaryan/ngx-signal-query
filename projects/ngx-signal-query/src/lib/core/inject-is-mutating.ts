@@ -1,9 +1,9 @@
 import {
+  type Injector,
+  type Signal,
   assertInInjectionContext,
   computed,
   inject,
-  Injector,
-  Signal,
 } from '@angular/core'
 
 import { QueryClient } from './query-client'

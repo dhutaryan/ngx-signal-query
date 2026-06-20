@@ -30,6 +30,15 @@
             "tsConfig": "projects/ngx-signal-query/tsconfig.spec.json",
             "polyfills": ["zone.js", "zone.js/testing"]
           }
+        },
+        "lint": {
+          "builder": "@angular-eslint/builder:lint",
+          "options": {
+            "lintFilePatterns": [
+              "projects/ngx-signal-query/**/*.ts",
+              "projects/ngx-signal-query/**/*.html"
+            ]
+          }
         }
       }
     },
@@ -125,6 +134,15 @@
         },
         "extract-i18n": {
           "builder": "@angular/build:extract-i18n"
+        },
+        "lint": {
+          "builder": "@angular-eslint/builder:lint",
+          "options": {
+            "lintFilePatterns": [
+              "projects/docs/**/*.ts",
+              "projects/docs/**/*.html"
+            ]
+          }
         }
       }
     }

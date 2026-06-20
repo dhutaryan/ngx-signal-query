@@ -1,13 +1,13 @@
 import {
+  type Injector,
+  type Signal,
   assertInInjectionContext,
   computed,
   inject,
-  Injector,
-  Signal,
 } from '@angular/core'
 
 import { QueryClient } from './query-client'
-import { QueryFilters } from './types'
+import type { QueryFilters } from './types'
 
 /**
  * Returns a signal with the number of queries currently fetching — useful for a

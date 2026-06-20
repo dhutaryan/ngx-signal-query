@@ -1,6 +1,6 @@
 import { Component, Injector, signal } from '@angular/core'
 import {
-  ComponentFixture,
+  type ComponentFixture,
   TestBed,
   fakeAsync,
   flush,
@@ -11,7 +11,7 @@ import { of, Subject, throwError } from 'rxjs'
 import { injectQuery } from './inject-query'
 import { provideQueryClient } from './provider'
 import { QueryClient } from './query-client'
-import { QueryOptions, QueryResult } from './types'
+import type { QueryOptions, QueryResult } from './types'
 
 // Mounts injectQuery inside a host component so its effects are tied to a real
 // view and flush on detectChanges(). Returns the result plus the fixture so a
@@ -25,7 +25,9 @@ function mount<TData, TError = Error>(
   }
 
   const fixture = TestBed.createComponent(Host)
+
   fixture.detectChanges()
+
   return { fixture, result: fixture.componentInstance.result }
 }
 
@@ -217,6 +219,7 @@ describe('injectQuery', () => {
       }))
 
       const cache = client.getQueryCache()
+
       expect(cache.get(['k', 1])?.observerCount).toBe(1)
 
       id.set(2)
@@ -255,6 +258,7 @@ describe('injectQuery', () => {
       }))
 
       const query = client.getQueryCache().get(['d'])
+
       expect(query?.observerCount).toBe(1)
 
       fixture.destroy()
@@ -265,7 +269,9 @@ describe('injectQuery', () => {
 
   describe('initialData', () => {
     it('renders success immediately and skips fetch when fresh', () => {
-      const queryFn = jasmine.createSpy('queryFn').and.returnValue(of('fetched'))
+      const queryFn = jasmine
+        .createSpy('queryFn')
+        .and.returnValue(of('fetched'))
       const { result } = mount(() => ({
         queryKey: ['id'],
         queryFn,
@@ -325,6 +331,7 @@ describe('injectQuery', () => {
 
     it('stops polling when the interval function returns false', fakeAsync(() => {
       const queryFn = jasmine.createSpy('queryFn').and.returnValue(of(1))
+
       mount(() => ({
         queryKey: ['pf'],
         queryFn,
@@ -388,6 +395,7 @@ describe('injectQuery', () => {
           queryKey: ['user'],
           queryFn: userFn,
         }))
+
         readonly posts = injectQuery<string[]>(() => ({
           queryKey: ['posts', this.user.data()],
           queryFn: postsFn,
@@ -396,6 +404,7 @@ describe('injectQuery', () => {
       }
 
       const fixture = TestBed.createComponent(Host)
+
       fixture.detectChanges()
 
       // First query in flight, dependent one is still gated off.

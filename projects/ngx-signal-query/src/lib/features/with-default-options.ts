@@ -1,7 +1,7 @@
 import { QUERY_CLIENT_CONFIG } from '../core/injection-tokens'
-import { RetryDelayValue, RetryValue } from '../core/types'
+import type { RetryDelayValue, RetryValue } from '../core/types'
 import {
-  QueryClientFeature,
+  type QueryClientFeature,
   QueryClientFeatureKind,
   queryClientFeature,
 } from './feature'

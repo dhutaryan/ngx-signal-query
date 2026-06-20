@@ -1,9 +1,14 @@
 import { Component, Injector } from '@angular/core'
-import { ComponentFixture, TestBed, fakeAsync, tick } from '@angular/core/testing'
+import {
+  type ComponentFixture,
+  TestBed,
+  fakeAsync,
+  tick,
+} from '@angular/core/testing'
 import { EMPTY, of, Subject, throwError } from 'rxjs'
 
 import { injectMutation } from './inject-mutation'
-import { MutationOptions, MutationResult } from './mutation'
+import type { MutationOptions, MutationResult } from './mutation'
 import { provideQueryClient } from './provider'
 import { QueryClient } from './query-client'
 
@@ -36,7 +41,9 @@ describe('injectMutation', () => {
 
     it('goes pending while the mutation is in flight', fakeAsync(() => {
       const subject = new Subject<number>()
-      const m = setup<number, Error, number>(() => ({ mutationFn: () => subject }))
+      const m = setup<number, Error, number>(() => ({
+        mutationFn: () => subject,
+      }))
 
       m.mutate(5)
 
@@ -87,7 +94,9 @@ describe('injectMutation', () => {
     })
 
     it('re-runs and overwrites state on a second mutate', () => {
-      const m = setup<number, Error, number>(() => ({ mutationFn: (v) => of(v) }))
+      const m = setup<number, Error, number>(() => ({
+        mutationFn: (v) => of(v),
+      }))
 
       m.mutate(1)
       expect(m.data()).toBe(1)
@@ -100,7 +109,9 @@ describe('injectMutation', () => {
 
   describe('reset', () => {
     it('returns the mutation to idle', () => {
-      const m = setup<number, Error, number>(() => ({ mutationFn: (v) => of(v) }))
+      const m = setup<number, Error, number>(() => ({
+        mutationFn: (v) => of(v),
+      }))
 
       m.mutate(7)
       expect(m.isSuccess()).toBe(true)
@@ -155,6 +166,7 @@ describe('injectMutation', () => {
       const m = setup(() => ({
         mutationFn: () => {
           attempts++
+
           return attempts < 3 ? throwError(() => new Error('fail')) : of('ok')
         },
         retry: 3,
@@ -193,6 +205,7 @@ describe('injectMutation', () => {
         mutationFn: (v) => of(v),
         onMutate: (v) => {
           order.push('mutate')
+
           return { ctx: v }
         },
         onSuccess: (data, v, context) =>
@@ -236,7 +249,9 @@ describe('injectMutation', () => {
         mutationFn: () => throwError(() => new Error('fail')),
         onMutate: (todo) => {
           const prev = client.getQueryData<string[]>(['todos']) ?? []
+
           client.setQueryData(['todos'], [...prev, todo])
+
           return { prev }
         },
         onError: (_err, _todo, context) => {
@@ -253,7 +268,9 @@ describe('injectMutation', () => {
 
   describe('independent instances', () => {
     it('keeps separate state per mutation', () => {
-      const a = setup<number, Error, number>(() => ({ mutationFn: (v) => of(v) }))
+      const a = setup<number, Error, number>(() => ({
+        mutationFn: (v) => of(v),
+      }))
       const b = setup<number, Error, number>(() => ({
         mutationFn: (v) => of(v * 10),
       }))
@@ -274,6 +291,7 @@ describe('injectMutation', () => {
       }
 
       const fixture: ComponentFixture<Host> = TestBed.createComponent(Host)
+
       fixture.detectChanges()
 
       expect(client.getMutationCache().getAll().length).toBe(1)

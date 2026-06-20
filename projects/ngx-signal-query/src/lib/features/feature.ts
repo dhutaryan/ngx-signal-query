@@ -1,4 +1,4 @@
-import { Provider } from '@angular/core'
+import type { Provider } from '@angular/core'
 
 /** Discriminator identifying each kind of {@link QueryClientFeature}. */
 export enum QueryClientFeatureKind {

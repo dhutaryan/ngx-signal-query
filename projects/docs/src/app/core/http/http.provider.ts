@@ -1,5 +1,8 @@
 import { provideHttpClient as provideAngularHttpClient } from '@angular/common/http'
-import { EnvironmentProviders, makeEnvironmentProviders } from '@angular/core'
+import {
+  type EnvironmentProviders,
+  makeEnvironmentProviders,
+} from '@angular/core'
 
 export function provideHttpClient(): EnvironmentProviders {
   return makeEnvironmentProviders([provideAngularHttpClient()])

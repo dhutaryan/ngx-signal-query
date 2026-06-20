@@ -10,9 +10,19 @@ export abstract class Cache<TEntry> {
 
   readonly #entriesMap = new Map<string, TEntry>()
 
+  getAll(): TEntry[] {
+    return Array.from(this.#entriesMap.values())
+  }
+
+  clear(): void {
+    this.#entriesMap.clear()
+    this.#sync()
+  }
+
   protected addEntry(key: string, entry: TEntry): TEntry {
     this.#entriesMap.set(key, entry)
     this.#sync()
+
     return entry
   }
 
@@ -22,17 +32,10 @@ export abstract class Cache<TEntry> {
 
   protected removeEntry(key: string): boolean {
     const removed = this.#entriesMap.delete(key)
+
     if (removed) this.#sync()
+
     return removed
-  }
-
-  getAll(): TEntry[] {
-    return Array.from(this.#entriesMap.values())
-  }
-
-  clear(): void {
-    this.#entriesMap.clear()
-    this.#sync()
   }
 
   #sync(): void {

@@ -1,4 +1,4 @@
-import { assertInInjectionContext, inject, Injector } from '@angular/core'
+import { type Injector, assertInInjectionContext, inject } from '@angular/core'
 
 import { QueryClient } from './query-client'
 

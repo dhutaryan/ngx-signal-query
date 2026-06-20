@@ -8,7 +8,7 @@ import {
 } from '@angular/core'
 
 import { QueryClient } from './query-client'
-import { MutationOptions, MutationResult } from './mutation'
+import type { MutationOptions, MutationResult } from './mutation'
 
 /**
  * Creates a mutation for imperative writes (create/update/delete) and exposes

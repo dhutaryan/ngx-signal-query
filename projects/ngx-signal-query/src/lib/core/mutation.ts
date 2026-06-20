@@ -1,17 +1,17 @@
-import { signal, Signal } from '@angular/core'
+import { type Signal, signal } from '@angular/core'
 import {
   defer,
   from,
-  Observable,
   retry as retryOperator,
   take,
   throwIfEmpty,
   timer,
+  type Observable,
   type Subscription,
 } from 'rxjs'
 
 import { defaultRetryDelay, resolveRetryDelay, shouldRetry } from './retryer'
-import { RetryDelayValue, RetryValue } from './types'
+import type { RetryDelayValue, RetryValue } from './types'
 
 /** Lifecycle status of a mutation: not yet run, running, succeeded, or failed. */
 export type MutationStatus = 'idle' | 'pending' | 'success' | 'error'
@@ -134,6 +134,10 @@ export class Mutation<
     signal<MutationState<TData, TError, TVariables, TContext>>(
       getInitialState(),
     )
+
+  // `state` must follow `#state`: a public field can't precede the private
+  // field it reads during initialization (field init order).
+  // eslint-disable-next-line @typescript-eslint/member-ordering
   readonly state = this.#state.asReadonly()
 
   #subscription: Subscription | null = null
@@ -178,7 +182,9 @@ export class Mutation<
             }))
 
             const attemptIndex = retryCount - 1
+
             if (!shouldRetry(retry, attemptIndex, error as TError)) throw error
+
             return timer(
               resolveRetryDelay(retryDelay, attemptIndex, error as TError),
             )

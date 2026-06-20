@@ -1,4 +1,4 @@
-import { MutationOptions } from './mutation'
+import type { MutationOptions } from './mutation'
 
 /**
  * Identity helper that defines a typed, reusable set of {@link MutationOptions}.

@@ -1,6 +1,6 @@
 import { InjectionToken } from '@angular/core'
 
-import { RetryDelayValue, RetryValue } from './types'
+import type { RetryDelayValue, RetryValue } from './types'
 
 export interface QueryClientConfig {
   defaultOptions?: {

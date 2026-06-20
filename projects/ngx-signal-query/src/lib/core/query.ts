@@ -2,26 +2,17 @@ import { signal } from '@angular/core'
 import {
   defer,
   from,
-  Observable,
   retry as retryOperator,
   take,
   throwIfEmpty,
   timer,
+  type Observable,
   type Subscription,
 } from 'rxjs'
 
-import { QueryCache } from './query-cache'
-import {
-  defaultRetryDelay,
-  resolveRetryDelay,
-  shouldRetry,
-} from './retryer'
-import {
-  QueryKey,
-  QueryState,
-  RetryDelayValue,
-  RetryValue,
-} from './types'
+import type { QueryCache } from './query-cache'
+import { defaultRetryDelay, resolveRetryDelay, shouldRetry } from './retryer'
+import type { QueryKey, QueryState, RetryDelayValue, RetryValue } from './types'
 
 const DEFAULT_GC_TIME = 5 * 60 * 1000
 
@@ -36,6 +27,10 @@ export class Query<TData, TError = Error> {
     failureReason: null,
     updatedAt: 0,
   })
+
+  // `state` must follow `#state`: a public field can't precede the private
+  // field it reads during initialization (field init order).
+  // eslint-disable-next-line @typescript-eslint/member-ordering
   readonly state = this.#state.asReadonly()
 
   #subscription: Subscription | null = null
@@ -114,7 +109,9 @@ export class Query<TData, TError = Error> {
             }))
 
             const attemptIndex = retryCount - 1
+
             if (!shouldRetry(retry, attemptIndex, error as TError)) throw error
+
             return timer(
               resolveRetryDelay(retryDelay, attemptIndex, error as TError),
             )
@@ -169,15 +166,12 @@ export class Query<TData, TError = Error> {
 
   shouldFetch(staleTime: number): boolean {
     const state = this.state()
+
     return (
       state.status !== 'success' ||
       state.isInvalidated ||
       this.#isStale(staleTime)
     )
-  }
-
-  #isStale(staleTime: number): boolean {
-    return Date.now() - this.state().updatedAt > staleTime
   }
 
   cancel(): void {
@@ -194,6 +188,10 @@ export class Query<TData, TError = Error> {
   destroy(): void {
     this.cancel()
     this.#clearGcTimer()
+  }
+
+  #isStale(staleTime: number): boolean {
+    return Date.now() - this.state().updatedAt > staleTime
   }
 
   #scheduleGc(): void {

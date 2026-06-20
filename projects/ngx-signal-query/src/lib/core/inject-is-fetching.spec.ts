@@ -18,6 +18,7 @@ describe('injectIsFetching', () => {
 
   it('is 0 when nothing is fetching', () => {
     const isFetching = TestBed.runInInjectionContext(() => injectIsFetching())
+
     expect(isFetching()).toBe(0)
   })
 
@@ -51,9 +52,7 @@ describe('injectIsFetching', () => {
 
   describe('injection context', () => {
     it('throws when called outside an injection context', () => {
-      expect(() => injectIsFetching()).toThrowError(
-        /NG0203|injection context/,
-      )
+      expect(() => injectIsFetching()).toThrowError(/NG0203|injection context/)
     })
 
     it('works outside an injection context when given an injector', () => {

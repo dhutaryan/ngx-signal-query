@@ -19,6 +19,7 @@ describe('injectIsMutating', () => {
 
   it('is 0 when nothing is mutating', () => {
     const isMutating = TestBed.runInInjectionContext(() => injectIsMutating())
+
     expect(isMutating()).toBe(0)
   })
 
@@ -76,6 +77,7 @@ describe('injectIsMutating', () => {
         .build<number, Error, void, unknown>({
           mutationFn: () => new Subject<number>(),
         })
+
       mutation.execute()
 
       expect(isMutating()).toBe(1)

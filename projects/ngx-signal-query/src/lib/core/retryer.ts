@@ -1,4 +1,4 @@
-import { RetryDelayValue, RetryValue } from './types'
+import type { RetryDelayValue, RetryValue } from './types'
 
 // Exponential backoff capped at 30s, matching TanStack's default.
 export function defaultRetryDelay(failureCount: number): number {
@@ -12,6 +12,7 @@ export function shouldRetry<TError>(
 ): boolean {
   if (typeof retry === 'function') return retry(failureCount, error)
   if (typeof retry === 'number') return failureCount < retry
+
   return retry
 }
 

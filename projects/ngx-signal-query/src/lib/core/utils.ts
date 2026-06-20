@@ -1,4 +1,4 @@
-import { QueryKey, Updater } from './types'
+import type { QueryKey, Updater } from './types'
 
 // Resolves an updater: calls it with the previous value if it's a function,
 // otherwise uses it as the value directly.
@@ -40,6 +40,7 @@ export function hashKey(key: QueryKey): string {
           .sort()
           .reduce<Record<string, unknown>>((result, k) => {
             result[k] = value[k]
+
             return result
           }, {})
       : value,
@@ -47,6 +48,7 @@ export function hashKey(key: QueryKey): string {
 }
 
 // Copied from: https://github.com/jonschlinkert/is-plain-object
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 export function isPlainObject(o: any): o is Record<PropertyKey, unknown> {
   if (!hasObjectPrototype(o)) {
     return false
@@ -54,18 +56,20 @@ export function isPlainObject(o: any): o is Record<PropertyKey, unknown> {
 
   // If has no constructor
   const ctor = o.constructor
+
   if (ctor === undefined) {
     return true
   }
 
   // If has modified prototype
   const prot = ctor.prototype
+
   if (!hasObjectPrototype(prot)) {
     return false
   }
 
   // If constructor does not have an Object-specific method
-  if (!prot.hasOwnProperty('isPrototypeOf')) {
+  if (!Object.prototype.hasOwnProperty.call(prot, 'isPrototypeOf')) {
     return false
   }
 
@@ -78,6 +82,7 @@ export function isPlainObject(o: any): o is Record<PropertyKey, unknown> {
   return true
 }
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 function hasObjectPrototype(o: any): boolean {
   return Object.prototype.toString.call(o) === '[object Object]'
 }

@@ -48,11 +48,11 @@ import { AppQueries } from './app-queries'
 export class App {
   protected readonly title = signal('docs')
 
-  private readonly _queries = inject(AppQueries)
-
-  protected readonly recipes = injectQuery(() => this._queries.recipes())
-  protected readonly addRecipe = injectMutation(() => this._queries.addRecipe())
+  protected readonly recipes = injectQuery(() => this.#queries.recipes())
+  protected readonly addRecipe = injectMutation(() => this.#queries.addRecipe())
 
   protected readonly isFetching = injectIsFetching()
   protected readonly isMutating = injectIsMutating()
+
+  readonly #queries = inject(AppQueries)
 }

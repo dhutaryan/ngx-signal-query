@@ -1,4 +1,4 @@
-import { QueryOptions } from './types'
+import type { QueryOptions } from './types'
 
 /**
  * Identity helper that defines a typed, reusable set of {@link QueryOptions}.

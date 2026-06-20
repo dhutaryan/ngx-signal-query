@@ -10,8 +10,8 @@ import {
 } from '@angular/core'
 
 import { QueryClient } from './query-client'
-import { Query } from './query'
-import { QueryOptions, QueryResult } from './types'
+import type { Query } from './query'
+import type { QueryOptions, QueryResult } from './types'
 
 /**
  * Runs a cached, reactive query and exposes its state as signals.
@@ -76,6 +76,7 @@ export function injectQuery<TData, TError = Error>(
     // background refetch.
     const applyInitialData = (q: Query<TData, TError>): void => {
       const { initialData, initialDataUpdatedAt } = untracked(defaultedOptions)
+
       if (initialData === undefined || q.state().status !== 'pending') return
 
       const data =
@@ -96,12 +97,15 @@ export function injectQuery<TData, TError = Error>(
     const seed = cache.getOrCreate<TData, TError>(
       untracked(defaultedOptions).queryKey,
     )
+
     applyInitialData(seed)
+
     const query = signal(seed)
 
     effect(() => {
       const key = defaultedOptions().queryKey
       const q = untracked(() => cache.getOrCreate<TData, TError>(key))
+
       untracked(() => applyInitialData(q))
       query.set(q)
     })
@@ -178,6 +182,7 @@ export function injectQuery<TData, TError = Error>(
       // First fetch in-flight: fetching with no resolved data yet.
       isLoading: computed(() => {
         const state = query().state()
+
         return state.isFetching && state.status === 'pending'
       }),
       isPending: computed(() => query().state().status === 'pending'),

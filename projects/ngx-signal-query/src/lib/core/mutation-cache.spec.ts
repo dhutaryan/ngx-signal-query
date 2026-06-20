@@ -68,6 +68,7 @@ describe('MutationCache', () => {
       const b = cache.build<number, Error, void, unknown>({
         mutationFn: () => new Subject<number>(),
       })
+
       a.execute()
       b.execute()
       spyOn(a, 'cancel')

@@ -2,7 +2,7 @@ import { fakeAsync, tick } from '@angular/core/testing'
 import { of, throwError } from 'rxjs'
 
 import { Query } from './query'
-import { QueryCache } from './query-cache'
+import type { QueryCache } from './query-cache'
 
 function createQuery<TData, TError = Error>() {
   // Query only calls cache.remove(this) on gc; a stub is enough.
@@ -12,6 +12,7 @@ function createQuery<TData, TError = Error>() {
     '["key"]',
     cache as unknown as QueryCache,
   )
+
   return { query, cache }
 }
 
@@ -31,6 +32,7 @@ describe('Query', () => {
     query.fetch(() => of(42))
 
     const state = query.state()
+
     expect(state.status).toBe('success')
     expect(state.data).toBe(42)
     expect(state.isFetching).toBe(false)
@@ -98,6 +100,7 @@ describe('Query', () => {
     query.fetch(() => throwError(() => err))
 
     const state = query.state()
+
     expect(state.status).toBe('error')
     expect(state.error).toBe(err)
     expect(state.isFetching).toBe(false)
@@ -117,6 +120,7 @@ describe('Query', () => {
     let attempts = 0
     const queryFn = () => {
       attempts++
+
       return attempts < 3 ? throwError(() => new Error('fail')) : of(99)
     }
 
@@ -133,10 +137,15 @@ describe('Query', () => {
     const err = new Error('nope')
 
     // retry: 2 -> 3 attempts total before giving up.
-    query.fetch(() => throwError(() => err), 2, () => 10)
+    query.fetch(
+      () => throwError(() => err),
+      2,
+      () => 10,
+    )
     tick(100)
 
     const state = query.state()
+
     expect(state.status).toBe('error')
     expect(state.error).toBe(err)
     expect(state.failureCount).toBe(3)
@@ -233,17 +242,20 @@ describe('Query', () => {
   describe('invalidate / shouldFetch', () => {
     it('fetches while pending', () => {
       const { query } = createQuery<number>()
+
       expect(query.shouldFetch(Infinity)).toBe(true)
     })
 
     it('does not fetch fresh successful data within staleTime', () => {
       const { query } = createQuery<number>()
+
       query.setData(1)
       expect(query.shouldFetch(Infinity)).toBe(false)
     })
 
     it('fetches again once invalidated', () => {
       const { query } = createQuery<number>()
+
       query.setData(1)
       query.invalidate()
 
@@ -253,6 +265,7 @@ describe('Query', () => {
 
     it('fetches again once data is stale', fakeAsync(() => {
       const { query } = createQuery<number>()
+
       query.setData(1)
       tick(50)
       expect(query.shouldFetch(10)).toBe(true)
@@ -260,6 +273,7 @@ describe('Query', () => {
 
     it('fetches when the last fetch errored', () => {
       const { query } = createQuery<number>()
+
       query.fetch(() => throwError(() => new Error('boom')))
 
       expect(query.state().status).toBe('error')
@@ -270,6 +284,7 @@ describe('Query', () => {
   describe('observers and gc', () => {
     it('counts observers', () => {
       const { query } = createQuery<number>()
+
       query.addObserver()
       query.addObserver()
       expect(query.observerCount).toBe(2)
@@ -280,12 +295,14 @@ describe('Query', () => {
 
     it('does not underflow when removing with no observers', () => {
       const { query } = createQuery<number>()
+
       query.removeObserver()
       expect(query.observerCount).toBe(0)
     })
 
     it('cancels an in-flight fetch when the last observer leaves', fakeAsync(() => {
       const { query } = createQuery<number>()
+
       query.addObserver()
       query.fetch(() => Promise.resolve(1))
 
@@ -299,6 +316,7 @@ describe('Query', () => {
 
     it('schedules gc removal when the last observer leaves', fakeAsync(() => {
       const { query, cache } = createQuery<number>()
+
       query.setGcTime(1000)
       query.addObserver()
 
@@ -311,6 +329,7 @@ describe('Query', () => {
 
     it('removes immediately when gcTime is 0 and the last observer leaves', fakeAsync(() => {
       const { query, cache } = createQuery<number>()
+
       query.setGcTime(0)
       query.addObserver()
 
@@ -322,6 +341,7 @@ describe('Query', () => {
 
     it('schedules gc for an orphaned setData write (no observers)', fakeAsync(() => {
       const { query, cache } = createQuery<number>()
+
       query.setGcTime(1000)
 
       query.setData(1) // no observer → orphaned, must still be collected
@@ -332,6 +352,7 @@ describe('Query', () => {
 
     it('does not gc a setData write while it has observers', fakeAsync(() => {
       const { query, cache } = createQuery<number>()
+
       query.setGcTime(1000)
       query.addObserver()
 
@@ -343,6 +364,7 @@ describe('Query', () => {
 
     it('cancels a scheduled gc when an observer returns', fakeAsync(() => {
       const { query, cache } = createQuery<number>()
+
       query.setGcTime(1000)
       query.addObserver()
       query.removeObserver()

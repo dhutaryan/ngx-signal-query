@@ -169,6 +169,7 @@ describe('QueryClient', () => {
       client.invalidateQueries({ queryKey: ['todos'] })
 
       const cache = client.getQueryCache()
+
       expect(cache.get(['todos', 1])?.state().isInvalidated).toBe(true)
       expect(cache.get(['todos', 2])?.state().isInvalidated).toBe(true)
       expect(cache.get(['other'])?.state().isInvalidated).toBe(false)
@@ -181,6 +182,7 @@ describe('QueryClient', () => {
       client.invalidateQueries()
 
       const cache = client.getQueryCache()
+
       expect(cache.get(['todos', 1])?.state().isInvalidated).toBe(true)
       expect(cache.get(['other'])?.state().isInvalidated).toBe(true)
     })
@@ -192,6 +194,7 @@ describe('QueryClient', () => {
       client.invalidateQueries({ queryKey: ['todos'], exact: true })
 
       const cache = client.getQueryCache()
+
       expect(cache.get(['todos'])?.state().isInvalidated).toBe(true)
       expect(cache.get(['todos', 1])?.state().isInvalidated).toBe(false)
     })
@@ -228,6 +231,7 @@ describe('QueryClient', () => {
       client.removeQueries({ queryKey: ['todos'] })
 
       const cache = client.getQueryCache()
+
       expect(cache.get(['todos', 1])).toBeUndefined()
       expect(cache.get(['todos', 2])).toBeUndefined()
       expect(cache.get(['other'])).toBeDefined()

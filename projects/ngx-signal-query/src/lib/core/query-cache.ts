@@ -3,7 +3,7 @@ import { Injectable } from '@angular/core'
 import { Cache } from './cache'
 import { hashKey, partialMatchKey } from './utils'
 import { Query } from './query'
-import { QueryFilters, QueryKey } from './types'
+import type { QueryFilters, QueryKey } from './types'
 
 @Injectable()
 export class QueryCache extends Cache<Query<unknown, unknown>> {
@@ -23,7 +23,7 @@ export class QueryCache extends Cache<Query<unknown, unknown>> {
     return this.getEntry(hashKey(key)) as Query<TData, TError> | undefined
   }
 
-  findAll(filters: QueryFilters = {}): Query<unknown, unknown>[] {
+  findAll(filters: QueryFilters = {}): Array<Query<unknown, unknown>> {
     const { queryKey, exact } = filters
 
     // Reads the reactive `entries()` so findAll() works inside computed().
@@ -33,6 +33,7 @@ export class QueryCache extends Cache<Query<unknown, unknown>> {
 
     if (exact) {
       const queryHash = hashKey(queryKey)
+
       return all.filter((query) => query.queryHash === queryHash)
     }
 

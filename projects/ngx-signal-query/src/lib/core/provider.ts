@@ -1,9 +1,15 @@
-import { EnvironmentProviders, makeEnvironmentProviders } from '@angular/core'
+import {
+  type EnvironmentProviders,
+  makeEnvironmentProviders,
+} from '@angular/core'
 
 import { QueryClient } from './query-client'
 import { QueryCache } from './query-cache'
 import { MutationCache } from './mutation-cache'
-import { QueryClientFeature, QueryClientFeatureKind } from '../features/feature'
+import {
+  type QueryClientFeature,
+  QueryClientFeatureKind,
+} from '../features/feature'
 
 /**
  * Registers the {@link QueryClient} and its caches for the application.

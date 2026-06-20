@@ -1,11 +1,11 @@
-import { Signal } from '@angular/core'
-import { Observable } from 'rxjs'
+import type { Signal } from '@angular/core'
+import type { Observable } from 'rxjs'
 
 /**
  * Uniquely identifies a query and serves as its cache key. Use a serializable
  * array, from broad to specific, e.g. `['todos']` or `['todo', id]`.
  */
-export type QueryKey = ReadonlyArray<unknown>
+export type QueryKey = readonly unknown[]
 
 /** Lifecycle status of a query: no data yet, resolved, or failed. */
 export type QueryStatus = 'pending' | 'success' | 'error'

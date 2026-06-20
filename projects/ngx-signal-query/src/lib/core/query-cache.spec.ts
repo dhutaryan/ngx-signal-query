@@ -51,11 +51,13 @@ describe('QueryCache', () => {
 
     it('partial-matches by key prefix', () => {
       const found = cache.findAll({ queryKey: ['todos'] })
+
       expect(found.map((q) => q.key)).toEqual([['todos'], ['todos', 1]])
     })
 
     it('matches only the exact key with exact: true', () => {
       const found = cache.findAll({ queryKey: ['todos'], exact: true })
+
       expect(found.map((q) => q.key)).toEqual([['todos']])
     })
   })
@@ -72,10 +74,12 @@ describe('QueryCache', () => {
 
     it('only removes the instance currently stored under the key', () => {
       const stale = cache.getOrCreate(['x'])
+
       cache.remove(stale)
 
       // A fresh query is created under the same key.
       const current = cache.getOrCreate(['x'])
+
       expect(current).not.toBe(stale)
 
       // Removing the stale instance must not evict the current one.
@@ -87,6 +91,7 @@ describe('QueryCache', () => {
     it('is a no-op for a query that is not cached', () => {
       const tracked = cache.getOrCreate(['kept'])
       const orphan = cache.getOrCreate(['orphan'])
+
       cache.remove(orphan)
 
       expect(() => cache.remove(orphan)).not.toThrow()
@@ -98,6 +103,7 @@ describe('QueryCache', () => {
     it('destroys every query and empties the cache', () => {
       const a = cache.getOrCreate(['a'])
       const b = cache.getOrCreate(['b'])
+
       spyOn(a, 'destroy')
       spyOn(b, 'destroy')
 

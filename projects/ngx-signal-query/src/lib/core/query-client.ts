@@ -1,11 +1,11 @@
 import { inject, Injectable } from '@angular/core'
-import { Observable } from 'rxjs'
+import type { Observable } from 'rxjs'
 
 import { QueryCache } from './query-cache'
 import { MutationCache } from './mutation-cache'
 import { defaultRetryDelay } from './retryer'
 import { functionalUpdate } from './utils'
-import {
+import type {
   DefaultedQueryOptions,
   QueryFilters,
   QueryKey,
