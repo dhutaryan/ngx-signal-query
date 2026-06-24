@@ -1,6 +1,7 @@
 {
   "name": "ngx-signal-query",
   "version": "0.0.0",
+  "packageManager": "pnpm@10.18.1",
   "scripts": {
     "ng": "ng",
     "start": "ng serve",
@@ -29,10 +30,13 @@
     "@angular/build": "^20.3.26",
     "@angular/cli": "^20.3.5",
     "@angular/compiler-cli": "^20.3.0",
+    "@commitlint/cli": "^21.1.0",
+    "@commitlint/config-conventional": "^21.1.0",
     "@eslint/js": "^9.39.1",
     "@stylistic/eslint-plugin": "^5.10.0",
     "@types/jasmine": "~5.1.0",
     "angular-eslint": "20.7.0",
+    "conventional-changelog-conventionalcommits": "^9.3.1",
     "eslint": "^9.39.1",
     "jasmine-core": "~5.9.0",
     "karma": "~6.4.0",
@@ -42,6 +46,7 @@
     "karma-jasmine-html-reporter": "~2.1.0",
     "ng-packagr": "^20.3.0",
     "prettier": "^3.8.3",
+    "semantic-release": "^25.0.5",
     "typescript": "~5.9.2",
     "typescript-eslint": "8.46.4"
   }
