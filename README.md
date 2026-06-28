@@ -3,12 +3,10 @@
 [![npm version](https://img.shields.io/npm/v/ngx-signal-query.svg)](https://www.npmjs.com/package/ngx-signal-query)
 [![license](https://img.shields.io/npm/l/ngx-signal-query.svg)](./LICENSE)
 
-Signal-first asynchronous state management for Angular — querying, caching, and
-mutations built entirely on Angular Signals. Inspired by
-[TanStack Query](https://tanstack.com/query), reimagined for the signal era: no
-`Observable` subscriptions to manage, just signals you read in templates.
-
-> ⚠️ Pre-1.0 — the API may still change between minor versions.
+A tiny, signal-native library for data fetching, caching, and mutations in
+Angular — inspired by [TanStack Query](https://tanstack.com/query). Built
+directly on Angular Signals, with first-class RxJS support: your `queryFn` can
+return an `Observable` (hello `HttpClient`) or a `Promise`.
 
 ## Features
 
