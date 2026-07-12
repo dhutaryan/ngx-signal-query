@@ -1,58 +1,74 @@
-import { Component, inject, signal } from '@angular/core'
+import { Component, inject } from '@angular/core'
 import { RouterOutlet } from '@angular/router'
 import {
-  injectIsFetching,
-  injectIsMutating,
-  injectMutation,
-  injectQuery,
-} from 'ngx-signal-query'
-
-import { AppQueries } from './app-queries'
+  NgDocNavbarComponent,
+  NgDocRootComponent,
+  NgDocSidebarComponent,
+  NgDocThemeToggleComponent,
+} from '@ng-doc/app'
+import { NgDocThemeService } from '@ng-doc/app/services/theme'
+import { NgDocButtonIconComponent, NgDocTooltipDirective } from '@ng-doc/ui-kit'
 
 @Component({
   selector: 'app-root',
-  imports: [RouterOutlet],
+  imports: [
+    RouterOutlet,
+    NgDocRootComponent,
+    NgDocNavbarComponent,
+    NgDocSidebarComponent,
+    NgDocThemeToggleComponent,
+    NgDocButtonIconComponent,
+    NgDocTooltipDirective,
+  ],
   template: `
-    <h1>Welcome to {{ title() }}!</h1>
+    <ng-doc-root>
+      <ng-doc-navbar [search]="false">
+        <h3 class="brand" style="margin: 0" ngDocNavbarLeft>ngx-signal-query</h3>
 
-    <p>global — fetching: {{ isFetching() }} | mutating: {{ isMutating() }}</p>
+        <div class="navbar-right" ngDocNavbarRight>
+          <ng-doc-theme-toggle />
 
-    <button (click)="recipes.refetch()">Refetch</button>
-
-    <p>
-      recipes status: {{ recipes.status() }} | fetching:
-      {{ recipes.isFetching() }} | failures: {{ recipes.failureCount() }}
-    </p>
-
-    <ul>
-      @for (recipe of recipes.data(); track recipe.id) {
-        <li>{{ recipe.name }}</li>
-      }
-    </ul>
-
-    <hr />
-
-    <button
-      (click)="addRecipe.mutate('New recipe')"
-      [disabled]="addRecipe.isPending()"
-    >
-      Add recipe (optimistic)
-    </button>
-
-    <p>mutation status: {{ addRecipe.status() }}</p>
-
-    <router-outlet />
+          <a
+            ng-doc-button-icon
+            size="large"
+            href="https://github.com/dhutaryan/ngx-signal-query"
+            target="_blank"
+            rel="noreferrer"
+            ngDocTooltip="View on GitHub"
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path
+                fill="currentColor"
+                d="M12 .5A11.5 11.5 0 0 0 .5 12a11.5 11.5 0 0 0 7.86 10.92c.58.1.79-.25.79-.56v-2.17c-3.2.7-3.88-1.37-3.88-1.37-.53-1.34-1.29-1.7-1.29-1.7-1.06-.72.08-.71.08-.71 1.17.08 1.78 1.2 1.78 1.2 1.04 1.78 2.73 1.27 3.4.97.1-.75.4-1.27.74-1.56-2.56-.29-5.26-1.28-5.26-5.7 0-1.26.45-2.29 1.19-3.1-.12-.29-.52-1.46.11-3.05 0 0 .97-.31 3.18 1.18a11.1 11.1 0 0 1 5.8 0c2.2-1.49 3.17-1.18 3.17-1.18.63 1.59.23 2.76.11 3.05.74.81 1.19 1.84 1.19 3.1 0 4.43-2.7 5.41-5.28 5.69.41.36.78 1.06.78 2.14v3.17c0 .31.21.67.8.56A11.5 11.5 0 0 0 23.5 12 11.5 11.5 0 0 0 12 .5Z"
+              />
+            </svg>
+          </a>
+        </div>
+      </ng-doc-navbar>
+      <ng-doc-sidebar />
+      <router-outlet />
+    </ng-doc-root>
   `,
-  styles: [],
+  styles: [
+    `
+      .navbar-right {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+      }
+
+      .navbar-right svg {
+        display: block;
+        width: 24px;
+        height: 24px;
+      }
+    `,
+  ],
 })
 export class App {
-  protected readonly title = signal('docs')
+  readonly #theme = inject(NgDocThemeService)
 
-  protected readonly recipes = injectQuery(() => this.#queries.recipes())
-  protected readonly addRecipe = injectMutation(() => this.#queries.addRecipe())
-
-  protected readonly isFetching = injectIsFetching()
-  protected readonly isMutating = injectIsMutating()
-
-  readonly #queries = inject(AppQueries)
+  constructor() {
+    this.#theme.set('auto')
+  }
 }

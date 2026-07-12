@@ -2,6 +2,7 @@
 
 [![npm version](https://img.shields.io/npm/v/ngx-signal-query.svg)](https://www.npmjs.com/package/ngx-signal-query)
 [![license](https://img.shields.io/npm/l/ngx-signal-query.svg)](./LICENSE)
+[![docs](https://img.shields.io/badge/docs-ngx--signal--query-blue)](https://dhutaryan.github.io/ngx-signal-query/)
 
 A tiny, signal-native library for data fetching, caching, and mutations in
 Angular — inspired by [TanStack Query](https://tanstack.com/query). Built
@@ -23,7 +24,7 @@ return an `Observable` (hello `HttpClient`) or a `Promise`.
 npm install ngx-signal-query
 ```
 
-Requires **Angular 20+** (`@angular/core` and `@angular/common` are peer dependencies).
+Requires **Angular 19+** (`@angular/core` is the only peer dependency).
 
 ## Quick start
 
@@ -99,7 +100,7 @@ const addTodo = injectMutation(() =>
 
 ## Documentation
 
-📖 Full guides and API reference — **coming soon** (documentation site is in progress).
+📖 **[Read the docs](https://dhutaryan.github.io/ngx-signal-query/)** — guides and examples.
 
 ## License
 

@@ -67,3 +67,11 @@ jobs:
 
       - name: Test
         run: pnpm test:ci
+
+      # The docs app compiles against the built library, so build it first.
+      # This catches broken markdown/pages before they reach main and deploy.
+      - name: Build library
+        run: pnpm build:lib
+
+      - name: Build docs
+        run: pnpm docs:build

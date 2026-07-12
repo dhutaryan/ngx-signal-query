@@ -8,8 +8,11 @@
     "noPropertyAccessFromIndexSignature": true,
     "noImplicitReturns": true,
     "paths": {
-      "ngx-signal-query": ["./dist/ngx-signal-query"]
+      "ngx-signal-query": ["./dist/ngx-signal-query"],
+      "@ng-doc/generated": ["./ng-doc/docs/index.ts"],
+      "@ng-doc/generated/*": ["./ng-doc/docs/*"]
     },
+    "allowSyntheticDefaultImports": true,
     "noFallthroughCasesInSwitch": true,
     "skipLibCheck": true,
     "isolatedModules": true,

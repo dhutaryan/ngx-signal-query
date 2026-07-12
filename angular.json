@@ -78,7 +78,7 @@
       "prefix": "app",
       "architect": {
         "build": {
-          "builder": "@angular/build:application",
+          "builder": "@ng-doc/builder:application",
           "options": {
             "browser": "projects/docs/src/main.ts",
             "polyfills": [
@@ -90,9 +90,25 @@
               {
                 "glob": "**/*",
                 "input": "projects/docs/public"
+              },
+              {
+                "glob": "**/*",
+                "input": "node_modules/@ng-doc/app/assets",
+                "output": "assets/ng-doc/app"
+              },
+              {
+                "glob": "**/*",
+                "input": "node_modules/@ng-doc/ui-kit/assets",
+                "output": "assets/ng-doc/ui-kit"
+              },
+              {
+                "glob": "**/*",
+                "input": "ng-doc/docs/assets",
+                "output": "assets/ng-doc"
               }
             ],
             "styles": [
+              "node_modules/@ng-doc/app/styles/global.css",
               "projects/docs/src/styles.scss"
             ]
           },
@@ -101,8 +117,8 @@
               "budgets": [
                 {
                   "type": "initial",
-                  "maximumWarning": "500kB",
-                  "maximumError": "1MB"
+                  "maximumWarning": "2MB",
+                  "maximumError": "4MB"
                 },
                 {
                   "type": "anyComponentStyle",
@@ -121,7 +137,7 @@
           "defaultConfiguration": "production"
         },
         "serve": {
-          "builder": "@angular/build:dev-server",
+          "builder": "@ng-doc/builder:dev-server",
           "configurations": {
             "production": {
               "buildTarget": "docs:build:production"
