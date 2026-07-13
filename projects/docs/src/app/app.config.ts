@@ -19,7 +19,9 @@ export const appConfig: ApplicationConfig = {
     provideBrowserGlobalErrorListeners(),
     provideZoneChangeDetection({ eventCoalescing: true }),
     provideRouter(
-      NG_DOC_ROUTING,
+      // NG_DOC_ROUTING has no route for the empty path, so `/` (and any unknown
+      // URL) falls through to the wildcard and lands on the first page.
+      [...NG_DOC_ROUTING, { path: '**', redirectTo: 'introduction' }],
       withInMemoryScrolling({
         scrollPositionRestoration: 'enabled',
         anchorScrolling: 'enabled',
