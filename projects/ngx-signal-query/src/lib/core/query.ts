@@ -190,8 +190,12 @@ export class Query<TData, TError = Error> {
     this.#clearGcTimer()
   }
 
+  // Inclusive: data fetched exactly `staleTime` ago is already stale. This
+  // matters for seeded data (initialData is stamped with the current time), so
+  // the default staleTime of 0 still means "stale at once" → background
+  // refetch, rather than depending on whether a millisecond happened to pass.
   #isStale(staleTime: number): boolean {
-    return Date.now() - this.state().updatedAt > staleTime
+    return Date.now() - this.state().updatedAt >= staleTime
   }
 
   #scheduleGc(): void {
