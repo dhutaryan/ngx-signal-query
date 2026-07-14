@@ -1,0 +1,107 @@
+// Layout and chrome only — the demo brings its own panel styles.
+:host {
+  display: block;
+  max-width: 1000px;
+  margin: 0 auto;
+  padding: 1.5rem;
+  font-family: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+  color: #1f2328;
+}
+
+h1 {
+  font-size: 1.25rem;
+  margin: 0 0 1rem;
+}
+
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-bottom: 0.75rem;
+
+  button {
+    padding: 0.4rem 0.75rem;
+    border: 1px solid #d0d7de;
+    border-radius: 6px;
+    background: #f6f8fa;
+    cursor: pointer;
+    font: inherit;
+    font-size: 0.9rem;
+
+    &:hover {
+      background: #eef1f4;
+    }
+
+    &.on {
+      background: #fff1e5;
+      border-color: #d4a72c;
+    }
+  }
+}
+
+.hint {
+  color: #57606a;
+  font-size: 0.85rem;
+  line-height: 1.5;
+}
+
+main {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+  align-items: start;
+}
+
+.panel {
+  border: 1px solid #d0d7de;
+  border-radius: 8px;
+  padding: 1rem;
+  background: #fff;
+
+  h2 {
+    margin: 0 0 0.75rem;
+    font-size: 1rem;
+  }
+}
+
+.destroyed {
+  border-color: #cf222e;
+  background: #fff5f5;
+}
+
+.log {
+  grid-column: 1 / -1;
+
+  ol {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 0.8rem;
+  }
+
+  li {
+    display: flex;
+    gap: 0.75rem;
+    padding: 0.15rem 0;
+    border-bottom: 1px solid #f0f2f4;
+
+    &.ui {
+      color: #0969da;
+      font-weight: 600;
+    }
+  }
+
+  .at {
+    color: #8c959f;
+    flex: 0 0 auto;
+  }
+}
+
+code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  background: #f6f8fa;
+  padding: 0.05rem 0.3rem;
+  border-radius: 4px;
+  font-size: 0.85em;
+}

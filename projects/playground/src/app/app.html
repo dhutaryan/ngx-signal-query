@@ -1,0 +1,57 @@
+<header>
+  <h1>ngx-signal-query · mutations playground</h1>
+
+  <div class="toolbar">
+    <button (click)="toggleBackend()">
+      backend: <strong>{{ api.backend() }}</strong>
+    </button>
+
+    <button (click)="toggleFail()" [class.on]="api.shouldFail()">
+      shouldFail: <strong>{{ api.shouldFail() }}</strong>
+    </button>
+
+    <button (click)="toggleMount()" [class.on]="!mounted()">
+      {{ mounted() ? 'Destroy demo' : 'Mount demo' }}
+    </button>
+
+    <button (click)="log.clear()">Clear log</button>
+  </div>
+
+  <p class="hint">
+    On the <strong>real</strong> backend every call is a genuine HTTP request to
+    dummyjson (latency comes from its <code>?delay=</code> param), so open
+    DevTools → Network to see which requests get <em>canceled</em>. The
+    <strong>fake</strong> backend behaves the same, without the network.
+  </p>
+</header>
+
+<main>
+  @if (mounted()) {
+    <app-mutation-demo />
+  } @else {
+    <section class="panel destroyed">
+      <h2>Demo destroyed</h2>
+      <p>
+        Anything still in flight kept its own subscription. Watch the log: hooks
+        that fire from here on belong to a component that no longer exists.
+      </p>
+    </section>
+  }
+
+  <section class="panel log">
+    <h2>Log <small>(outlives the demo)</small></h2>
+
+    @if (log.entries().length === 0) {
+      <p class="hint">Nothing yet.</p>
+    }
+
+    <ol>
+      @for (entry of log.entries(); track $index) {
+        <li [class.ui]="entry.kind === 'ui'">
+          <span class="at">{{ entry.at }}</span>
+          <span class="text">{{ entry.text }}</span>
+        </li>
+      }
+    </ol>
+  </section>
+</main>

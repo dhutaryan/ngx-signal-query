@@ -1,0 +1,54 @@
+<section class="panel">
+  <h2>Mutation state</h2>
+
+  <dl class="state">
+    <dt>status()</dt>
+    <dd><code>{{ addTodo.status() }}</code></dd>
+
+    <dt>variables()</dt>
+    <dd><code>{{ addTodo.variables()?.title ?? '—' }}</code></dd>
+
+    <dt>data()</dt>
+    <dd><code>{{ addTodo.data()?.title ?? '—' }}</code></dd>
+
+    <dt>error()</dt>
+    <dd><code>{{ addTodo.error()?.message ?? '—' }}</code></dd>
+
+    <dt>failureCount()</dt>
+    <dd><code>{{ addTodo.failureCount() }}</code></dd>
+  </dl>
+
+  <div class="actions">
+    <button (click)="addOne()" [disabled]="addTodo.isPending()">
+      Add one (1s)
+    </button>
+
+    <button class="danger" (click)="race()">
+      Race: slow(3s) then fast(500ms)
+    </button>
+
+    <button (click)="addTodo.reset()" [disabled]="addTodo.isIdle()">
+      reset()
+    </button>
+  </div>
+
+  <p class="hint">
+    “Race” fires two mutations back to back. The <em>second</em> call is the one
+    you'd expect to win — watch what actually ends up in <code>data()</code>,
+    and compare it with <code>variables()</code>.
+  </p>
+</section>
+
+<section class="panel">
+  <h2>Todos <small>({{ todos.status() }})</small></h2>
+
+  @if (todos.isFetching()) {
+    <span class="badge">fetching…</span>
+  }
+
+  <ul>
+    @for (todo of todos.data() ?? []; track todo.id) {
+      <li [class.optimistic]="todo.id < 0">{{ todo.title }}</li>
+    }
+  </ul>
+</section>

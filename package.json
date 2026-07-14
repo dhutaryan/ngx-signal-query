@@ -4,14 +4,15 @@
   "packageManager": "pnpm@10.18.1",
   "scripts": {
     "ng": "ng",
+    "start": "ng serve playground",
     "docs:start": "ng serve docs",
     "docs:build": "ng build docs",
     "docs:build:gh": "ng build docs --base-href=/ngx-signal-query/",
     "build:lib": "ng build ngx-signal-query && cp README.md LICENSE dist/ngx-signal-query/",
     "watch": "ng build --watch --project ngx-signal-query --configuration development",
-    "test": "ng test",
-    "test:ci": "ng test --watch=false --browsers=ChromeHeadless",
-    "test:coverage": "ng test --watch=false --browsers=ChromeHeadless --code-coverage",
+    "test": "ng test ngx-signal-query",
+    "test:ci": "ng test ngx-signal-query --watch=false --browsers=ChromeHeadless",
+    "test:coverage": "ng test ngx-signal-query --watch=false --browsers=ChromeHeadless --code-coverage",
     "lint": "ng lint"
   },
   "private": true,

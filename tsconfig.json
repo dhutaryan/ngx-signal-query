@@ -38,6 +38,12 @@
     },
     {
       "path": "./projects/docs/tsconfig.app.json"
+    },
+    {
+      "path": "./projects/playground/tsconfig.app.json"
+    },
+    {
+      "path": "./projects/playground/tsconfig.spec.json"
     }
   ]
 }
