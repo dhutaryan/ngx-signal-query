@@ -104,14 +104,11 @@ export function injectMutation<
         run.execute(variables)
       },
       reset: () => {
-        const run = untracked(current)
-
-        // Unlike destroy, reset() is an explicit "stop this" — it aborts the
-        // run, so its hooks never fire.
-        if (run) {
-          run.reset()
-          run.removeObserver()
-        }
+        // "Forget the result", not "stop the request". A run still in flight
+        // keeps going and fires its hooks, so the cache stays in step with the
+        // server — cancelling could not un-send the write anyway, it could only
+        // hide the fact that it happened.
+        untracked(current)?.removeObserver()
 
         current.set(null)
       },

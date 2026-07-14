@@ -249,11 +249,6 @@ export class Mutation<
       })
   }
 
-  reset(): void {
-    this.cancel()
-    this.#state.set(getInitialState())
-  }
-
   cancel(): void {
     this.#subscription?.unsubscribe()
     this.#subscription = null
