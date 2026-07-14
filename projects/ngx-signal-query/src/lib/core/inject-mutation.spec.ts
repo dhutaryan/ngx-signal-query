@@ -284,7 +284,18 @@ describe('injectMutation', () => {
   })
 
   describe('lifecycle', () => {
-    it('removes the mutation from the cache when the host is destroyed', () => {
+    it('does not touch the cache until the first mutate()', () => {
+      const m = setup(() => ({ mutationFn: () => of(1) }))
+
+      // Nothing has run, so there's nothing to observe or count.
+      expect(client.getMutationCache().getAll().length).toBe(0)
+
+      m.mutate()
+
+      expect(client.getMutationCache().getAll().length).toBe(1)
+    })
+
+    it('removes a settled mutation from the cache when the host is destroyed', () => {
       @Component({ template: '' })
       class Host {
         readonly m = injectMutation(() => ({ mutationFn: () => of(1) }))
@@ -293,12 +304,134 @@ describe('injectMutation', () => {
       const fixture: ComponentFixture<Host> = TestBed.createComponent(Host)
 
       fixture.detectChanges()
+      fixture.componentInstance.m.mutate()
 
       expect(client.getMutationCache().getAll().length).toBe(1)
 
       fixture.destroy()
 
       expect(client.getMutationCache().getAll().length).toBe(0)
+    })
+
+    it('lets an in-flight mutation finish after the host is destroyed', fakeAsync(() => {
+      const subject = new Subject<number>()
+      const onSuccess = jasmine.createSpy('onSuccess')
+
+      @Component({ template: '' })
+      class Host {
+        readonly m = injectMutation<number, Error, void>(() => ({
+          mutationFn: () => subject,
+          onSuccess,
+        }))
+      }
+
+      const fixture: ComponentFixture<Host> = TestBed.createComponent(Host)
+
+      fixture.detectChanges()
+      fixture.componentInstance.m.mutate()
+      fixture.destroy()
+
+      // The write is probably already on the server; cancelling would skip
+      // onSuccess and leave the cache stale. So it runs to completion.
+      subject.next(7)
+      subject.complete()
+      tick()
+
+      expect(onSuccess).toHaveBeenCalledWith(7, undefined, undefined)
+      // …and cleans itself out of the cache once it's done.
+      expect(client.getMutationCache().getAll().length).toBe(0)
+    }))
+
+    it('replaces settled runs in the cache rather than piling them up', () => {
+      const m = setup(() => ({ mutationFn: () => of(1) }))
+
+      m.mutate()
+      m.mutate()
+      m.mutate()
+
+      expect(client.getMutationCache().getAll().length).toBe(1)
+    })
+  })
+
+  describe('concurrent calls', () => {
+    it('keeps the latest call as the result, even if an earlier one lands later', fakeAsync(() => {
+      const slow = new Subject<string>()
+      const fast = new Subject<string>()
+      const sources = [slow, fast]
+
+      const m = setup(() => ({
+        mutationFn: (variables: string) =>
+          sources[variables === 'slow' ? 0 : 1],
+      }))
+
+      m.mutate('slow')
+      m.mutate('fast')
+
+      // The later call is the one being tracked.
+      expect(m.variables()).toBe('fast')
+
+      fast.next('fast result')
+      fast.complete()
+      tick()
+
+      expect(m.data()).toBe('fast result')
+
+      // The superseded run finishes afterwards. It must not hijack the state.
+      slow.next('slow result')
+      slow.complete()
+      tick()
+
+      expect(m.data()).toBe('fast result')
+      expect(m.variables()).toBe('fast')
+    }))
+
+    it('does not cancel the earlier call, and still runs its hooks', fakeAsync(() => {
+      const slow = new Subject<string>()
+      const fast = new Subject<string>()
+      const sources = [slow, fast]
+      const onSuccess = jasmine.createSpy('onSuccess')
+
+      const m = setup(() => ({
+        mutationFn: (variables: string) =>
+          sources[variables === 'slow' ? 0 : 1],
+        onSuccess,
+      }))
+
+      m.mutate('slow')
+      m.mutate('fast')
+
+      fast.next('fast result')
+      fast.complete()
+      slow.next('slow result')
+      slow.complete()
+      tick()
+
+      // Both writes happened, so both get their side effects.
+      expect(onSuccess).toHaveBeenCalledTimes(2)
+      expect(onSuccess).toHaveBeenCalledWith('fast result', 'fast', undefined)
+      expect(onSuccess).toHaveBeenCalledWith('slow result', 'slow', undefined)
+    }))
+  })
+
+  describe('options', () => {
+    it('re-reads the options on every mutate()', () => {
+      const first = jasmine.createSpy('first').and.returnValue(of(1))
+      const second = jasmine.createSpy('second').and.returnValue(of(2))
+      let currentFn = first
+
+      const m = setup<number, Error, void>(() => ({
+        mutationFn: () => currentFn(),
+      }))
+
+      m.mutate()
+
+      expect(first).toHaveBeenCalledTimes(1)
+
+      currentFn = second
+      m.mutate()
+
+      expect(second).toHaveBeenCalledTimes(1)
+      expect(m.data()).toBe(2)
     })
   })
 
