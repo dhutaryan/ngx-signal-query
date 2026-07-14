@@ -72,8 +72,10 @@ export function injectQuery<TData, TError = Error>(
     )
 
     // Seed a fresh query (status 'pending', no data yet) with initialData so
-    // it renders immediately as 'success'. updatedAt defaults to 0 → stale →
-    // background refetch.
+    // it renders immediately as 'success'. Without an explicit
+    // initialDataUpdatedAt the seed is treated as fetched right now, so
+    // staleTime applies to it as it would to any other data (a staleTime of 0
+    // still means "stale immediately" → background refetch).
     const applyInitialData = (q: Query<TData, TError>): void => {
       const { initialData, initialDataUpdatedAt } = untracked(defaultedOptions)
 
@@ -86,7 +88,7 @@ export function injectQuery<TData, TError = Error>(
       const updatedAt =
         typeof initialDataUpdatedAt === 'function'
           ? initialDataUpdatedAt()
-          : (initialDataUpdatedAt ?? 0)
+          : (initialDataUpdatedAt ?? Date.now())
 
       q.setData(data, updatedAt)
     }

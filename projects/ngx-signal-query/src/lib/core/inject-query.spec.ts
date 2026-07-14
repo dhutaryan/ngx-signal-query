@@ -292,7 +292,8 @@ describe('injectQuery', () => {
         initialData: 'init',
       }))
 
-      // updatedAt defaults to 0 → stale → background refetch, but data shows.
+      // staleTime defaults to 0 → the seed is stale at once → background
+      // refetch, but the seeded data is shown meanwhile.
       expect(result.isSuccess()).toBe(true)
       expect(result.data()).toBe('init')
       expect(result.isFetching()).toBe(true)
@@ -304,6 +305,38 @@ describe('injectQuery', () => {
 
       expect(result.data()).toBe('fresh')
     }))
+
+    it('honours staleTime for the seed (no refetch while fresh)', () => {
+      const queryFn = jasmine
+        .createSpy('queryFn')
+        .and.returnValue(of('fetched'))
+      const { result } = mount(() => ({
+        queryKey: ['id3'],
+        queryFn,
+        initialData: 'init',
+        staleTime: 60_000,
+      }))
+
+      // The seed is stamped with the current time, so staleTime applies to it.
+      expect(result.data()).toBe('init')
+      expect(queryFn).not.toHaveBeenCalled()
+    })
+
+    it('refetches when initialDataUpdatedAt says the seed is old', () => {
+      const queryFn = jasmine
+        .createSpy('queryFn')
+        .and.returnValue(of('fetched'))
+      const { result } = mount(() => ({
+        queryKey: ['id4'],
+        queryFn,
+        initialData: 'init',
+        initialDataUpdatedAt: Date.now() - 120_000, // two minutes ago
+        staleTime: 60_000,
+      }))
+
+      expect(queryFn).toHaveBeenCalledTimes(1)
+      expect(result.data()).toBe('fetched')
+    })
   })
 
   describe('refetchInterval (polling)', () => {
