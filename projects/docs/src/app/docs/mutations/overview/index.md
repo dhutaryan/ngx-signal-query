@@ -163,17 +163,18 @@ options, next to `mutationFn`.
 `onSettled` — the return value is ignored. If you need something to happen after
 an async step, do the awaiting inside the hook itself.
 
-**Calls aren't serialized.** Nothing stops two `mutate()` calls from running at
-the same time, and they can finish out of order — whichever lands last wins, and
-that may not be the one you fired last. There's no `scope` option to queue them.
-Guard the trigger yourself:
+**Calls aren't serialized.** Each `mutate()` is its own independent run, so two
+of them can be in flight at once and there's no `scope` option to queue them.
+The signals always track the **latest** call — an earlier run landing later
+won't hijack `data()` — but both writes do reach the server, and both fire their
+hooks. If the operation isn't safe to run twice, guard the trigger:
 
 ```html
 <button (click)="add(title())" [disabled]="addTodo.isPending()">Add</button>
 ```
 
-**Options are read once.** Unlike query options, which are reactive, a
-mutation's options are captured when `injectMutation` runs. A signal read
-directly in the options (say, `retry: this.retries()`) won't update later.
-Reading signals *inside* `mutationFn` or the hooks is fine — those run at call
-time.
+**Destroying the component doesn't cancel the write.** A mutation that's already
+in flight runs to completion, and its `onSuccess` / `onError` / `onSettled` still
+fire. That's deliberate: the request has most likely reached the server already,
+so aborting it would only skip the cache update and leave the UI showing stale
+data for a write that actually happened.

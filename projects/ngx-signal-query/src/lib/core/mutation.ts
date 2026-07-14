@@ -10,6 +10,7 @@ import {
   type Subscription,
 } from 'rxjs'
 
+import type { MutationCache } from './mutation-cache'
 import { defaultRetryDelay, resolveRetryDelay, shouldRetry } from './retryer'
 import type { RetryDelayValue, RetryValue } from './types'
 
@@ -106,12 +107,12 @@ export type MutationResult<TData, TError, TVariables> = {
   failureReason: Signal<TError | null>
 }
 
-function getInitialState<TData, TError, TVariables, TContext>(): MutationState<
+export function getInitialState<
   TData,
   TError,
   TVariables,
-  TContext
-> {
+  TContext,
+>(): MutationState<TData, TError, TVariables, TContext> {
   return {
     status: 'idle',
     data: undefined,
@@ -141,15 +142,42 @@ export class Mutation<
   readonly state = this.#state.asReadonly()
 
   #subscription: Subscription | null = null
+  #observers = 0
   readonly #options: MutationOptions<TData, TError, TVariables, TContext>
+  readonly #cache: MutationCache
 
   constructor(
     readonly mutationId: number,
     options: MutationOptions<TData, TError, TVariables, TContext>,
+    cache: MutationCache,
   ) {
     this.#options = options
+    this.#cache = cache
   }
 
+  get observerCount(): number {
+    return this.#observers
+  }
+
+  addObserver(): void {
+    this.#observers++
+  }
+
+  /**
+   * Unlike a query, losing its last observer does not cancel a mutation: the
+   * write has most likely reached the server already, so it must be allowed to
+   * land and run its hooks. It is only dropped from the cache once it has both
+   * settled and been abandoned — whichever of the two happens last.
+   */
+  removeObserver(): void {
+    if (this.#observers === 0) return
+
+    this.#observers--
+
+    this.#disposeIfDone()
+  }
+
+  /** Runs the mutation once. `variables` are passed straight to `mutationFn`. */
   execute(variables: TVariables): void {
     const context = this.#options.onMutate?.(variables)
     // Mutations default to no retry (not idempotent — a retried POST could
@@ -196,15 +224,27 @@ export class Mutation<
         ),
       )
       .subscribe({
+        // `finally`: a hook that throws must not leave the mutation stranded in
+        // the cache (where injectIsMutating would keep counting it forever).
         next: (data) => {
           this.#state.update((state) => ({ ...state, status: 'success', data }))
-          this.#options.onSuccess?.(data, variables, context)
-          this.#options.onSettled?.(data, null, variables, context)
+
+          try {
+            this.#options.onSuccess?.(data, variables, context)
+            this.#options.onSettled?.(data, null, variables, context)
+          } finally {
+            this.#disposeIfDone()
+          }
         },
         error: (error: TError) => {
           this.#state.update((state) => ({ ...state, status: 'error', error }))
-          this.#options.onError?.(error, variables, context)
-          this.#options.onSettled?.(undefined, error, variables, context)
+
+          try {
+            this.#options.onError?.(error, variables, context)
+            this.#options.onSettled?.(undefined, error, variables, context)
+          } finally {
+            this.#disposeIfDone()
+          }
         },
       })
   }
@@ -217,5 +257,18 @@ export class Mutation<
   cancel(): void {
     this.#subscription?.unsubscribe()
     this.#subscription = null
+  }
+
+  /**
+   * A run nobody observes any more, and which is no longer in flight, has
+   * nothing left to report — drop it. Called from both ends, since the two
+   * conditions can be met in either order: a superseded run may settle later,
+   * and a settled run may be abandoned later.
+   */
+  #disposeIfDone(): void {
+    if (this.#observers > 0) return
+    if (this.state().status === 'pending') return
+
+    this.#cache.remove(this)
   }
 }

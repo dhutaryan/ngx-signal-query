@@ -16,7 +16,7 @@ export class MutationCache extends Cache<
   build<TData, TError, TVariables, TContext>(
     options: MutationOptions<TData, TError, TVariables, TContext>,
   ): Mutation<TData, TError, TVariables, TContext> {
-    const mutation = new Mutation(++this.#lastId, options)
+    const mutation = new Mutation(++this.#lastId, options, this)
 
     this.addEntry(
       String(mutation.mutationId),

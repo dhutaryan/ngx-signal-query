@@ -5,10 +5,17 @@ import {
   inject,
   Injector,
   runInInjectionContext,
+  signal,
+  untracked,
 } from '@angular/core'
 
 import { QueryClient } from './query-client'
-import type { MutationOptions, MutationResult } from './mutation'
+import {
+  type Mutation,
+  type MutationOptions,
+  type MutationResult,
+  getInitialState,
+} from './mutation'
 
 /**
  * Creates a mutation for imperative writes (create/update/delete) and exposes
@@ -59,28 +66,65 @@ export function injectMutation<
 
   return runInInjectionContext(injector, () => {
     const cache = inject(QueryClient).getMutationCache()
-    const mutation = cache.build(optionsFn())
 
-    inject(DestroyRef).onDestroy(() => {
-      mutation.cancel()
-      cache.remove(mutation)
-    })
+    // Every mutate() builds its own Mutation. Sharing one across calls meant a
+    // second call overwrote the first's subscription (orphaning the request)
+    // and its state (so the slower run, not the latest one, decided the result).
+    const current = signal<Mutation<
+      TData,
+      TError,
+      TVariables,
+      TContext
+    > | null>(null)
+
+    // Detaching is all we do on destroy. A run still in flight keeps going —
+    // the write has most likely reached the server already, so cancelling it
+    // would only skip onSuccess and leave the cache out of sync. It drops
+    // itself from the cache once it settles with nobody watching.
+    inject(DestroyRef).onDestroy(() => untracked(current)?.removeObserver())
+
+    const state = computed(
+      () =>
+        current()?.state() ??
+        getInitialState<TData, TError, TVariables, TContext>(),
+    )
 
     return {
-      mutate: (variables) => mutation.execute(variables),
-      reset: () => mutation.reset(),
-      data: computed(() => mutation.state().data),
-      error: computed(() => mutation.state().error as TError | null),
-      variables: computed(() => mutation.state().variables),
-      status: computed(() => mutation.state().status),
-      isIdle: computed(() => mutation.state().status === 'idle'),
-      isPending: computed(() => mutation.state().status === 'pending'),
-      isSuccess: computed(() => mutation.state().status === 'success'),
-      isError: computed(() => mutation.state().status === 'error'),
-      failureCount: computed(() => mutation.state().failureCount),
-      failureReason: computed(
-        () => mutation.state().failureReason as TError | null,
-      ),
+      mutate: (variables) => {
+        // Stop observing the previous run. It isn't cancelled — if it's still
+        // in flight it finishes and fires its hooks; it just no longer feeds
+        // the signals below.
+        untracked(current)?.removeObserver()
+
+        // Options are read per call, so a signal used in them stays live.
+        const run = cache.build(optionsFn())
+
+        run.addObserver()
+        current.set(run)
+        run.execute(variables)
+      },
+      reset: () => {
+        const run = untracked(current)
+
+        // Unlike destroy, reset() is an explicit "stop this" — it aborts the
+        // run, so its hooks never fire.
+        if (run) {
+          run.reset()
+          run.removeObserver()
+        }
+
+        current.set(null)
+      },
+      data: computed(() => state().data),
+      error: computed(() => state().error as TError | null),
+      variables: computed(() => state().variables),
+      status: computed(() => state().status),
+      isIdle: computed(() => state().status === 'idle'),
+      isPending: computed(() => state().status === 'pending'),
+      isSuccess: computed(() => state().status === 'success'),
+      isError: computed(() => state().status === 'error'),
+      failureCount: computed(() => state().failureCount),
+      failureReason: computed(() => state().failureReason as TError | null),
     }
   })
 }

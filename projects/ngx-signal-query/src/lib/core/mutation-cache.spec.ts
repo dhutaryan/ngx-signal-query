@@ -39,6 +39,11 @@ describe('MutationCache', () => {
         mutationFn: () => new Subject<number>(),
       })
 
+      // injectMutation always observes a run before executing it; an unobserved
+      // one drops itself from the cache the moment it settles.
+      settled.addObserver()
+      pending.addObserver()
+
       settled.execute() // of() resolves synchronously -> success
       pending.execute() // Subject stays open -> pending
 
