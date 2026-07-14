@@ -124,7 +124,7 @@ describe('injectMutation', () => {
       expect(m.error()).toBeNull()
     })
 
-    it('cancels an in-flight mutation without firing callbacks', fakeAsync(() => {
+    it('forgets an in-flight mutation without cancelling it', fakeAsync(() => {
       const subject = new Subject<number>()
       const onSuccess = jasmine.createSpy('onSuccess')
       const m = setup<number, Error, number>(() => ({
@@ -138,13 +138,20 @@ describe('injectMutation', () => {
       m.reset()
       expect(m.isIdle()).toBe(true)
 
-      // Late emission from the cancelled mutation must be ignored.
       subject.next(1)
       subject.complete()
       tick()
 
-      expect(onSuccess).not.toHaveBeenCalled()
+      // The write can't be un-sent, so it runs to completion and its hooks fire
+      // — otherwise the cache would never learn about a write that succeeded.
+      expect(onSuccess).toHaveBeenCalledWith(1, 1, undefined)
+
+      // The result is still forgotten: the signals stay idle.
       expect(m.isIdle()).toBe(true)
+      expect(m.data()).toBeUndefined()
+
+      // …and the abandoned run cleans itself out of the cache.
+      expect(client.getMutationCache().getAll().length).toBe(0)
     }))
   })
 

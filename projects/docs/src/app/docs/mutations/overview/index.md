@@ -93,6 +93,13 @@ back to `'idle'`, clearing `data()` and `error()`:
 Useful for clearing an error banner, or resetting a form after a successful
 save.
 
+`reset()` means *"forget the result"*, not *"stop the request"*. If a mutation
+is still in flight when you call it, the signals go back to `'idle'` but the
+write itself carries on and its hooks still fire. That's deliberate — the
+request has probably reached the server already, and aborting it wouldn't
+un-send the write, it would only stop the cache from finding out that it
+happened.
+
 ## Side effects
 
 This is where mutations earn their keep. Four hooks fire in a fixed order:
