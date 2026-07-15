@@ -1,0 +1,40 @@
+<svg width="256" height="256" viewBox="0 0 256 256" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="ngx-signal-query">
+  <defs>
+    <linearGradient id="ng" gradientUnits="userSpaceOnUse" x1="40" y1="128" x2="216" y2="128">
+      <stop offset="0" stop-color="#fa2c05"/>
+      <stop offset="0.5" stop-color="#f637e3"/>
+      <stop offset="1" stop-color="#8514f5"/>
+    </linearGradient>
+  </defs>
+
+  <g stroke="url(#ng)" fill="url(#ng)">
+    <!-- pulse: ripples emanating from the source -->
+    <g fill="none" stroke-width="3.5">
+      <circle cx="128" cy="128" r="46" opacity="0.45"/>
+      <circle cx="128" cy="128" r="66" opacity="0.25"/>
+    </g>
+
+    <!-- spokes: source of truth -> subscribers -->
+    <g stroke-width="13" stroke-linecap="round" fill="none">
+      <line x1="128" y1="128" x2="208" y2="128"/>
+      <line x1="128" y1="128" x2="168" y2="197.3"/>
+      <line x1="128" y1="128" x2="88" y2="197.3"/>
+      <line x1="128" y1="128" x2="48" y2="128"/>
+      <line x1="128" y1="128" x2="88" y2="58.7"/>
+      <line x1="128" y1="128" x2="168" y2="58.7"/>
+    </g>
+
+    <!-- subscriber nodes -->
+    <g stroke="none">
+      <circle cx="208" cy="128" r="11"/>
+      <circle cx="168" cy="197.3" r="11"/>
+      <circle cx="88" cy="197.3" r="11"/>
+      <circle cx="48" cy="128" r="11"/>
+      <circle cx="88" cy="58.7" r="11"/>
+      <circle cx="168" cy="58.7" r="11"/>
+    </g>
+
+    <!-- central node: the cached source of truth -->
+    <circle cx="128" cy="128" r="25" stroke="none"/>
+  </g>
+</svg>

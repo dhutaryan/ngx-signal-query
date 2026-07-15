@@ -1,5 +1,5 @@
 import { Component, inject } from '@angular/core'
-import { RouterOutlet } from '@angular/router'
+import { RouterLink, RouterOutlet } from '@angular/router'
 import {
   NgDocNavbarComponent,
   NgDocRootComponent,
@@ -12,6 +12,7 @@ import { NgDocButtonIconComponent, NgDocTooltipDirective } from '@ng-doc/ui-kit'
 @Component({
   selector: 'app-root',
   imports: [
+    RouterLink,
     RouterOutlet,
     NgDocRootComponent,
     NgDocNavbarComponent,
@@ -23,7 +24,10 @@ import { NgDocButtonIconComponent, NgDocTooltipDirective } from '@ng-doc/ui-kit'
   template: `
     <ng-doc-root>
       <ng-doc-navbar [search]="false">
-        <h3 class="brand" style="margin: 0" ngDocNavbarLeft>ngx-signal-query</h3>
+        <a class="brand" routerLink="/" ngDocNavbarLeft>
+          <img class="brand-logo" src="logo.svg" alt="" />
+          <h3 class="brand-name">ngx-signal-query</h3>
+        </a>
 
         <div class="navbar-right" ngDocNavbarRight>
           <ng-doc-theme-toggle />
@@ -51,6 +55,25 @@ import { NgDocButtonIconComponent, NgDocTooltipDirective } from '@ng-doc/ui-kit'
   `,
   styles: [
     `
+      .brand {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        text-decoration: none;
+        color: inherit;
+      }
+
+      .brand-logo {
+        display: block;
+        width: 28px;
+        height: 28px;
+      }
+
+      .brand-name {
+        margin: 0;
+        font-size: 1.1rem;
+      }
+
       .navbar-right {
         display: flex;
         align-items: center;
