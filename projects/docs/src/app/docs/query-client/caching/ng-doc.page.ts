@@ -2,11 +2,11 @@ import { type NgDocPage } from '@ng-doc/core'
 
 import QueryClient from '../ng-doc.category'
 
-const FiltersPage: NgDocPage = {
-  title: 'Filters',
+const CachingPage: NgDocPage = {
+  title: 'Caching',
   mdFile: './index.md',
   category: QueryClient,
-  order: 4,
+  order: 2,
 }
 
-export default FiltersPage
+export default CachingPage

@@ -6,7 +6,7 @@ const QueryInvalidationPage: NgDocPage = {
   title: 'Query Invalidation',
   mdFile: './index.md',
   category: QueryClient,
-  order: 2,
+  order: 3,
 }
 
 export default QueryInvalidationPage
