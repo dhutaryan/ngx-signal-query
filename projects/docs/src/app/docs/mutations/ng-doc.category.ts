@@ -6,7 +6,7 @@ const Mutations: NgDocCategory = {
   title: 'Mutations',
   order: 4,
   expandable: true,
-  expanded: true,
+  expanded: false,
 }
 
 export default Mutations

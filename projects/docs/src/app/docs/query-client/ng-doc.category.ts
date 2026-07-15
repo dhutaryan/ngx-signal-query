@@ -6,7 +6,7 @@ const QueryClient: NgDocCategory = {
   title: 'Query Client',
   order: 5,
   expandable: true,
-  expanded: true,
+  expanded: false,
 }
 
 export default QueryClient

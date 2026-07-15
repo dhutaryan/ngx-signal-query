@@ -4,7 +4,7 @@ const Queries: NgDocCategory = {
   title: 'Queries',
   order: 3,
   expandable: true,
-  expanded: true,
+  expanded: false,
 }
 
 export default Queries
