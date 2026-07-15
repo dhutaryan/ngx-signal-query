@@ -34,7 +34,7 @@ everywhere else.
 
 | Method | Purpose |
 | --- | --- |
-| `invalidateQueries(filters?)` | Mark queries stale so they refetch. |
+| `invalidateQueries(filters?)` | Mark queries stale so they refetch. See [Query Invalidation](/query-client/query-invalidation). |
 | `getQueryData(key)` | Read a cached value synchronously. |
 | `setQueryData(key, updater)` | Write to the cache by hand. |
 | `cancelQueries(filters?)` | Cancel in-flight fetches. |
