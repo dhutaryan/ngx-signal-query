@@ -49,31 +49,20 @@ object doesn't matter but array order does — see [Query Keys](/queries/query-k
 So the same `{ queryKey: ['todos'] }` can invalidate the todo family, or count
 just the todo requests in flight — one filter, many uses.
 
-## Mutation filters
+## Mutations aren't filtered
 
-Mutations are filtered differently — they have no key, so there's nothing to
-match by prefix. The only field is `status`:
+Queries are the only thing you filter. Mutations have no key, so there's nothing
+to match by prefix — and the one place you might expect a mutation filter,
+[`injectIsMutating`](/query-client/global-indicators), doesn't take one. It
+always counts mutations in the `'pending'` state, which is the only question a
+global "saving…" indicator asks.
 
-```ts
-type MutationFilters = {
-  status?: MutationStatus // 'idle' | 'pending' | 'success' | 'error'
-}
-```
-
-It's used by `injectIsMutating`, which counts mutations by status:
-
-```ts
-// How many writes are currently in flight
-readonly saving = injectIsMutating({ status: 'pending' })
-```
-
-Omit the filter and you get the count across every status.
+(There is a `MutationFilters` type with a `status` field, but no public API
+accepts it — it's used internally.)
 
 ## A note if you're coming from TanStack Query
 
-Filters here are deliberately small. TanStack lets you match queries by
-`predicate`, by active/inactive status, by staleness, by fetch status; and
-mutations by `mutationKey` and `predicate`. None of that exists here — query
-filters are `queryKey` + `exact`, mutation filters are `status`. If you need to
-select a subset that these can't express, structure your **keys** so a prefix
-covers it instead.
+Query filters here are deliberately small. TanStack lets you match by
+`predicate`, by active/inactive status, by staleness, by fetch status. None of
+that exists — filters are `queryKey` + `exact`. If you need to select a subset
+those can't express, structure your **keys** so a prefix covers it instead.
