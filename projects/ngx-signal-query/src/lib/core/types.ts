@@ -90,7 +90,11 @@ export type QueryOptions<TData, TError = Error> = {
   enabled?: boolean
 }
 
-/** {@link QueryOptions} with defaults resolved (internal, set by {@link QueryClient}). */
+/**
+ * {@link QueryOptions} with defaults resolved (internal, set by {@link QueryClient}).
+ *
+ * @internal
+ */
 export type DefaultedQueryOptions<TData, TError = Error> = QueryOptions<
   TData,
   TError

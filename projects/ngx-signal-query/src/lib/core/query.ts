@@ -16,6 +16,7 @@ import type { QueryKey, QueryState, RetryDelayValue, RetryValue } from './types'
 
 const DEFAULT_GC_TIME = 5 * 60 * 1000
 
+/** @internal */
 export class Query<TData, TError = Error> {
   readonly #state = signal<QueryState<TData, TError>>({
     data: undefined,

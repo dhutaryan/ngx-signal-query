@@ -1,6 +1,10 @@
 import type { Provider } from '@angular/core'
 
-/** Discriminator identifying each kind of {@link QueryClientFeature}. */
+/**
+ * Discriminator identifying each kind of {@link QueryClientFeature}.
+ *
+ * @internal
+ */
 export enum QueryClientFeatureKind {
   DefaultOptions,
 }
@@ -17,6 +21,7 @@ export interface QueryClientFeature<
   ɵproviders: Provider[]
 }
 
+/** @internal */
 export function queryClientFeature<K extends QueryClientFeatureKind>(
   kind: K,
   providers: Provider[],

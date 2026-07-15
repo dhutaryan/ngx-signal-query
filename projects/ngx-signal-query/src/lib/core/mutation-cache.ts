@@ -7,6 +7,7 @@ import {
   Mutation,
 } from './mutation'
 
+/** @internal */
 @Injectable()
 export class MutationCache extends Cache<
   Mutation<unknown, unknown, unknown, unknown>

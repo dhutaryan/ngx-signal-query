@@ -2,6 +2,7 @@ import type { QueryKey, Updater } from './types'
 
 // Resolves an updater: calls it with the previous value if it's a function,
 // otherwise uses it as the value directly.
+/** @internal */
 export function functionalUpdate<TInput, TOutput>(
   updater: Updater<TInput, TOutput>,
   input: TInput,
@@ -13,6 +14,7 @@ export function functionalUpdate<TInput, TOutput>(
 
 // True when `filter` is a (deep) prefix of `key`, e.g. ['app'] matches
 // ['app', 1]. Used to invalidate/find groups of queries by partial key.
+/** @internal */
 export function partialMatchKey(key: QueryKey, filter: QueryKey): boolean {
   return partialDeepEqual(key, filter)
 }
@@ -33,6 +35,7 @@ function partialDeepEqual(a: unknown, b: unknown): boolean {
   return false
 }
 
+/** @internal */
 export function hashKey(key: QueryKey): string {
   return JSON.stringify(key, (_, value) =>
     isPlainObject(value)
@@ -48,6 +51,7 @@ export function hashKey(key: QueryKey): string {
 }
 
 // Copied from: https://github.com/jonschlinkert/is-plain-object
+/** @internal */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export function isPlainObject(o: any): o is Record<PropertyKey, unknown> {
   if (!hasObjectPrototype(o)) {

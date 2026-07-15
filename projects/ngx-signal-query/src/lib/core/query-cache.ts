@@ -5,6 +5,7 @@ import { hashKey, partialMatchKey } from './utils'
 import { Query } from './query'
 import type { QueryFilters, QueryKey } from './types'
 
+/** @internal */
 @Injectable()
 export class QueryCache extends Cache<Query<unknown, unknown>> {
   getOrCreate<TData, TError = Error>(key: QueryKey): Query<TData, TError> {

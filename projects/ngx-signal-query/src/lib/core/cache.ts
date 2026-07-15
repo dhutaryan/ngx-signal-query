@@ -1,5 +1,6 @@
 import { signal } from '@angular/core'
 
+/** @internal */
 export abstract class Cache<TEntry> {
   readonly #entries = signal<TEntry[]>([])
 

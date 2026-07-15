@@ -107,6 +107,7 @@ export type MutationResult<TData, TError, TVariables> = {
   failureReason: Signal<TError | null>
 }
 
+/** @internal */
 export function getInitialState<
   TData,
   TError,
@@ -125,6 +126,7 @@ export function getInitialState<
   }
 }
 
+/** @internal */
 export class Mutation<
   TData = unknown,
   TError = Error,
