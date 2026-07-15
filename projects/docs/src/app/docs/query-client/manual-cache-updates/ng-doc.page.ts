@@ -6,7 +6,7 @@ const ManualCacheUpdatesPage: NgDocPage = {
   title: 'Manual Cache Updates',
   mdFile: './index.md',
   category: QueryClient,
-  order: 5,
+  order: 6,
 }
 
 export default ManualCacheUpdatesPage

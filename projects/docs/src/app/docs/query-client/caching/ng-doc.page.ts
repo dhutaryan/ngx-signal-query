@@ -6,7 +6,7 @@ const CachingPage: NgDocPage = {
   title: 'Caching',
   mdFile: './index.md',
   category: QueryClient,
-  order: 2,
+  order: 3,
 }
 
 export default CachingPage

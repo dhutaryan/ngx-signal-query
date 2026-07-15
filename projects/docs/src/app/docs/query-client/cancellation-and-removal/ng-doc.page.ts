@@ -6,7 +6,7 @@ const CancellationAndRemovalPage: NgDocPage = {
   title: 'Cancellation & Removal',
   mdFile: './index.md',
   category: QueryClient,
-  order: 6,
+  order: 7,
 }
 
 export default CancellationAndRemovalPage

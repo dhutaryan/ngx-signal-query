@@ -6,7 +6,7 @@ const GlobalIndicatorsPage: NgDocPage = {
   title: 'Global Indicators',
   mdFile: './index.md',
   category: QueryClient,
-  order: 7,
+  order: 8,
 }
 
 export default GlobalIndicatorsPage
