@@ -11,7 +11,12 @@ import {
 
 import { QueryClient } from './query-client'
 import type { Query } from './query'
-import type { QueryOptions, QueryResult } from './types'
+import type {
+  PlaceholderDataFunction,
+  QueryOptions,
+  QueryResult,
+  QueryStatus,
+} from './types'
 
 /**
  * Runs a cached, reactive query and exposes its state as signals.
@@ -104,11 +109,24 @@ export function injectQuery<TData, TError = Error>(
 
     const query = signal(seed)
 
+    // Data of the last query that had any, fed to the placeholderData function
+    // on key change (mirrors TanStack's lastQueryWithDefinedData). Captured
+    // synchronously before the switch so it can't miss a just-resolved value.
+    const lastData = signal<TData | undefined>(undefined)
+
     effect(() => {
       const key = defaultedOptions().queryKey
       const q = untracked(() => cache.getOrCreate<TData, TError>(key))
 
-      untracked(() => applyInitialData(q))
+      untracked(() => {
+        const prev = query()
+
+        if (prev !== q && prev.state().data !== undefined) {
+          lastData.set(prev.state().data)
+        }
+
+        applyInitialData(q)
+      })
       query.set(q)
     })
 
@@ -176,20 +194,50 @@ export function injectQuery<TData, TError = Error>(
       onCleanup(() => clearInterval(id))
     })
 
+    // Placeholder layer: while the query is pending with no data, present
+    // placeholderData as already-successful data. Purely presentational — the
+    // cache entry stays 'pending' and the fetch proceeds, so isFetching keeps
+    // reporting the real request and the placeholder is dropped on resolve.
+    const resolved = computed<{
+      data: TData | undefined
+      status: QueryStatus
+      isPlaceholderData: boolean
+    }>(() => {
+      const state = query().state()
+      const { placeholderData } = defaultedOptions()
+
+      if (
+        placeholderData !== undefined &&
+        state.data === undefined &&
+        state.status === 'pending'
+      ) {
+        const data =
+          typeof placeholderData === 'function'
+            ? (placeholderData as PlaceholderDataFunction<TData>)(lastData())
+            : placeholderData
+
+        if (data !== undefined) {
+          return { data, status: 'success', isPlaceholderData: true }
+        }
+      }
+
+      return { data: state.data, status: state.status, isPlaceholderData: false }
+    })
+
     return {
-      data: computed(() => query().state().data),
-      status: computed(() => query().state().status),
+      data: computed(() => resolved().data),
+      status: computed(() => resolved().status),
       error: computed(() => query().state().error as TError | null),
       isFetching: computed(() => query().state().isFetching),
-      // First fetch in-flight: fetching with no resolved data yet.
-      isLoading: computed(() => {
-        const state = query().state()
-
-        return state.isFetching && state.status === 'pending'
-      }),
-      isPending: computed(() => query().state().status === 'pending'),
-      isSuccess: computed(() => query().state().status === 'success'),
-      isError: computed(() => query().state().status === 'error'),
+      // First fetch in-flight: fetching with no resolved data yet. An active
+      // placeholder counts as data — the UI shows it, not a loading state.
+      isLoading: computed(
+        () => query().state().isFetching && resolved().status === 'pending',
+      ),
+      isPending: computed(() => resolved().status === 'pending'),
+      isSuccess: computed(() => resolved().status === 'success'),
+      isError: computed(() => resolved().status === 'error'),
+      isPlaceholderData: computed(() => resolved().isPlaceholderData),
       failureCount: computed(() => query().state().failureCount),
       failureReason: computed(
         () => query().state().failureReason as TError | null,
