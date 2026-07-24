@@ -11,6 +11,7 @@ export * from './lib/core/inject-mutation'
 export * from './lib/core/inject-is-fetching'
 export * from './lib/core/inject-is-mutating'
 export * from './lib/core/query-options'
+export * from './lib/core/keep-previous-data'
 export * from './lib/core/mutation-options'
 export type {
   MutationFilters,

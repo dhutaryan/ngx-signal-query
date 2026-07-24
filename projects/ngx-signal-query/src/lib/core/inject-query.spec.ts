@@ -9,6 +9,7 @@ import {
 import { of, Subject, throwError } from 'rxjs'
 
 import { injectQuery } from './inject-query'
+import { keepPreviousData } from './keep-previous-data'
 import { provideQueryClient } from './provider'
 import { QueryClient } from './query-client'
 import type { QueryOptions, QueryResult } from './types'
@@ -336,6 +337,152 @@ describe('injectQuery', () => {
 
       expect(queryFn).toHaveBeenCalledTimes(1)
       expect(result.data()).toBe('fetched')
+    })
+  })
+
+  describe('placeholderData', () => {
+    it('shows placeholder as success while pending, then real data', fakeAsync(() => {
+      const subject = new Subject<string>()
+      const { result } = mount(() => ({
+        queryKey: ['ph'],
+        queryFn: () => subject,
+        placeholderData: 'placeholder',
+      }))
+
+      expect(result.status()).toBe('success')
+      expect(result.data()).toBe('placeholder')
+      expect(result.isPlaceholderData()).toBe(true)
+      expect(result.isPending()).toBe(false)
+      // The real fetch is still in flight; only the loading flag is masked.
+      expect(result.isFetching()).toBe(true)
+      expect(result.isLoading()).toBe(false)
+
+      subject.next('real')
+      subject.complete()
+      tick()
+
+      expect(result.data()).toBe('real')
+      expect(result.isPlaceholderData()).toBe(false)
+    }))
+
+    it('does not write the placeholder to the cache', () => {
+      mount(() => ({
+        queryKey: ['ph-cache'],
+        queryFn: () => new Subject<string>(),
+        placeholderData: 'placeholder',
+      }))
+
+      expect(client.getQueryData(['ph-cache'])).toBeUndefined()
+    })
+
+    it('keepPreviousData keeps the old page while the next one loads', fakeAsync(() => {
+      const page = signal(1)
+      const subjects = new Map<number, Subject<string>>()
+      const queryFn = jasmine.createSpy('queryFn').and.callFake(() => {
+        const subject = new Subject<string>()
+
+        subjects.set(page(), subject)
+
+        return subject
+      })
+
+      const { fixture, result } = mount(() => ({
+        queryKey: ['todos', page()],
+        queryFn,
+        placeholderData: keepPreviousData,
+      }))
+
+      subjects.get(1)!.next('page1')
+      subjects.get(1)!.complete()
+      tick()
+
+      expect(result.data()).toBe('page1')
+
+      page.set(2)
+      fixture.detectChanges()
+
+      // Page 2 is pending, but page 1 stays visible as placeholder.
+      expect(result.data()).toBe('page1')
+      expect(result.isPlaceholderData()).toBe(true)
+      expect(result.isPending()).toBe(false)
+      expect(result.isFetching()).toBe(true)
+
+      subjects.get(2)!.next('page2')
+      subjects.get(2)!.complete()
+      tick()
+
+      expect(result.data()).toBe('page2')
+      expect(result.isPlaceholderData()).toBe(false)
+    }))
+
+    it('feeds the latest defined data to the placeholder function across keys', fakeAsync(() => {
+      const page = signal(1)
+      const subjects = new Map<number, Subject<string>>()
+      const { fixture, result } = mount(() => ({
+        queryKey: ['t', page()],
+        queryFn: () => {
+          const subject = new Subject<string>()
+
+          subjects.set(page(), subject)
+
+          return subject
+        },
+        placeholderData: keepPreviousData,
+      }))
+
+      subjects.get(1)!.next('page1')
+      subjects.get(1)!.complete()
+      tick()
+
+      // Page 2 never resolves; page 3 must still fall back to page 1's data.
+      page.set(2)
+      fixture.detectChanges()
+      page.set(3)
+      fixture.detectChanges()
+
+      expect(result.data()).toBe('page1')
+      expect(result.isPlaceholderData()).toBe(true)
+    }))
+
+    it('stays pending when the placeholder function returns undefined', () => {
+      const { result } = mount(() => ({
+        queryKey: ['ph-undef'],
+        queryFn: () => new Subject<string>(),
+        // No previous data on first load → keepPreviousData yields undefined.
+        placeholderData: keepPreviousData,
+      }))
+
+      expect(result.isPending()).toBe(true)
+      expect(result.isLoading()).toBe(true)
+      expect(result.data()).toBeUndefined()
+      expect(result.isPlaceholderData()).toBe(false)
+    })
+
+    it('is ignored when initialData seeds the cache', () => {
+      const { result } = mount(() => ({
+        queryKey: ['ph-init'],
+        queryFn: () => new Subject<string>(),
+        initialData: 'init',
+        placeholderData: 'placeholder',
+        staleTime: Infinity,
+      }))
+
+      expect(result.data()).toBe('init')
+      expect(result.isPlaceholderData()).toBe(false)
+    })
+
+    it('drops the placeholder when the query errors', () => {
+      const err = new Error('boom')
+      const { result } = mount<string>(() => ({
+        queryKey: ['ph-err'],
+        queryFn: () => throwError(() => err),
+        placeholderData: 'placeholder',
+        retry: false,
+      }))
+
+      expect(result.isError()).toBe(true)
+      expect(result.data()).toBeUndefined()
+      expect(result.isPlaceholderData()).toBe(false)
     })
   })
 

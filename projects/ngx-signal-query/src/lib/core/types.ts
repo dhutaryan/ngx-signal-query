@@ -42,6 +42,14 @@ export type QueryFilters = {
 export type Updater<TInput, TOutput> = TOutput | ((input: TInput) => TOutput)
 
 /**
+ * Computes placeholder data from the previous query's data (e.g. the page
+ * shown before a key change). Return `undefined` to show no placeholder.
+ */
+export type PlaceholderDataFunction<TData> = (
+  previousData: TData | undefined,
+) => TData | undefined
+
+/**
  * Polling interval in ms, `false` to disable, or a function of the current
  * query snapshot returning the next interval (e.g. stop polling on error).
  */
@@ -84,6 +92,13 @@ export type QueryOptions<TData, TError = Error> = {
   refetchInterval?: RefetchIntervalValue<TData, TError>
   /** Seed data to render immediately (treated as already-resolved). */
   initialData?: TData | (() => TData)
+  /**
+   * Data shown while the query is `'pending'` with no data yet, either a value
+   * or a function of the previous query's data (see {@link keepPreviousData}).
+   * Unlike `initialData` it is never written to the cache: the query stays
+   * `'pending'` underneath, and `isPlaceholderData` is `true` while shown.
+   */
+  placeholderData?: TData | PlaceholderDataFunction<TData>
   /** Timestamp (ms) for `initialData`; older data is considered stale. */
   initialDataUpdatedAt?: number | (() => number)
   /** Set `false` to disable fetching (e.g. until a dependency is ready). */
@@ -122,6 +137,8 @@ export type QueryResult<TData, TError = Error> = {
   isSuccess: Signal<boolean>
   /** Whether status is `'error'`. */
   isError: Signal<boolean>
+  /** Whether `data` is placeholder data (see `placeholderData`), not cached data. */
+  isPlaceholderData: Signal<boolean>
   /** Consecutive failures in the current fetch. */
   failureCount: Signal<number>
   /** Error of the most recent failed attempt, or `null`. */
