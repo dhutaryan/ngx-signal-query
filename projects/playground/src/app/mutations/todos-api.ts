@@ -1,10 +1,14 @@
 import { HttpClient } from '@angular/common/http'
 import { Injectable, inject, signal } from '@angular/core'
-import { type Observable, defer, delay, map, of, throwError } from 'rxjs'
+import { type Observable, defer, delay, map, of, throwError, timer } from 'rxjs'
 
+import { Log } from '../core/log/log'
 import type { AddTodoVars, Backend, DummyTodo, Todo } from './todos.types'
 
 const API = 'https://dummyjson.com/todos'
+
+/** dummyjson ships 254 todos; the fake backend mirrors that so a missing id 404s on both. */
+const TOTAL_TODOS = 254
 
 /**
  * Two interchangeable backends behind one interface.
@@ -24,6 +28,7 @@ export class TodosApi {
   readonly shouldFail = signal(false)
 
   readonly #http = inject(HttpClient)
+  readonly #log = inject(Log)
 
   #nextFakeId = 100
   #fakeTodos: Todo[] = [
@@ -39,6 +44,32 @@ export class TodosApi {
     return this.#http
       .get<{ todos: DummyTodo[] }>(`${API}?limit=5&delay=400`)
       .pipe(map(({ todos }) => todos.map(toTodo)))
+  }
+
+  public get(id: number): Observable<Todo> {
+    // Called once per fetch attempt (retries included), so the log is an exact
+    // record of the requests the queries demo fires.
+    this.#log.add(`GET /todos/${id}`, 'query')
+
+    // Latency grows with the id, so a batch visibly resolves item by item.
+    const latency = 400 + (id % 5) * 200
+
+    if (this.backend() === 'fake') {
+      return timer(latency).pipe(
+        map(() => {
+          if (id > TOTAL_TODOS)
+            throw new Error(`Todo with id '${id}' not found`)
+
+          const known = this.#fakeTodos.find((todo) => todo.id === id)
+
+          return known ? { ...known } : { id, title: `Fake todo #${id}` }
+        }),
+      )
+    }
+
+    return this.#http
+      .get<DummyTodo>(`${API}/${id}?delay=${latency}`)
+      .pipe(map(toTodo))
   }
 
   public add({ title, delayMs }: AddTodoVars): Observable<Todo> {

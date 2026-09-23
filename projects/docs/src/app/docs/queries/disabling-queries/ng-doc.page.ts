@@ -6,7 +6,7 @@ const DisablingQueriesPage: NgDocPage = {
   title: 'Disabling Queries',
   mdFile: './index.md',
   category: Queries,
-  order: 6,
+  order: 7,
 }
 
 export default DisablingQueriesPage

@@ -1,13 +1,15 @@
 <header>
-  <h1>ngx-signal-query · mutations playground</h1>
+  <h1>ngx-signal-query · playground</h1>
 
   <div class="toolbar">
     <button (click)="toggleBackend()">
-      backend: <strong>{{ api.backend() }}</strong>
+      backend:
+      <strong>{{ api.backend() }}</strong>
     </button>
 
     <button (click)="toggleFail()" [class.on]="api.shouldFail()">
-      shouldFail: <strong>{{ api.shouldFail() }}</strong>
+      shouldFail:
+      <strong>{{ api.shouldFail() }}</strong>
     </button>
 
     <button (click)="toggleMount()" [class.on]="!mounted()">
@@ -18,16 +20,23 @@
   </div>
 
   <p class="hint">
-    On the <strong>real</strong> backend every call is a genuine HTTP request to
-    dummyjson (latency comes from its <code>?delay=</code> param), so open
-    DevTools → Network to see which requests get <em>canceled</em>. The
-    <strong>fake</strong> backend behaves the same, without the network.
+    On the
+    <strong>real</strong>
+    backend every call is a genuine HTTP request to dummyjson (latency comes
+    from its
+    <code>?delay=</code>
+    param), so open DevTools → Network to see which requests get
+    <em>canceled</em>
+    . The
+    <strong>fake</strong>
+    backend behaves the same, without the network.
   </p>
 </header>
 
 <main>
   @if (mounted()) {
     <app-mutation-demo />
+    <app-queries-demo />
   } @else {
     <section class="panel destroyed">
       <h2>Demo destroyed</h2>
@@ -39,7 +48,10 @@
   }
 
   <section class="panel log">
-    <h2>Log <small>(outlives the demo)</small></h2>
+    <h2>
+      Log
+      <small>(outlives the demo)</small>
+    </h2>
 
     @if (log.entries().length === 0) {
       <p class="hint">Nothing yet.</p>
@@ -47,7 +59,10 @@
 
     <ol>
       @for (entry of log.entries(); track $index) {
-        <li [class.ui]="entry.kind === 'ui'">
+        <li
+          [class.ui]="entry.kind === 'ui'"
+          [class.query]="entry.kind === 'query'"
+        >
           <span class="at">{{ entry.at }}</span>
           <span class="text">{{ entry.text }}</span>
         </li>

@@ -6,7 +6,7 @@ const PlaceholderDataPage: NgDocPage = {
   title: 'Placeholder Query Data',
   mdFile: './index.md',
   category: Queries,
-  order: 9,
+  order: 10,
 }
 
 export default PlaceholderDataPage

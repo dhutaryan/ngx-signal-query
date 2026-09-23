@@ -190,6 +190,48 @@ describe('injectQuery', () => {
     })
   })
 
+  describe('options re-evaluation', () => {
+    it('does not refetch when the options change but the key does not', () => {
+      const version = signal(1)
+      const queryFn = jasmine.createSpy('queryFn').and.returnValue(of(1))
+      const { fixture } = mount(() => ({
+        queryKey: ['same'],
+        queryFn,
+        // Read in the options but not part of the key.
+        retry: version(),
+      }))
+
+      expect(queryFn).toHaveBeenCalledTimes(1)
+
+      // staleTime defaults to 0, so the data is stale: a refetch here could
+      // only come from the options object having been rebuilt.
+      version.set(2)
+      fixture.detectChanges()
+
+      expect(queryFn).toHaveBeenCalledTimes(1)
+    })
+
+    it('uses the latest options when the key does change', () => {
+      const id = signal(1)
+      const retry = signal(0)
+      const spy = spyOn(QueryClient.prototype, 'fetchQuery').and.callThrough()
+      const { fixture } = mount(() => ({
+        queryKey: ['item', id()],
+        queryFn: () => of(id()),
+        retry: retry(),
+      }))
+
+      retry.set(5)
+      id.set(2)
+      fixture.detectChanges()
+
+      const lastCall = spy.calls.mostRecent().args
+
+      expect(lastCall[0]).toEqual(['item', 2])
+      expect(lastCall[2]?.retry).toBe(5)
+    })
+  })
+
   describe('reactive query key', () => {
     it('switches to a new query when the key changes', () => {
       const id = signal(1)

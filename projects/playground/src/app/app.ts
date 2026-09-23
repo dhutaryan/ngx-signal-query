@@ -7,12 +7,13 @@ import {
 
 import { Log } from './core/log/log'
 import { MutationDemo } from './mutations/mutation-demo/mutation-demo'
+import { QueriesDemo } from './queries/queries-demo/queries-demo'
 import { TodosApi } from './mutations/todos-api'
 
 @Component({
   selector: 'app-root',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [MutationDemo],
+  imports: [MutationDemo, QueriesDemo],
   templateUrl: './app.html',
   styleUrl: './app.scss',
 })

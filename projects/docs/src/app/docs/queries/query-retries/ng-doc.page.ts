@@ -6,7 +6,7 @@ const QueryRetriesPage: NgDocPage = {
   title: 'Query Retries',
   mdFile: './index.md',
   category: Queries,
-  order: 7,
+  order: 8,
 }
 
 export default QueryRetriesPage
