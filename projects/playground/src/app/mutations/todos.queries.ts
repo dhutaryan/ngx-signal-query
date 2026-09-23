@@ -19,4 +19,15 @@ export class TodoQueries {
       staleTime: 10_000,
     })
   }
+
+  public detail(id: number) {
+    return queryOptions({
+      queryKey: ['todos', 'detail', id],
+      queryFn: () => this.#api.get(id),
+      // One retry, so a 404 surfaces after ~1s instead of the default three
+      // retries' ~7s of backoff. staleTime is left at 0 on purpose: see the
+      // queries demo for why that matters.
+      retry: 1,
+    })
+  }
 }

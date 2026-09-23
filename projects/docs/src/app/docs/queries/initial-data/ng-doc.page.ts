@@ -6,7 +6,7 @@ const InitialDataPage: NgDocPage = {
   title: 'Initial Data',
   mdFile: './index.md',
   category: Queries,
-  order: 8,
+  order: 9,
 }
 
 export default InitialDataPage

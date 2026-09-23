@@ -3,9 +3,10 @@ import { Injectable, signal } from '@angular/core'
 import type { LogEntry, LogKind } from './log.type'
 
 /**
- * Provided at the root, so it outlives the demo component. That's the whole
+ * Provided at the root, so it outlives the demo components. That's the whole
  * point: it keeps recording hook calls from mutations that are still in flight
- * after their component has been destroyed.
+ * after their component has been destroyed, and it shows exactly which
+ * requests the queries demo fires.
  */
 @Injectable({ providedIn: 'root' })
 export class Log {

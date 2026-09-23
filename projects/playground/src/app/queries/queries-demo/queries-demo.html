@@ -1,0 +1,82 @@
+<section class="panel">
+  <h2>
+    Parallel queries
+    <small>({{ ids().length }} ids)</small>
+  </h2>
+
+  <div class="chips">
+    @for (id of ids(); track id) {
+      <button class="chip" (click)="remove(id)" title="Remove this id">
+        {{ id }}
+        <span aria-hidden="true">×</span>
+      </button>
+    } @empty {
+      <span class="hint">No ids — no queries.</span>
+    }
+  </div>
+
+  <div class="actions">
+    <button (click)="add()">Add next id</button>
+    <button class="danger" (click)="addMissing()">Add missing id (404)</button>
+    <button (click)="shuffle()" [disabled]="ids().length < 2">Shuffle</button>
+    <button (click)="refetchAll()" [disabled]="ids().length === 0">
+      Refetch all
+    </button>
+  </div>
+
+  <dl class="state">
+    <dt>pending</dt>
+    <dd>
+      <code>{{ pending() }}</code>
+    </dd>
+
+    <dt>fetching</dt>
+    <dd>
+      <code>{{ fetching() }}</code>
+    </dd>
+
+    <dt>errors</dt>
+    <dd>
+      <code>{{ errors() }}</code>
+    </dd>
+  </dl>
+
+  <p class="hint">
+    Adding an id fires exactly one
+    <code>GET</code>
+    — the ids already there keep their data, even though it's stale (
+    <code>staleTime: 0</code>
+    ). Shuffling fires nothing. Watch the green lines in the log, or the network
+    panel on the real backend.
+  </p>
+</section>
+
+<section class="panel">
+  <h2>Results</h2>
+
+  <ul class="results">
+    @for (todo of todos(); track todo) {
+      <li [class.error]="todo.isError()">
+        @if (todo.isFetching()) {
+          <span class="badge">fetching…</span>
+        }
+
+        @if (todo.isLoading()) {
+          <em>
+            loading…
+            @if (todo.failureCount() > 0) {
+              (retry {{ todo.failureCount() }})
+            }
+          </em>
+        } @else if (todo.data(); as data) {
+          <strong>#{{ data.id }}</strong>
+          {{ data.title }}
+        } @else if (todo.isError()) {
+          {{ todo.error()?.message }}
+        }
+      </li>
+    } @empty {
+      <li class="hint">Nothing to show.</li>
+    }
+  </ul>
+</section>

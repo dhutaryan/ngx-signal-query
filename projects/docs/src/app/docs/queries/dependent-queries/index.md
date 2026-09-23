@@ -76,7 +76,7 @@ time":
 
 ```html
 @if (projects.isLoading()) {
-  <p>Loading projects…</p>
+<p>Loading projects…</p>
 } @else if (projects.data(); as data) {
 <ul>
   @for (project of data; track project.id) {
@@ -107,13 +107,34 @@ protected readonly error = computed(
 )
 ```
 
-## A caveat on dynamic chains
+## Dynamic chains
 
-`enabled` handles a **fixed** chain: query A, then query B. What it can't do is
-fan out into a _variable_ number of dependent queries — one per id in a list
-you just fetched, say. That needs a way to run a dynamic set of queries, which
-doesn't exist yet (`injectQueries` is not implemented).
+`enabled` handles a **fixed** chain: query A, then query B. To fan out into a
+_variable_ number of dependent queries — one per id in a list you just fetched,
+say — combine the first query with `injectQueries` from
+[Parallel Queries](../parallel-queries):
 
-For now, either fetch the batch in a single `queryFn` (giving up per-item
-caching) or render a child component per item, each running its own
-`injectQuery`.
+```ts
+export class UserProjectsComponent {
+  readonly #queries = inject(AppQueries)
+
+  readonly email = input.required<string>()
+
+  // 1. Fetch the user…
+  protected readonly user = injectQuery(() =>
+    this.#queries.userByEmail(this.email()),
+  )
+
+  // 2. …then one query per project id, as soon as the user is here.
+  protected readonly projects = injectQueries(() => ({
+    queries: (this.user.data()?.projectIds ?? []).map((id) =>
+      this.#queries.project(id),
+    ),
+  }))
+}
+```
+
+No `enabled` is needed this time: while the user is pending the list of ids is
+empty, so there are no queries to run. The moment `user.data()` resolves, the
+array fills and one query per id starts — each with its own cache entry, so a
+project shared between two users is fetched once.

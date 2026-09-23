@@ -2,11 +2,11 @@ import { type NgDocPage } from '@ng-doc/core'
 
 import Queries from '../ng-doc.category'
 
-const DependentQueriesPage: NgDocPage = {
-  title: 'Dependent Queries',
+const ParallelQueriesPage: NgDocPage = {
+  title: 'Parallel Queries',
   mdFile: './index.md',
   category: Queries,
-  order: 6,
+  order: 5,
 }
 
-export default DependentQueriesPage
+export default ParallelQueriesPage

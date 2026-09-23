@@ -4,7 +4,12 @@
   max-width: 1000px;
   margin: 0 auto;
   padding: 1.5rem;
-  font-family: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+  font-family:
+    ui-sans-serif,
+    system-ui,
+    -apple-system,
+    'Segoe UI',
+    sans-serif;
   color: #1f2328;
 }
 
@@ -89,6 +94,10 @@ main {
     &.ui {
       color: #0969da;
       font-weight: 600;
+    }
+
+    &.query {
+      color: #1a7f37;
     }
   }
 
