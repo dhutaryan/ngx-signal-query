@@ -6,6 +6,7 @@ import {
 } from '@angular/core'
 
 import { Log } from './core/log/log'
+import { LazyOptionsDemo } from './lazy-options/lazy-options-demo/lazy-options-demo'
 import { MutationDemo } from './mutations/mutation-demo/mutation-demo'
 import { QueriesDemo } from './queries/queries-demo/queries-demo'
 import { TodosApi } from './mutations/todos-api'
@@ -13,7 +14,7 @@ import { TodosApi } from './mutations/todos-api'
 @Component({
   selector: 'app-root',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [MutationDemo, QueriesDemo],
+  imports: [MutationDemo, QueriesDemo, LazyOptionsDemo],
   templateUrl: './app.html',
   styleUrl: './app.scss',
 })

@@ -1,0 +1,90 @@
+<section class="panel">
+  <h2>
+    Options read at construction
+    <small>(issue #14)</small>
+  </h2>
+
+  <p class="hint">
+    Each case reads, from its options, something that doesn't exist yet while
+    the component is being constructed. Mount it: a todo means the options are
+    evaluated lazily, a red line in the log means they're evaluated eagerly.
+  </p>
+
+  <ol class="cases">
+    <li>
+      <button
+        (click)="toggle('query-input')"
+        [class.on]="mounted().has('query-input')"
+      >
+        {{ mounted().has('query-input') ? 'Unmount' : 'Mount' }}
+      </button>
+      <span>
+        <code>injectQuery</code>
+        · key reads
+        <code>input.required</code>
+      </span>
+      <div class="result">
+        @if (mounted().has('query-input')) {
+          <app-query-required-input [id]="1" />
+        }
+      </div>
+    </li>
+
+    <li>
+      <button
+        (click)="toggle('query-field')"
+        [class.on]="mounted().has('query-field')"
+      >
+        {{ mounted().has('query-field') ? 'Unmount' : 'Mount' }}
+      </button>
+      <span>
+        <code>injectQuery</code>
+        ·
+        <code>enabled</code>
+        reads a field declared below
+      </span>
+      <div class="result">
+        @if (mounted().has('query-field')) {
+          <app-query-field-below />
+        }
+      </div>
+    </li>
+
+    <li>
+      <button
+        (click)="toggle('queries-input')"
+        [class.on]="mounted().has('queries-input')"
+      >
+        {{ mounted().has('queries-input') ? 'Unmount' : 'Mount' }}
+      </button>
+      <span>
+        <code>injectQueries</code>
+        · reads
+        <code>input.required</code>
+      </span>
+      <div class="result">
+        @if (mounted().has('queries-input')) {
+          <app-queries-required-input [ids]="[1, 2]" />
+        }
+      </div>
+    </li>
+
+    <li>
+      <button
+        (click)="toggle('queries-field')"
+        [class.on]="mounted().has('queries-field')"
+      >
+        {{ mounted().has('queries-field') ? 'Unmount' : 'Mount' }}
+      </button>
+      <span>
+        <code>injectQueries</code>
+        · reads a field declared below
+      </span>
+      <div class="result">
+        @if (mounted().has('queries-field')) {
+          <app-queries-field-below />
+        }
+      </div>
+    </li>
+  </ol>
+</section>

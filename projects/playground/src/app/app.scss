@@ -99,6 +99,11 @@ main {
     &.query {
       color: #1a7f37;
     }
+
+    &.error {
+      color: #cf222e;
+      font-weight: 600;
+    }
   }
 
   .at {

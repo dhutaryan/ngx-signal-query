@@ -37,6 +37,7 @@
   @if (mounted()) {
     <app-mutation-demo />
     <app-queries-demo />
+    <app-lazy-options-demo />
   } @else {
     <section class="panel destroyed">
       <h2>Demo destroyed</h2>
@@ -62,6 +63,7 @@
         <li
           [class.ui]="entry.kind === 'ui'"
           [class.query]="entry.kind === 'query'"
+          [class.error]="entry.kind === 'error'"
         >
           <span class="at">{{ entry.at }}</span>
           <span class="text">{{ entry.text }}</span>
