@@ -15,8 +15,11 @@ import type { QueryOptions, QueryResult } from './types'
  * cache entry and in-flight request (deduplication). `optionsFn` is read in a
  * reactive context, so when a value it depends on changes (e.g. a route or
  * input signal in the key), the query automatically switches to the new key
- * and fetches. The query is bound to the current injection context and cleans
- * up its cache observer when that context is destroyed.
+ * and fetches. `optionsFn` isn't called before the query is first needed (its
+ * first effect run or the first read of a result signal), so it can read
+ * inputs, `input.required` included, and fields declared after the query. The
+ * query is bound to the current injection context and cleans up its cache
+ * observer when that context is destroyed.
  *
  * Must run in an injection context, or be given an explicit `injector`.
  *

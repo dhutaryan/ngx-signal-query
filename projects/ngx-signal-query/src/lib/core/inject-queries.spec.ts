@@ -2,8 +2,12 @@ import {
   Component,
   computed,
   Injector,
+  type OnInit,
   type Signal,
+  type WritableSignal,
+  input,
   signal,
+  viewChild,
 } from '@angular/core'
 import {
   type ComponentFixture,
@@ -21,24 +25,41 @@ import { QueryClient } from './query-client'
 import type { QueryResult } from './types'
 
 // Mounts injectQueries inside a host component so its effects are tied to a
-// real view and flush on detectChanges(). Returns the results signal plus the
-// fixture so a test can push new inputs (detectChanges) or unmount (destroy).
-function mount<TData, TError = Error>(
-  optionsFn: () => InjectQueriesOptions<TData, TError>,
+// real view and flush on detectChanges(). The host is rendered from a parent
+// template, as in an app, and gets `value` through an `input.required`
+// binding: options may read it, although it has no value yet while the host
+// is being constructed. Returns the results signal, the parent's `value`
+// signal (set it and detectChanges() to push a new input) and the fixture
+// (destroy it to unmount).
+function mount<TData, TError = Error, TValue = number[]>(
+  optionsFn: (value: Signal<TValue>) => InjectQueriesOptions<TData, TError>,
+  value?: TValue,
 ): {
   fixture: ComponentFixture<unknown>
   results: Signal<Array<QueryResult<TData, TError>>>
+  value: WritableSignal<TValue>
 } {
-  @Component({ template: '' })
+  @Component({ selector: 'app-host', template: '' })
   class Host {
-    readonly results = injectQueries<TData, TError>(optionsFn)
+    readonly value = input.required<TValue>()
+    readonly results = injectQueries<TData, TError>(() => optionsFn(this.value))
   }
 
-  const fixture = TestBed.createComponent(Host)
+  @Component({ imports: [Host], template: '<app-host [value]="value()" />' })
+  class Parent {
+    readonly value = signal(value as TValue)
+    readonly host = viewChild.required(Host)
+  }
+
+  const fixture = TestBed.createComponent(Parent)
 
   fixture.detectChanges()
 
-  return { fixture, results: fixture.componentInstance.results }
+  return {
+    fixture,
+    results: fixture.componentInstance.host().results,
+    value: fixture.componentInstance.value,
+  }
 }
 
 describe('injectQueries', () => {
@@ -346,6 +367,144 @@ describe('injectQueries', () => {
       fixture.destroy()
       flush()
     }))
+  })
+
+  // optionsFn may read what a component only has once it's rendered: its
+  // inputs, and fields declared after the call. So it must not run while the
+  // host is being constructed.
+  describe('options evaluation', () => {
+    it('does not call optionsFn while the host is being constructed', () => {
+      const optionsFn = jasmine.createSpy('optionsFn').and.returnValue({
+        queries: [{ queryKey: ['lazy'], queryFn: () => of(1) }],
+      })
+
+      @Component({ template: '' })
+      class Host {
+        readonly results = injectQueries<number>(optionsFn)
+      }
+
+      const fixture = TestBed.createComponent(Host)
+
+      expect(optionsFn).not.toHaveBeenCalled()
+
+      fixture.detectChanges()
+
+      expect(optionsFn).toHaveBeenCalled()
+      expect(fixture.componentInstance.results()[0].data()).toBe(1)
+    })
+
+    it('reads an input.required bound by the parent template', () => {
+      const queryFn = jasmine
+        .createSpy('queryFn')
+        .and.callFake((id: number) => of(`todo-${id}`))
+      const { fixture, results, value } = mount(
+        (ids) => ({
+          queries: ids().map((id) => ({
+            queryKey: ['todo', id],
+            queryFn: () => queryFn(id),
+          })),
+        }),
+        [1, 2],
+      )
+
+      expect(results().map((todo) => todo.data())).toEqual(['todo-1', 'todo-2'])
+
+      value.set([1, 2, 3])
+      fixture.detectChanges()
+
+      expect(results().map((todo) => todo.data())).toEqual([
+        'todo-1',
+        'todo-2',
+        'todo-3',
+      ])
+      expect(queryFn.calls.allArgs()).toEqual([[1], [2], [3]])
+    })
+
+    it('reads a field declared after the call', () => {
+      @Component({ template: '' })
+      class Host {
+        readonly results = injectQueries(() => ({
+          queries: this.ids().map((id) => ({
+            queryKey: ['todo', id],
+            queryFn: () => of(`todo-${id}`),
+          })),
+        }))
+
+        // Declared after the call on purpose: it doesn't exist yet while the
+        // queries are being created.
+        readonly ids = signal([1, 2])
+      }
+
+      const fixture = TestBed.createComponent(Host)
+
+      fixture.detectChanges()
+
+      expect(
+        fixture.componentInstance.results().map((todo) => todo.data()),
+      ).toEqual(['todo-1', 'todo-2'])
+    })
+
+    it('sees cached data and initialData when read before the first effect run', () => {
+      // staleTime 0: once the fetch effects run, both refetch in the
+      // background. That no fetch has happened yet by ngOnInit is the proof
+      // that the read came first.
+      const queryFn = jasmine.createSpy('queryFn').and.returnValue(of('fresh'))
+      let seenInOnInit: unknown[] = []
+
+      client.setQueryData(['cached', 1], 'from cache')
+
+      @Component({ selector: 'app-host', template: '' })
+      class Host implements OnInit {
+        readonly id = input.required<number>()
+
+        readonly results = injectQueries(() => ({
+          queries: [
+            { queryKey: ['cached', this.id()], queryFn },
+            {
+              queryKey: ['seeded', this.id()],
+              queryFn,
+              initialData: 'from initialData',
+            },
+          ],
+        }))
+
+        ngOnInit(): void {
+          seenInOnInit = [
+            queryFn.calls.count(),
+            ...this.results().map((result) => result.data()),
+          ]
+        }
+      }
+
+      @Component({ imports: [Host], template: '<app-host [id]="1" />' })
+      class Parent {}
+
+      TestBed.createComponent(Parent).detectChanges()
+
+      expect(seenInOnInit).toEqual([0, 'from cache', 'from initialData'])
+      expect(queryFn).toHaveBeenCalledTimes(2)
+    })
+
+    it('creates nothing when first read after the host is destroyed', () => {
+      const optionsFn = jasmine.createSpy('optionsFn').and.returnValue({
+        queries: [{ queryKey: ['gone'], queryFn: () => of(1) }],
+      })
+
+      @Component({ template: '' })
+      class Host {
+        readonly results = injectQueries<number>(optionsFn)
+      }
+
+      const fixture = TestBed.createComponent(Host)
+      const { results } = fixture.componentInstance
+
+      // Destroyed before change detection ever ran, and before any read.
+      fixture.destroy()
+
+      expect(results()).toEqual([])
+      expect(optionsFn).not.toHaveBeenCalled()
+      expect(client.getQueryCache().get(['gone'])).toBeUndefined()
+    })
   })
 
   describe('injection context', () => {

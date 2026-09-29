@@ -2,6 +2,7 @@ import {
   type Signal,
   type WritableSignal,
   assertInInjectionContext,
+  computed,
   DestroyRef,
   effect,
   inject,
@@ -42,7 +43,10 @@ interface Entry<TData, TError> {
  * `staleTime`, retries, error and observer. `optionsFn` is reactive: when the
  * array changes, queries whose `queryKey` is still present are kept (with
  * their options updated), new keys start fetching, and dropped keys release
- * their observer. Aggregate across the results with `computed`.
+ * their observer. As with `injectQuery`, `optionsFn` isn't called before the
+ * results are first needed, so it can read inputs, `input.required` included,
+ * and fields declared after the call. Aggregate across the results with
+ * `computed`.
  *
  * Must run in an injection context, or be given an explicit `injector`.
  *
@@ -78,15 +82,18 @@ export function injectQueries<TData, TError = Error>(
   if (!options?.injector) assertInInjectionContext(injectQueries)
 
   const injector = options?.injector ?? inject(Injector)
-  const results = signal<Array<QueryResult<TData, TError>>>([])
 
   let entries: Array<Entry<TData, TError>> = []
+  let current: Array<QueryResult<TData, TError>> = []
+  let destroyed = false
 
   // Reconciles the entries with a new list, matching by key hash the way
   // TanStack's QueriesObserver does: a matching entry is reused and handed the
   // new options, an unmatched query gets a fresh observer, and whatever is
   // left over is destroyed. Duplicate keys are paired up one-to-one in order.
-  const sync = (queries: Array<QueryOptions<TData, TError>>): void => {
+  const sync = (
+    queries: Array<QueryOptions<TData, TError>>,
+  ): Array<QueryResult<TData, TError>> => {
     const pool = new Map<string, Array<Entry<TData, TError>>>()
 
     for (const entry of entries) {
@@ -127,24 +134,37 @@ export function injectQueries<TData, TError = Error>(
 
     entries = next
 
-    if (changed) results.set(entries.map((entry) => entry.observer.result))
+    if (changed) current = entries.map((entry) => entry.observer.result)
+
+    return current
   }
 
-  // Seed synchronously so the result is populated before effects flush.
-  sync(untracked(() => optionsFn().queries))
+  // The results of the effect's latest sync; unset until its first run.
+  const synced = signal<Array<QueryResult<TData, TError>> | undefined>(
+    undefined,
+  )
 
   effect(
     () => {
       const { queries } = optionsFn()
 
-      untracked(() => sync(queries))
+      untracked(() => synced.set(sync(queries)))
     },
     { injector },
   )
 
   injector.get(DestroyRef).onDestroy(() => {
+    destroyed = true
     entries.forEach((entry) => entry.observer.destroy())
   })
 
-  return results.asReadonly()
+  // Nothing is synced until first needed: on the first read or the effect's
+  // first run, whichever comes first. Syncing calls optionsFn, which may read
+  // inputs or fields that don't exist yet while the owner is being
+  // constructed. A read before the effect's first run syncs on the spot, so
+  // it already sees the queries; once destroyed, it creates nothing.
+  return computed(
+    () =>
+      synced() ?? (destroyed ? [] : untracked(() => sync(optionsFn().queries))),
+  )
 }

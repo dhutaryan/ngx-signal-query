@@ -12,6 +12,7 @@ import { QueryClient } from './query-client'
 import type { Query } from './query'
 import type {
   PlaceholderDataFunction,
+  QueryKey,
   QueryOptions,
   QueryResult,
   QueryStatus,
@@ -31,6 +32,11 @@ export interface QueryObserver<TData, TError = Error> {
 /**
  * Observes a single query and exposes its state as signals — the engine behind
  * {@link injectQuery} and {@link injectQueries}.
+ *
+ * Nothing is evaluated on creation: `optionsFn` is first called by the first
+ * effect run or the first read of a result signal, so it may depend on state
+ * that isn't ready while the owner is being constructed (inputs, fields
+ * declared later).
  *
  * Effects are created on `injector` with `manualCleanup` so the observer can be
  * torn down on its own via `destroy()`, independently of the injector's
@@ -81,16 +87,29 @@ export function createQueryObserver<TData, TError = Error>(
     q.setData(data, updatedAt)
   }
 
-  // getOrCreate mutates the cache (a side effect), so it must not run inside
-  // a computed. Resolve the query in a signal: seed it synchronously and
-  // update it from an effect whenever the key changes.
-  const seed = cache.getOrCreate<TData, TError>(
-    untracked(defaultedOptions).queryKey,
+  // Resolves the query for a key, seeding a fresh one with initialData. It
+  // writes signals (the cache's entries, the query's state), so callers run it
+  // untracked: reached from a computed, a tracked write throws NG0600.
+  const resolve = (key: QueryKey): Query<TData, TError> => {
+    const q = cache.getOrCreate<TData, TError>(key)
+
+    applyInitialData(q)
+
+    return q
+  }
+
+  // The query the key effect below last switched to; unset until it first runs.
+  const switched = signal<Query<TData, TError> | undefined>(undefined)
+
+  // The observed query, resolved lazily: on the first read of a result signal
+  // or the first effect run, whichever comes first. Resolving it calls
+  // optionsFn, which may read inputs or fields that don't exist yet while the
+  // owner is being constructed. A read before the key effect's first run
+  // resolves the current key on the spot, so it already sees cached data and
+  // initialData; from then on only the key effect switches queries.
+  const query = computed(
+    () => switched() ?? untracked(() => resolve(defaultedOptions().queryKey)),
   )
-
-  applyInitialData(seed)
-
-  const query = signal(seed)
 
   // Data of the last query that had any, fed to the placeholderData function
   // on key change (mirrors TanStack's lastQueryWithDefinedData). Captured
@@ -99,18 +118,16 @@ export function createQueryObserver<TData, TError = Error>(
 
   track(() => {
     const key = defaultedOptions().queryKey
-    const q = untracked(() => cache.getOrCreate<TData, TError>(key))
+    const q = untracked(() => resolve(key))
 
     untracked(() => {
-      const prev = query()
+      const prev = switched()
 
-      if (prev !== q && prev.state().data !== undefined) {
+      if (prev && prev !== q && prev.state().data !== undefined) {
         lastData.set(prev.state().data)
       }
-
-      applyInitialData(q)
     })
-    query.set(q)
+    switched.set(q)
   })
 
   // Memoized: only emits when the flag itself flips, so ordinary data
