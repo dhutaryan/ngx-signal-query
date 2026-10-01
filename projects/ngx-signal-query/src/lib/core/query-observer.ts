@@ -9,7 +9,7 @@ import {
 } from '@angular/core'
 
 import { QueryClient } from './query-client'
-import type { Query } from './query'
+import type { Query, QuerySubscriber } from './query'
 import type {
   PlaceholderDataFunction,
   QueryKey,
@@ -17,6 +17,7 @@ import type {
   QueryResult,
   QueryStatus,
 } from './types'
+import { hashKey } from './utils'
 
 /**
  * One observed query: its reactive {@link QueryResult} and a `destroy()` that
@@ -130,10 +131,6 @@ export function createQueryObserver<TData, TError = Error>(
     switched.set(q)
   })
 
-  // Memoized: only emits when the flag itself flips, so ordinary data
-  // updates don't wake the fetch effect (no refetch loop).
-  const isInvalidated = computed(() => query().state().isInvalidated)
-
   track((cleanup) => {
     const q = query()
     const { gcTime } = untracked(defaultedOptions)
@@ -142,28 +139,43 @@ export function createQueryObserver<TData, TError = Error>(
       q.setGcTime(gcTime)
     }
 
-    q.addObserver()
-    cleanup(() => q.removeObserver())
+    // This observer as q sees it: how to fetch q for us, from the live
+    // options. Once the key has moved on (before the key effect above catches
+    // up), queryFn already fetches the next query's data, so q must not be
+    // fetched with it.
+    const subscriber: QuerySubscriber<TData, TError> = {
+      fetchOptions: () => {
+        const { queryKey, queryFn, retry, retryDelay, enabled } =
+          untracked(defaultedOptions)
+
+        if (enabled === false || hashKey(queryKey) !== q.queryHash) {
+          return null
+        }
+
+        return { queryFn, retry, retryDelay }
+      },
+    }
+
+    q.addObserver(subscriber)
+    cleanup(() => q.removeObserver(subscriber))
   })
 
   // Memoized so options re-evaluations that leave the flag alone don't wake
   // the fetch effect.
   const enabled = computed(() => defaultedOptions().enabled !== false)
 
-  // Fetch when the observed query switches (key change), when it becomes
-  // enabled, or when it is invalidated — not on every re-evaluation of the
-  // options. defaultQueryOptions() builds a fresh object each time, so
-  // tracking it whole would refetch stale data whenever any signal read in
-  // optionsFn changes, even one unrelated to the key. queryFn, staleTime and
-  // the retry policy only parameterise the fetch and are read untracked
-  // (TanStack's shouldFetchOptionally).
+  // Fetch when the observed query switches (key change) or when it becomes
+  // enabled — not on every re-evaluation of the options. defaultQueryOptions()
+  // builds a fresh object each time, so tracking it whole would refetch stale
+  // data whenever any signal read in optionsFn changes, even one unrelated to
+  // the key. queryFn, staleTime and the retry policy only parameterise the
+  // fetch and are read untracked (TanStack's shouldFetchOptionally).
+  // Invalidation isn't a trigger: invalidateQueries() refetches each active
+  // query once itself. A query it skipped (unobserved, or its observers
+  // disabled) stays invalidated, so it fetches here once observed or enabled:
+  // shouldFetch sees the flag.
   track(() => {
     query()
-
-    // Track invalidation so invalidateQueries() re-triggers a refetch.
-    // When invalidated, cancel any in-flight fetch and start a fresh one
-    // (otherwise the stale in-flight result would clear isInvalidated).
-    const invalidated = isInvalidated()
 
     if (!enabled()) return
 
@@ -171,12 +183,7 @@ export function createQueryObserver<TData, TError = Error>(
       untracked(defaultedOptions)
 
     untracked(() =>
-      client.fetchQuery(queryKey, queryFn, {
-        staleTime,
-        retry,
-        retryDelay,
-        cancelRefetch: invalidated,
-      }),
+      client.fetchQuery(queryKey, queryFn, { staleTime, retry, retryDelay }),
     )
   })
 

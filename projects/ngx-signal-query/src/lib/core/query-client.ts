@@ -1,4 +1,4 @@
-import { inject, Injectable } from '@angular/core'
+import { inject, Injectable, untracked } from '@angular/core'
 import type { Observable } from 'rxjs'
 
 import { QueryCache } from './query-cache'
@@ -133,8 +133,12 @@ export class QueryClient {
   }
 
   /**
-   * Marks matching queries as stale and triggers a refetch for those that are
-   * actively observed. Commonly called after a mutation succeeds.
+   * Marks matching queries as stale and refetches the actively observed ones,
+   * once per query however many components observe it. The refetch starts
+   * right away and replaces a fetch already in flight, which may predate the
+   * change; this method doesn't wait for it. A query with no enabled observer
+   * keeps the stale mark and refetches as soon as one appears. Commonly called
+   * after a mutation succeeds.
    *
    * @param filters - Which queries to invalidate; omit to invalidate all.
    *
@@ -144,7 +148,25 @@ export class QueryClient {
    * ```
    */
   invalidateQueries(filters?: QueryFilters): void {
-    this.#cache.findAll(filters).forEach((query) => query.invalidate())
+    const queries = this.#cache.findAll(filters)
+
+    queries.forEach((query) => query.invalidate())
+
+    // Refetch each active query once, however many observers watch it; an
+    // inactive one refetches when next observed, as shouldFetch sees the flag.
+    // cancelRefetch: a fetch already in flight started before the
+    // invalidation, so it may have missed the change. untracked: queryFn runs
+    // synchronously here, and an effect calling this mustn't start tracking
+    // what it reads.
+    untracked(() =>
+      queries.forEach((query) => {
+        const options = query.activeFetchOptions()
+
+        if (options) {
+          query.fetch(options.queryFn, options.retry, options.retryDelay, true)
+        }
+      }),
+    )
   }
 
   /**

@@ -140,6 +140,44 @@ describe('injectQueries', () => {
     expect(client.getQueryCache().get(['shared'])?.observerCount).toBe(2)
   })
 
+  it('makes one request per invalidation for a key shared with injectQuery', () => {
+    const subjects: Array<Subject<string>> = []
+    const queryFn = jasmine.createSpy('queryFn').and.callFake(() => {
+      const subject = new Subject<string>()
+
+      subjects.push(subject)
+
+      return subject
+    })
+
+    @Component({ template: '' })
+    class Host {
+      readonly one = injectQuery(() => ({
+        queryKey: ['shared'],
+        queryFn,
+        staleTime: Infinity,
+      }))
+
+      readonly many = injectQueries(() => ({
+        queries: [{ queryKey: ['shared'], queryFn, staleTime: Infinity }],
+      }))
+    }
+
+    const fixture = TestBed.createComponent(Host)
+
+    fixture.detectChanges()
+    subjects[0].next('v1')
+    subjects[0].complete()
+    fixture.detectChanges()
+
+    client.invalidateQueries({ queryKey: ['shared'] })
+    fixture.detectChanges()
+
+    // One new request, still running: a cancelled one is unsubscribed.
+    expect(queryFn).toHaveBeenCalledTimes(2)
+    expect(subjects[1].observed).toBe(true)
+  })
+
   it('isolates errors per query', () => {
     const err = new Error('boom')
     const { results } = mount<number>(() => ({

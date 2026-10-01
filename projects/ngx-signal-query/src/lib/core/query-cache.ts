@@ -41,7 +41,9 @@ export class QueryCache extends Cache<Query<unknown, unknown>> {
     return all.filter((query) => partialMatchKey(query.key, queryKey))
   }
 
-  remove(query: Query<unknown, unknown>): void {
+  // Generic: a query is invariant in TError (its observers' retry options take
+  // the error as an argument), so a typed one isn't a Query<unknown, unknown>.
+  remove<TData, TError>(query: Query<TData, TError>): void {
     // Guard on identity, not just the hash: a stale instance (already removed
     // and recreated under the same key) must not evict the current query.
     if (this.getEntry(query.queryHash) === query) {

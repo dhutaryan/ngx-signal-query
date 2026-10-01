@@ -9,7 +9,7 @@
     press
     <strong>invalidateQueries</strong>
     : it should cost exactly one request. The counters and the log show what it
-    actually costs. On the real backend, DevTools → Network shows the cancelled
+    actually costs. On the real backend, DevTools → Network shows any cancelled
     requests as
     <em>(canceled)</em>
     .
@@ -69,16 +69,18 @@
 
   <details>
     <summary>What to try</summary>
+    <p class="hint">
+      Every combination should cost one request. What each one cost before the
+      fix:
+    </p>
     <ul class="hint">
       <li>
         <strong>3 observers · staleTime 60 s</strong>
-        — the bug from the issue: each observer fires its own request and
-        cancels the previous observer's one.
+        — one request per observer, each cancelling the previous observer's one.
       </li>
       <li>
         <strong>1 observer · staleTime 0</strong>
-        — no cancellations, but a second request starts as soon as the first
-        resolves.
+        — a second request as soon as the first resolved.
       </li>
       <li>
         <strong>3 observers · staleTime 0</strong>
@@ -86,7 +88,7 @@
       </li>
       <li>
         <strong>1 observer · staleTime 60 s</strong>
-        — the only combination that costs one request today.
+        — one request: the only combination that was already right.
       </li>
     </ul>
   </details>

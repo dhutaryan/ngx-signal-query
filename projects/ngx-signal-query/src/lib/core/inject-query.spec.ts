@@ -4,9 +4,11 @@ import {
   type OnInit,
   type Signal,
   type WritableSignal,
+  effect,
   input,
   signal,
   viewChild,
+  viewChildren,
 } from '@angular/core'
 import {
   type ComponentFixture,
@@ -15,7 +17,7 @@ import {
   flush,
   tick,
 } from '@angular/core/testing'
-import { of, Subject, throwError } from 'rxjs'
+import { type Observable, of, Subject, throwError } from 'rxjs'
 
 import { injectQuery } from './inject-query'
 import { keepPreviousData } from './keep-previous-data'
@@ -58,6 +60,85 @@ function mount<TData, TError = Error, TValue = number>(
     fixture,
     result: fixture.componentInstance.host().result,
     value: fixture.componentInstance.value,
+  }
+}
+
+// Mounts `count` hosts side by side, like several components on one page
+// showing the same thing. Each gets `value` through its own input.required
+// binding, so a key built from it puts them all on one query. Returns their
+// results in template order, and the fixture.
+function mountMany<TData, TError = Error, TValue = number>(
+  count: number,
+  optionsFn: (value: Signal<TValue>) => QueryOptions<TData, TError>,
+  value?: TValue,
+): {
+  fixture: ComponentFixture<unknown>
+  results: Array<QueryResult<TData, TError>>
+} {
+  @Component({ selector: 'app-host', template: '' })
+  class Host {
+    readonly value = input.required<TValue>()
+    readonly result = injectQuery<TData, TError>(() => optionsFn(this.value))
+  }
+
+  @Component({
+    imports: [Host],
+    template: `
+      @for (host of hosts; track $index) {
+        <app-host [value]="value()" />
+      }
+    `,
+  })
+  class Parent {
+    readonly hosts = Array.from({ length: count })
+    readonly value = signal(value as TValue)
+    readonly children = viewChildren(Host)
+  }
+
+  const fixture = TestBed.createComponent(Parent)
+
+  fixture.detectChanges()
+
+  return {
+    fixture,
+    results: fixture.componentInstance.children().map((host) => host.result),
+  }
+}
+
+// A queryFn whose requests stay in flight until answered by hand. Every call
+// is a new request; one the query cancels is unsubscribed, so it no longer
+// counts as in flight. resolve() answers the latest request.
+function requests<T>(): {
+  queryFn: jasmine.Spy<() => Observable<T>>
+  inFlight: () => number
+  cancelled: () => number
+  resolve: (value: T) => void
+} {
+  const subjects: Array<Subject<T>> = []
+  const answered = new Set<Subject<T>>()
+  const queryFn = jasmine
+    .createSpy<() => Observable<T>>('queryFn')
+    .and.callFake(() => {
+      const subject = new Subject<T>()
+
+      subjects.push(subject)
+
+      return subject
+    })
+
+  return {
+    queryFn,
+    inFlight: () => subjects.filter((subject) => subject.observed).length,
+    cancelled: () =>
+      subjects.filter((subject) => !subject.observed && !answered.has(subject))
+        .length,
+    resolve: (value) => {
+      const subject = subjects.at(-1)!
+
+      answered.add(subject)
+      subject.next(value)
+      subject.complete()
+    },
   }
 }
 
@@ -220,6 +301,276 @@ describe('injectQuery', () => {
       fixture.detectChanges()
 
       expect(queryFn).toHaveBeenCalledTimes(1)
+    })
+  })
+
+  // One invalidateQueries() call costs one request per query, however many
+  // components observe it. The scenarios resolve the refetch and run change
+  // detection again: some of what can go wrong only happens once it lands.
+  describe('invalidation', () => {
+    it('makes one request for all observers of a key', () => {
+      const { queryFn, inFlight, cancelled, resolve } = requests<string>()
+      const { fixture, results } = mountMany(
+        3,
+        (id) => ({
+          queryKey: ['todo', id()],
+          queryFn,
+          // Fresh until invalidated, so only the invalidation can fetch.
+          staleTime: Infinity,
+        }),
+        1,
+      )
+
+      resolve('v1')
+      fixture.detectChanges()
+
+      client.invalidateQueries({ queryKey: ['todo', 1] })
+      fixture.detectChanges()
+
+      // One on mount, one for the invalidation.
+      expect(queryFn).toHaveBeenCalledTimes(2)
+      expect(inFlight()).toBe(1)
+      expect(cancelled()).toBe(0)
+
+      resolve('v2')
+      fixture.detectChanges()
+
+      expect(queryFn).toHaveBeenCalledTimes(2)
+      expect(results.map((result) => result.data())).toEqual(['v2', 'v2', 'v2'])
+    })
+
+    it('makes one request per invalidation at the default staleTime', () => {
+      const { queryFn, inFlight, resolve } = requests<string>()
+      const { fixture, result } = mount(
+        (id) => ({ queryKey: ['todo', id()], queryFn }),
+        1,
+      )
+
+      resolve('v1')
+      fixture.detectChanges()
+
+      client.invalidateQueries({ queryKey: ['todo', 1] })
+      fixture.detectChanges()
+      resolve('v2')
+      fixture.detectChanges()
+
+      // staleTime 0 makes the refetched data stale at once: anything that
+      // wakes the fetch now, such as the invalidated flag clearing, would
+      // send another request.
+      expect(queryFn).toHaveBeenCalledTimes(2)
+      expect(inFlight()).toBe(0)
+      expect(result.data()).toBe('v2')
+    })
+
+    it('makes one request for all observers at the default staleTime', () => {
+      const { queryFn, inFlight, cancelled, resolve } = requests<string>()
+      const { fixture, results } = mountMany(
+        3,
+        (id) => ({ queryKey: ['todo', id()], queryFn }),
+        1,
+      )
+
+      resolve('v1')
+      fixture.detectChanges()
+
+      client.invalidateQueries({ queryKey: ['todo', 1] })
+      fixture.detectChanges()
+      resolve('v2')
+      fixture.detectChanges()
+
+      expect(queryFn).toHaveBeenCalledTimes(2)
+      expect(cancelled()).toBe(0)
+      expect(inFlight()).toBe(0)
+      expect(results.map((result) => result.data())).toEqual(['v2', 'v2', 'v2'])
+    })
+
+    it('makes one request when queryFn is synchronous', () => {
+      const queryFn = jasmine.createSpy('queryFn').and.returnValue(of('v'))
+      const { fixture } = mountMany(
+        3,
+        (id) => ({ queryKey: ['todo', id()], queryFn }),
+        1,
+      )
+      // Each host fetches on mount: the request resolves at once, so at
+      // staleTime 0 the next host finds stale data rather than a request to
+      // share. Only what the invalidation adds is under test.
+      const mounted = queryFn.calls.count()
+
+      client.invalidateQueries({ queryKey: ['todo', 1] })
+      fixture.detectChanges()
+
+      expect(queryFn.calls.count() - mounted).toBe(1)
+    })
+
+    it('restarts the refetch when invalidated again while it runs', () => {
+      const { queryFn, inFlight, cancelled, resolve } = requests<string>()
+      const { fixture, result } = mount(
+        (id) => ({ queryKey: ['todo', id()], queryFn, staleTime: Infinity }),
+        1,
+      )
+
+      resolve('v1')
+      fixture.detectChanges()
+
+      client.invalidateQueries({ queryKey: ['todo', 1] })
+      fixture.detectChanges()
+      // A second write lands while the first refetch is in flight. That
+      // refetch may have read the data before the write, so it must not be
+      // the one that clears the invalidation.
+      client.invalidateQueries({ queryKey: ['todo', 1] })
+      fixture.detectChanges()
+
+      expect(queryFn).toHaveBeenCalledTimes(3)
+      expect(cancelled()).toBe(1)
+      expect(inFlight()).toBe(1)
+
+      resolve('v3')
+      fixture.detectChanges()
+
+      expect(result.data()).toBe('v3')
+    })
+
+    it('refetches again when invalidated as the refetch resolves', () => {
+      const { queryFn, inFlight, resolve } = requests<string>()
+      const { fixture } = mount(
+        (id) => ({ queryKey: ['todo', id()], queryFn, staleTime: Infinity }),
+        1,
+      )
+
+      resolve('v1')
+      fixture.detectChanges()
+
+      client.invalidateQueries({ queryKey: ['todo', 1] })
+      fixture.detectChanges()
+      // The response and the next invalidation both arrive before change
+      // detection runs again.
+      resolve('v2')
+      client.invalidateQueries({ queryKey: ['todo', 1] })
+      fixture.detectChanges()
+
+      expect(queryFn).toHaveBeenCalledTimes(3)
+      expect(inFlight()).toBe(1)
+    })
+
+    it('does not refetch for a disabled observer until it is enabled', () => {
+      const queryFn = jasmine.createSpy('queryFn').and.returnValue(of('fresh'))
+
+      client.setQueryData(['todo', 1], 'cached')
+
+      @Component({ selector: 'app-host', template: '' })
+      class Host {
+        readonly id = input.required<number>()
+
+        readonly result = injectQuery(() => ({
+          queryKey: ['todo', this.id()],
+          queryFn,
+          staleTime: Infinity,
+          enabled: this.enabled(),
+        }))
+
+        // Declared after the query on purpose: it doesn't exist yet while the
+        // query is being created.
+        readonly enabled = signal(false)
+      }
+
+      @Component({ imports: [Host], template: '<app-host [id]="1" />' })
+      class Parent {
+        readonly host = viewChild.required(Host)
+      }
+
+      const fixture = TestBed.createComponent(Parent)
+
+      fixture.detectChanges()
+
+      client.invalidateQueries({ queryKey: ['todo', 1] })
+      fixture.detectChanges()
+
+      expect(queryFn).not.toHaveBeenCalled()
+
+      fixture.componentInstance.host().enabled.set(true)
+      fixture.detectChanges()
+
+      // The cached data is fresh for staleTime: Infinity, so only the pending
+      // invalidation can make it fetch now.
+      expect(queryFn).toHaveBeenCalledTimes(1)
+      expect(fixture.componentInstance.host().result.data()).toBe('fresh')
+    })
+
+    it('refetches an invalidated query once a component uses it', () => {
+      const queryFn = jasmine.createSpy('queryFn').and.returnValue(of('fresh'))
+
+      client.setQueryData(['todo', 1], 'cached')
+      client.invalidateQueries({ queryKey: ['todo', 1] })
+
+      const { result } = mount(
+        (id) => ({ queryKey: ['todo', id()], queryFn, staleTime: Infinity }),
+        1,
+      )
+
+      // Fresh for staleTime: Infinity, so only the invalidation makes it
+      // fetch on mount.
+      expect(queryFn).toHaveBeenCalledTimes(1)
+      expect(result.data()).toBe('fresh')
+    })
+
+    it('leaves the previous key alone when invalidated before the key switch', () => {
+      // The key reads a plain signal, not an input: an input only changes
+      // with change detection, and this has to happen before it.
+      const id = signal(1)
+      const queryFn = jasmine
+        .createSpy('queryFn')
+        .and.callFake(() => of(`v${id()}`))
+      const { fixture } = mount(() => ({
+        queryKey: ['item', id()],
+        queryFn,
+        staleTime: Infinity,
+      }))
+
+      // The key has moved on, but change detection hasn't switched the
+      // observer to it yet: queryFn now fetches item 2.
+      id.set(2)
+      client.invalidateQueries({ queryKey: ['item', 1] })
+
+      expect(queryFn).toHaveBeenCalledTimes(1)
+      expect(client.getQueryData(['item', 1])).toBe('v1')
+
+      fixture.detectChanges()
+
+      expect(client.getQueryData(['item', 1])).toBe('v1')
+    })
+
+    it('does not make an effect that invalidates track what queryFn reads', () => {
+      const dep = signal(1)
+      const queryFn = jasmine.createSpy('queryFn').and.callFake(() => of(dep()))
+      let runs = 0
+
+      @Component({ template: '' })
+      class Host {
+        readonly result = injectQuery(() => ({
+          queryKey: ['dep'],
+          queryFn,
+          staleTime: Infinity,
+        }))
+
+        constructor() {
+          effect(() => {
+            runs++
+            client.invalidateQueries({ queryKey: ['dep'] })
+          })
+        }
+      }
+
+      const fixture = TestBed.createComponent(Host)
+
+      fixture.detectChanges()
+
+      // One on mount, one for the effect's invalidation.
+      expect(queryFn).toHaveBeenCalledTimes(2)
+
+      dep.set(2)
+      fixture.detectChanges()
+
+      expect(runs).toBe(1)
     })
   })
 

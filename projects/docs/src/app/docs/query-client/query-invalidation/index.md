@@ -8,15 +8,17 @@ it's a general tool, and a mutation is just one thing that calls it.
 
 ## What "invalidate" does
 
-Two steps, and only the first is immediate:
+Two steps, both right away:
 
 1. **Mark stale.** The matching queries are flagged — regardless of their
    `staleTime`. Invalidation overrides it; that's the point.
-2. **Refetch, if anyone's looking.** A query that's currently observed refetches
-   in the background, keeping its old data visible until the new data lands
-   (`isFetching()` goes `true`, `data()` doesn't blank). A query nobody is
-   observing just keeps the stale mark and refetches the next time a component
-   uses it.
+2. **Refetch, if anyone's looking.** A query that's currently observed starts
+   refetching in the background — one request, however many components observe
+   it — and keeps its old data visible until the new data lands
+   (`isFetching()` goes `true`, `data()` doesn't blank). A request already in
+   flight is cancelled and restarted, since it may have read the data before
+   the change. A query nobody is observing just keeps the stale mark and
+   refetches the next time a component uses it.
 
 So it's cheap: nothing hits the network unless it's actually needed on screen.
 
@@ -85,6 +87,6 @@ Two differences worth knowing:
   active/inactive status, by staleness, by fetch status. Here it's `queryKey`
   and `exact` — nothing else.
 - **It's synchronous.** `invalidateQueries` returns `void`, not a promise. It
-  marks queries stale and returns; the refetch happens reactively on its own.
-  There's nothing to `await` and no `refetchType` option — a query refetches if
-  it's observed, and doesn't if it isn't.
+  marks queries stale, starts refetching the observed ones and returns without
+  waiting for them. There's nothing to `await` and no `refetchType` option — a
+  query refetches if it's observed, and doesn't if it isn't.

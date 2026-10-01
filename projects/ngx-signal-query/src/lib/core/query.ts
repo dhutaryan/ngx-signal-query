@@ -12,9 +12,33 @@ import {
 
 import type { QueryCache } from './query-cache'
 import { defaultRetryDelay, resolveRetryDelay, shouldRetry } from './retryer'
-import type { QueryKey, QueryState, RetryDelayValue, RetryValue } from './types'
+import type {
+  DefaultedQueryOptions,
+  QueryKey,
+  QueryState,
+  RetryDelayValue,
+  RetryValue,
+} from './types'
 
 const DEFAULT_GC_TIME = 5 * 60 * 1000
+
+/**
+ * An observer of a query, as the query sees it: the query asks its observers
+ * how to fetch it when it refetches on their behalf (after invalidation).
+ *
+ * @internal
+ */
+export interface QuerySubscriber<TData, TError = Error> {
+  /**
+   * How this observer would fetch the query right now, read from its live
+   * options; `null` while it doesn't want the query fetched: it is disabled,
+   * or its key has already moved on to another query.
+   */
+  fetchOptions(): Pick<
+    DefaultedQueryOptions<TData, TError>,
+    'queryFn' | 'retry' | 'retryDelay'
+  > | null
+}
 
 /** @internal */
 export class Query<TData, TError = Error> {
@@ -35,7 +59,7 @@ export class Query<TData, TError = Error> {
   readonly state = this.#state.asReadonly()
 
   #subscription: Subscription | null = null
-  #observers = 0
+  readonly #observers = new Set<QuerySubscriber<TData, TError>>()
   #gcTime = DEFAULT_GC_TIME
   #gcTimer: ReturnType<typeof setTimeout> | null = null
   readonly #cache: QueryCache
@@ -49,29 +73,43 @@ export class Query<TData, TError = Error> {
   }
 
   get observerCount(): number {
-    return this.#observers
+    return this.#observers.size
   }
 
   setGcTime(ms: number): void {
     this.#gcTime = ms
   }
 
-  addObserver(): void {
-    this.#observers++
+  addObserver(observer: QuerySubscriber<TData, TError>): void {
+    this.#observers.add(observer)
     this.#clearGcTimer()
   }
 
-  removeObserver(): void {
-    if (this.#observers === 0) return
-
-    this.#observers--
+  removeObserver(observer: QuerySubscriber<TData, TError>): void {
+    // An observer this query doesn't have changes nothing: it mustn't cancel
+    // the fetch or schedule gc while others still watch.
+    if (!this.#observers.delete(observer)) return
 
     // No observers left: cancel any in-flight fetch (nobody is waiting for it)
     // and schedule gc to dispose the query if no observer returns.
-    if (this.#observers === 0) {
+    if (this.#observers.size === 0) {
       this.cancel()
       this.#scheduleGc()
     }
+  }
+
+  // How to refetch this query on its observers' behalf: the first observer
+  // that wants it fetched decides, as in TanStack; null if none does.
+  activeFetchOptions(): ReturnType<
+    QuerySubscriber<TData, TError>['fetchOptions']
+  > {
+    for (const observer of this.#observers) {
+      const options = observer.fetchOptions()
+
+      if (options) return options
+    }
+
+    return null
   }
 
   fetch(
@@ -158,7 +196,7 @@ export class Query<TData, TError = Error> {
 
     // Keep an orphaned query (no observers) alive for another gcTime so a
     // setQueryData write isn't collected before anyone subscribes.
-    if (this.#observers === 0) this.#scheduleGc()
+    if (this.#observers.size === 0) this.#scheduleGc()
   }
 
   invalidate(): void {
