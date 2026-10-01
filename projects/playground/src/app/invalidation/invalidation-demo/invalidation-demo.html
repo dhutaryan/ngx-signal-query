@@ -1,0 +1,93 @@
+<section class="panel">
+  <h2>
+    One invalidation, how many requests?
+    <small>(issue #15)</small>
+  </h2>
+
+  <p class="hint">
+    Every observer below watches the same key. Wait until they're idle, then
+    press
+    <strong>invalidateQueries</strong>
+    : it should cost exactly one request. The counters and the log show what it
+    actually costs. On the real backend, DevTools → Network shows the cancelled
+    requests as
+    <em>(canceled)</em>
+    .
+  </p>
+
+  <div class="controls">
+    <span class="label">observers</span>
+    @for (count of observerChoices; track count) {
+      <button
+        (click)="setObserverCount(count)"
+        [class.on]="observerCount() === count"
+      >
+        {{ count }}
+      </button>
+    }
+
+    <span class="label">staleTime</span>
+    @for (ms of staleTimeChoices; track ms) {
+      <button (click)="setStaleTime(ms)" [class.on]="staleTime() === ms">
+        {{ ms === 0 ? '0 (default)' : ms / 1000 + ' s' }}
+      </button>
+    }
+
+    <button class="primary" (click)="invalidate()">invalidateQueries</button>
+  </div>
+
+  <div class="observers">
+    @for (n of observers(); track n) {
+      <app-invalidation-observer [n]="n" [staleTime]="staleTime()" />
+    }
+  </div>
+
+  <table class="counters">
+    <thead>
+      <tr>
+        <th>since the last invalidateQueries</th>
+        <th>fired</th>
+        <th>cancelled</th>
+        <th>resolved</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>actual</td>
+        <td [class.bad]="trace.fired() > 1">{{ trace.fired() }}</td>
+        <td [class.bad]="trace.cancelled() > 0">{{ trace.cancelled() }}</td>
+        <td [class.bad]="trace.resolved() > 1">{{ trace.resolved() }}</td>
+      </tr>
+      <tr class="expected">
+        <td>expected</td>
+        <td>1</td>
+        <td>0</td>
+        <td>1</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <details>
+    <summary>What to try</summary>
+    <ul class="hint">
+      <li>
+        <strong>3 observers · staleTime 60 s</strong>
+        — the bug from the issue: each observer fires its own request and
+        cancels the previous observer's one.
+      </li>
+      <li>
+        <strong>1 observer · staleTime 0</strong>
+        — no cancellations, but a second request starts as soon as the first
+        resolves.
+      </li>
+      <li>
+        <strong>3 observers · staleTime 0</strong>
+        — both at once.
+      </li>
+      <li>
+        <strong>1 observer · staleTime 60 s</strong>
+        — the only combination that costs one request today.
+      </li>
+    </ul>
+  </details>
+</section>
