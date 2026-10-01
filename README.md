@@ -24,7 +24,8 @@ return an `Observable` (hello `HttpClient`) or a `Promise`.
 npm install ngx-signal-query
 ```
 
-Requires **Angular 19+** (`@angular/core` is the only peer dependency).
+Requires **Angular 19+** and **RxJS 7.4+** (peer dependencies `@angular/core`
+and `rxjs`).
 
 ## Quick start
 

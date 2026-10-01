@@ -25,7 +25,8 @@
     "url": "https://github.com/dhutaryan/ngx-signal-query/issues"
   },
   "peerDependencies": {
-    "@angular/core": ">=19.0.0"
+    "@angular/core": ">=19.0.0",
+    "rxjs": "^7.4.0"
   },
   "dependencies": {
     "tslib": "^2.3.0"
