@@ -1,7 +1,7 @@
 import { fakeAsync, tick } from '@angular/core/testing'
-import { of, throwError } from 'rxjs'
+import { type Observable, of, throwError } from 'rxjs'
 
-import { Query } from './query'
+import { Query, type QuerySubscriber } from './query'
 import type { QueryCache } from './query-cache'
 
 function createQuery<TData, TError = Error>() {
@@ -14,6 +14,19 @@ function createQuery<TData, TError = Error>() {
   )
 
   return { query, cache }
+}
+
+// An observer that never wants the query fetched, for specs that only count
+// observers.
+function stubObserver(): QuerySubscriber<number> {
+  return { fetchOptions: () => null }
+}
+
+// An observer that wants the query fetched with `queryFn`.
+function activeObserver(
+  queryFn: () => Observable<number>,
+): QuerySubscriber<number> {
+  return { fetchOptions: () => ({ queryFn, retry: 0, retryDelay: 0 }) }
 }
 
 describe('Query', () => {
@@ -284,29 +297,42 @@ describe('Query', () => {
   describe('observers and gc', () => {
     it('counts observers', () => {
       const { query } = createQuery<number>()
+      const first = stubObserver()
+      const second = stubObserver()
 
-      query.addObserver()
-      query.addObserver()
+      query.addObserver(first)
+      query.addObserver(second)
       expect(query.observerCount).toBe(2)
 
-      query.removeObserver()
+      query.removeObserver(first)
       expect(query.observerCount).toBe(1)
     })
 
-    it('does not underflow when removing with no observers', () => {
+    it('counts an observer once, however often it is added', () => {
+      const { query } = createQuery<number>()
+      const observer = stubObserver()
+
+      query.addObserver(observer)
+      query.addObserver(observer)
+      expect(query.observerCount).toBe(1)
+    })
+
+    it('ignores removing an observer it does not have', () => {
       const { query } = createQuery<number>()
 
-      query.removeObserver()
-      expect(query.observerCount).toBe(0)
+      query.addObserver(stubObserver())
+      query.removeObserver(stubObserver()) // never added
+      expect(query.observerCount).toBe(1)
     })
 
     it('cancels an in-flight fetch when the last observer leaves', fakeAsync(() => {
       const { query } = createQuery<number>()
+      const observer = stubObserver()
 
-      query.addObserver()
+      query.addObserver(observer)
       query.fetch(() => Promise.resolve(1))
 
-      query.removeObserver()
+      query.removeObserver(observer)
       tick()
 
       // Fetch was cancelled before it could resolve.
@@ -316,11 +342,12 @@ describe('Query', () => {
 
     it('schedules gc removal when the last observer leaves', fakeAsync(() => {
       const { query, cache } = createQuery<number>()
+      const observer = stubObserver()
 
       query.setGcTime(1000)
-      query.addObserver()
+      query.addObserver(observer)
 
-      query.removeObserver()
+      query.removeObserver(observer)
       expect(cache.remove).not.toHaveBeenCalled()
 
       tick(1000)
@@ -329,11 +356,12 @@ describe('Query', () => {
 
     it('removes immediately when gcTime is 0 and the last observer leaves', fakeAsync(() => {
       const { query, cache } = createQuery<number>()
+      const observer = stubObserver()
 
       query.setGcTime(0)
-      query.addObserver()
+      query.addObserver(observer)
 
-      query.removeObserver()
+      query.removeObserver(observer)
       tick(0)
 
       expect(cache.remove).toHaveBeenCalledWith(query)
@@ -354,7 +382,7 @@ describe('Query', () => {
       const { query, cache } = createQuery<number>()
 
       query.setGcTime(1000)
-      query.addObserver()
+      query.addObserver(stubObserver())
 
       query.setData(1)
 
@@ -364,16 +392,53 @@ describe('Query', () => {
 
     it('cancels a scheduled gc when an observer returns', fakeAsync(() => {
       const { query, cache } = createQuery<number>()
+      const observer = stubObserver()
 
       query.setGcTime(1000)
-      query.addObserver()
-      query.removeObserver()
+      query.addObserver(observer)
+      query.removeObserver(observer)
 
       tick(500)
-      query.addObserver()
+      query.addObserver(stubObserver())
       tick(1000)
 
       expect(cache.remove).not.toHaveBeenCalled()
     }))
+  })
+
+  describe('activeFetchOptions', () => {
+    it('is null while no observer wants the query fetched', () => {
+      const { query } = createQuery<number>()
+
+      expect(query.activeFetchOptions()).toBeNull()
+
+      query.addObserver(stubObserver())
+      expect(query.activeFetchOptions()).toBeNull()
+    })
+
+    it('takes the first observer that wants the query fetched', () => {
+      const { query } = createQuery<number>()
+      const first = () => of(1)
+      const second = () => of(2)
+
+      query.addObserver(stubObserver())
+      query.addObserver(activeObserver(first))
+      query.addObserver(activeObserver(second))
+
+      expect(query.activeFetchOptions()?.queryFn).toBe(first)
+    })
+
+    it('stops asking an observer once it is removed', () => {
+      const { query } = createQuery<number>()
+      const first = () => of(1)
+      const second = () => of(2)
+      const leaving = activeObserver(first)
+
+      query.addObserver(leaving)
+      query.addObserver(activeObserver(second))
+      query.removeObserver(leaving)
+
+      expect(query.activeFetchOptions()?.queryFn).toBe(second)
+    })
   })
 })

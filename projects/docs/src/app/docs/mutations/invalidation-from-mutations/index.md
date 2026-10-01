@@ -16,13 +16,13 @@ data around.
 
 ## What invalidation actually does
 
-`invalidateQueries` marks the matching queries **stale** — it doesn't fetch
-anything itself. What happens next depends on whether anyone is looking:
+`invalidateQueries` marks the matching queries **stale**. What happens next
+depends on whether anyone is looking:
 
 - A query that's **currently on screen** refetches right away, in the
-  background. Its data stays visible while the new data loads
-  (`isFetching()` flips to `true`, `data()` doesn't blank out) — the
-  stale-while-revalidate pattern.
+  background — one request, however many components show it. Its data stays
+  visible while the new data loads (`isFetching()` flips to `true`, `data()`
+  doesn't blank out) — the stale-while-revalidate pattern.
 - A query that **isn't currently observed** just keeps the stale mark and
   refetches the next time a component uses it.
 
@@ -77,8 +77,9 @@ There, `invalidateQueries` returns a promise, and the common pattern is to
 `await` it inside `onSuccess` so the mutation stays `pending` until the refetch
 finishes.
 
-Here it's **synchronous** and returns `void`. It marks queries stale and
-returns immediately; the refetch happens on its own, reactively. That means:
+Here it's **synchronous** and returns `void`. It marks queries stale, starts
+refetching the ones on screen, and returns immediately, without waiting for the
+refetch. That means:
 
 - there's nothing to `await`, and no `Promise.all` for multiple invalidations —
   just call it;
