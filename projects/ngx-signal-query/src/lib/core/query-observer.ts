@@ -8,6 +8,7 @@ import {
   untracked,
 } from '@angular/core'
 
+import { startPolling } from './polling'
 import { QueryClient } from './query-client'
 import type { Query, QuerySubscriber } from './query'
 import type {
@@ -17,7 +18,7 @@ import type {
   QueryResult,
   QueryStatus,
 } from './types'
-import { hashKey } from './utils'
+import { hashKey, isValidTimeout } from './utils'
 
 /**
  * One observed query: its reactive {@link QueryResult} and a `destroy()` that
@@ -131,6 +132,24 @@ export function createQueryObserver<TData, TError = Error>(
     switched.set(q)
   })
 
+  // How this observer would fetch q right now, from the live options; null
+  // while it is disabled, or once the key has moved on. Before the key effect
+  // above catches up, queryFn already fetches the next query's data, so q
+  // must not be fetched with it. Both refetches made on our behalf go by it:
+  // the invalidation one (through q's subscriber handle) and polling.
+  const fetchOptionsFor = (
+    q: Query<TData, TError>,
+  ): ReturnType<QuerySubscriber<TData, TError>['fetchOptions']> => {
+    const { queryKey, queryFn, retry, retryDelay, enabled } =
+      untracked(defaultedOptions)
+
+    if (enabled === false || hashKey(queryKey) !== q.queryHash) {
+      return null
+    }
+
+    return { queryFn, retry, retryDelay }
+  }
+
   track((cleanup) => {
     const q = query()
     const { gcTime } = untracked(defaultedOptions)
@@ -139,21 +158,9 @@ export function createQueryObserver<TData, TError = Error>(
       q.setGcTime(gcTime)
     }
 
-    // This observer as q sees it: how to fetch q for us, from the live
-    // options. Once the key has moved on (before the key effect above catches
-    // up), queryFn already fetches the next query's data, so q must not be
-    // fetched with it.
+    // This observer as q sees it.
     const subscriber: QuerySubscriber<TData, TError> = {
-      fetchOptions: () => {
-        const { queryKey, queryFn, retry, retryDelay, enabled } =
-          untracked(defaultedOptions)
-
-        if (enabled === false || hashKey(queryKey) !== q.queryHash) {
-          return null
-        }
-
-        return { queryFn, retry, retryDelay }
-      },
+      fetchOptions: () => fetchOptionsFor(q),
     }
 
     q.addObserver(subscriber)
@@ -161,7 +168,7 @@ export function createQueryObserver<TData, TError = Error>(
   })
 
   // Memoized so options re-evaluations that leave the flag alone don't wake
-  // the fetch effect.
+  // the fetch and polling effects.
   const enabled = computed(() => defaultedOptions().enabled !== false)
 
   // Fetch when the observed query switches (key change) or when it becomes
@@ -187,31 +194,54 @@ export function createQueryObserver<TData, TError = Error>(
     )
   })
 
-  // Polling: refetch on an interval, independent of staleTime (staleTime: 0
-  // forces the fetch). The function form is reactive — reading state() makes
-  // the effect re-run when data changes, so returning false stops polling.
-  track((onCleanup) => {
-    const { queryKey, queryFn, retry, retryDelay, refetchInterval, enabled } =
-      defaultedOptions()
-
-    if (enabled === false) return
-
-    const interval =
+  // The polling interval this observer asks for, or false for none. Memoized,
+  // so the polling effect wakes only when the value changes. The function form
+  // is resolved against the query's state, so it is re-resolved on every
+  // update of it, and a switch to false stops polling. 0 means no polling, and
+  // so does a value no timer can hold: the timer would fire over and over.
+  const interval = computed(() => {
+    const { refetchInterval } = defaultedOptions()
+    const value =
       typeof refetchInterval === 'function'
         ? refetchInterval({ state: query().state() })
         : refetchInterval
 
-    if (!interval) return
+    return isValidTimeout(value) && value > 0 ? value : false
+  })
 
-    const id = setInterval(() => {
-      client.fetchQuery(queryKey, queryFn, {
-        staleTime: 0,
-        retry,
-        retryDelay,
-      })
-    }, interval)
+  // Polling: refetch on an interval, independent of staleTime. The timer
+  // restarts when the observed query switches, or when enabled or the interval
+  // changes, as in TanStack's setOptions. It doesn't restart on every
+  // re-evaluation of the options: defaultQueryOptions() builds a fresh object
+  // each time, so tracking it whole would restart the timer whenever any
+  // signal read in optionsFn changes. One that changes faster than the
+  // interval would keep it from ever firing.
+  //
+  // Each poll comes ms after the query's last update, as in TanStack, whose
+  // observer restarts its timer on every update of the query. So a fetch made
+  // for any reason (another observer's poll, refetch(), an invalidation) or a
+  // cache write pushes the next poll back. However many observers poll a key,
+  // it's fetched once per interval. Unlike TanStack, the wait counts from
+  // updatedAt, the last response or cache write, not from any change of
+  // state: a fetch that starts or fails doesn't push it back.
+  track((onCleanup) => {
+    const q = query()
 
-    onCleanup(() => clearInterval(id))
+    if (!enabled()) return
+
+    const ms = interval()
+
+    if (!ms) return
+
+    // Fetches q with the options as they are when it fires, which may have
+    // changed since the effect ran.
+    const poll = (): void => {
+      const options = fetchOptionsFor(q)
+
+      if (options) q.fetch(options.queryFn, options.retry, options.retryDelay)
+    }
+
+    onCleanup(startPolling(ms, () => q.state().updatedAt, poll))
   })
 
   // Placeholder layer: while the query is pending with no data, present

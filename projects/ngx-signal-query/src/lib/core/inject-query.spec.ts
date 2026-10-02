@@ -17,7 +17,7 @@ import {
   flush,
   tick,
 } from '@angular/core/testing'
-import { type Observable, of, Subject, throwError } from 'rxjs'
+import { type Observable, map, of, Subject, throwError, timer } from 'rxjs'
 
 import { injectQuery } from './inject-query'
 import { keepPreviousData } from './keep-previous-data'
@@ -139,6 +139,38 @@ function requests<T>(): {
       subject.next(value)
       subject.complete()
     },
+  }
+}
+
+// A queryFn whose requests take `latency` ms each. `starts` records when each
+// request was sent, in ms since timed() was called. Call it inside fakeAsync.
+function timed(latency: number): {
+  queryFn: jasmine.Spy<() => Observable<number>>
+  starts: number[]
+} {
+  const start = Date.now()
+  const starts: number[] = []
+  const queryFn = jasmine
+    .createSpy<() => Observable<number>>('queryFn')
+    .and.callFake(() => {
+      starts.push(Date.now() - start)
+
+      return timer(latency).pipe(map(() => starts.length))
+    })
+
+  return { queryFn, starts }
+}
+
+// Advances fake time in 10 ms steps and runs change detection after each,
+// as an app does after every task. An effect only sees a state change once
+// change detection runs.
+function elapse(
+  ms: number,
+  ...fixtures: Array<ComponentFixture<unknown>>
+): void {
+  for (let elapsed = 0; elapsed < ms; elapsed += 10) {
+    tick(10)
+    fixtures.forEach((fixture) => fixture.detectChanges())
   }
 }
 
@@ -972,6 +1004,476 @@ describe('injectQuery', () => {
       expect(queryFn).toHaveBeenCalledTimes(1)
       flush()
     }))
+
+    // The timer restarts when the observed query, enabled or the interval
+    // changes, not whenever the options re-evaluate.
+    describe('timer restarts', () => {
+      it('keeps polling while a value the options read changes', fakeAsync(() => {
+        const queryFn = jasmine.createSpy('queryFn').and.returnValue(of([]))
+        // Only the status is part of the key, but the options read the whole
+        // filter, which a search box changes on every keystroke.
+        const { fixture, value } = mount(
+          (filter) => ({
+            queryKey: ['orders', filter().status],
+            queryFn,
+            refetchInterval: 100,
+          }),
+          { status: 'open', search: '' },
+        )
+
+        // A keystroke every 50 ms, twice per interval.
+        for (const search of ['a', 'ab', 'abc', 'abcd', 'abcde']) {
+          tick(50)
+          value.update((filter) => ({ ...filter, search }))
+          fixture.detectChanges()
+        }
+
+        // 250 ms in: the fetch on mount, then polls at 100 and 200.
+        expect(queryFn).toHaveBeenCalledTimes(3)
+
+        fixture.destroy()
+      }))
+
+      it('restarts the timer when the interval changes', fakeAsync(() => {
+        const queryFn = jasmine.createSpy('queryFn').and.returnValue(of(1))
+        const { fixture, value } = mount(
+          (interval) => ({
+            queryKey: ['todos'],
+            queryFn,
+            refetchInterval: interval(),
+          }),
+          100,
+        )
+
+        tick(50)
+        value.set(300)
+        fixture.detectChanges()
+
+        // The old 100 ms timer would have fired by now.
+        tick(250)
+        expect(queryFn).toHaveBeenCalledTimes(1)
+
+        // 300 ms after the change.
+        tick(50)
+        expect(queryFn).toHaveBeenCalledTimes(2)
+
+        fixture.destroy()
+      }))
+
+      it('stops polling while disabled and restarts the timer once enabled', fakeAsync(() => {
+        const enabled = signal(true)
+        const queryFn = jasmine.createSpy('queryFn').and.returnValue(of(1))
+        const { fixture } = mount(() => ({
+          queryKey: ['todos'],
+          queryFn,
+          refetchInterval: 100,
+          // Fresh data: enabling the query doesn't fetch, only polling does.
+          staleTime: Infinity,
+          enabled: enabled(),
+        }))
+
+        tick(50)
+        enabled.set(false)
+        fixture.detectChanges()
+        tick(200)
+        expect(queryFn).toHaveBeenCalledTimes(1)
+
+        enabled.set(true)
+        fixture.detectChanges()
+
+        // The timer from before disabling would fire here.
+        tick(50)
+        expect(queryFn).toHaveBeenCalledTimes(1)
+
+        // 100 ms after enabling.
+        tick(50)
+        expect(queryFn).toHaveBeenCalledTimes(2)
+
+        fixture.destroy()
+      }))
+
+      it('restarts the timer for the new key and stops polling the old one', fakeAsync(() => {
+        const queryFn = jasmine
+          .createSpy('queryFn')
+          .and.callFake((id: number) => of(id))
+        const { fixture, value } = mount(
+          (id) => ({
+            queryKey: ['todo', id()],
+            queryFn: () => queryFn(id()),
+            refetchInterval: 100,
+          }),
+          1,
+        )
+
+        tick(50)
+        value.set(2)
+        fixture.detectChanges()
+
+        // Todo 2 is fetched on the switch, and nothing is polled at 100.
+        tick(50)
+        expect(queryFn.calls.allArgs()).toEqual([[1], [2]])
+
+        // 100 ms after the switch: todo 2 is polled, todo 1 isn't.
+        tick(50)
+        expect(queryFn.calls.allArgs()).toEqual([[1], [2], [2]])
+
+        fixture.destroy()
+      }))
+
+      it('stops polling once the interval function turns false', fakeAsync(() => {
+        let version = 0
+        const queryFn = jasmine
+          .createSpy('queryFn')
+          .and.callFake(() => of(++version))
+        const { fixture } = mount<number>(() => ({
+          queryKey: ['job'],
+          queryFn,
+          // Poll until the job reports done, in its third response.
+          refetchInterval: ({ state }) =>
+            (state.data ?? 0) >= 3 ? false : 100,
+        }))
+
+        elapse(500, fixture)
+
+        expect(queryFn).toHaveBeenCalledTimes(3)
+
+        fixture.destroy()
+      }))
+
+      it('resumes polling once the interval function returns a number again', fakeAsync(() => {
+        let status = 'done'
+        const queryFn = jasmine
+          .createSpy('queryFn')
+          .and.callFake(() => of({ status }))
+        const { fixture, result } = mount<{ status: string }>(() => ({
+          queryKey: ['job'],
+          queryFn,
+          // Poll while the job runs.
+          refetchInterval: ({ state }) =>
+            state.data?.status === 'running' ? 100 : false,
+        }))
+
+        // Done on mount: nothing to poll.
+        elapse(200, fixture)
+        expect(queryFn).toHaveBeenCalledTimes(1)
+
+        // A refetch finds the job running again.
+        status = 'running'
+        result.refetch()
+        fixture.detectChanges()
+
+        // Polled 100 and 200 ms after the refetch.
+        tick(200)
+        expect(queryFn).toHaveBeenCalledTimes(4)
+
+        fixture.destroy()
+      }))
+
+      it('tracks the signals the interval function reads', fakeAsync(() => {
+        const paused = signal(false)
+        const queryFn = jasmine.createSpy('queryFn').and.returnValue(of(1))
+        const { fixture } = mount(() => ({
+          queryKey: ['prices'],
+          queryFn,
+          refetchInterval: () => (paused() ? false : 100),
+        }))
+
+        tick(50)
+        paused.set(true)
+        fixture.detectChanges()
+
+        // Paused before the first poll was due.
+        tick(200)
+        expect(queryFn).toHaveBeenCalledTimes(1)
+
+        paused.set(false)
+        fixture.detectChanges()
+
+        // 100 ms after resuming.
+        tick(100)
+        expect(queryFn).toHaveBeenCalledTimes(2)
+
+        fixture.destroy()
+      }))
+    })
+
+    // Each poll comes refetchInterval ms after the query's last update, as in
+    // TanStack, which restarts the timer on every update. So a fetch made for
+    // any reason (refetch(), an invalidation, another observer's poll) pushes
+    // the next poll back.
+    describe('cadence', () => {
+      it('counts each poll from the last response', fakeAsync(() => {
+        const { queryFn, starts } = timed(30)
+        const { fixture } = mount(() => ({
+          queryKey: ['todos'],
+          queryFn,
+          refetchInterval: 100,
+        }))
+
+        elapse(400, fixture)
+
+        // Requests take 30 ms; each poll goes 100 ms after the response.
+        expect(starts).toEqual([0, 130, 260, 390])
+
+        fixture.destroy()
+      }))
+
+      it('counts each poll from the last response with an interval function', fakeAsync(() => {
+        const { queryFn, starts } = timed(30)
+        const { fixture } = mount<number>(() => ({
+          queryKey: ['todos'],
+          queryFn,
+          refetchInterval: () => 100,
+        }))
+
+        elapse(400, fixture)
+
+        expect(starts).toEqual([0, 130, 260, 390])
+
+        fixture.destroy()
+      }))
+
+      it('counts the next poll from a refetch in between', fakeAsync(() => {
+        const queryFn = jasmine.createSpy('queryFn').and.returnValue(of(1))
+        const { fixture, result } = mount(() => ({
+          queryKey: ['todos'],
+          queryFn,
+          refetchInterval: 100,
+        }))
+
+        tick(60)
+        result.refetch()
+        expect(queryFn).toHaveBeenCalledTimes(2)
+
+        // The data is 40 ms old: no poll at 100.
+        tick(40)
+        expect(queryFn).toHaveBeenCalledTimes(2)
+
+        // 100 ms after the refetch.
+        tick(60)
+        expect(queryFn).toHaveBeenCalledTimes(3)
+
+        fixture.destroy()
+      }))
+
+      it('counts the next poll from an invalidation in between', fakeAsync(() => {
+        const queryFn = jasmine.createSpy('queryFn').and.returnValue(of(1))
+        const { fixture } = mount(() => ({
+          queryKey: ['todos'],
+          queryFn,
+          refetchInterval: 100,
+        }))
+
+        tick(60)
+        client.invalidateQueries({ queryKey: ['todos'] })
+        expect(queryFn).toHaveBeenCalledTimes(2)
+
+        // The data is 40 ms old: no poll at 100.
+        tick(40)
+        expect(queryFn).toHaveBeenCalledTimes(2)
+
+        // 100 ms after the refetch.
+        tick(60)
+        expect(queryFn).toHaveBeenCalledTimes(3)
+
+        fixture.destroy()
+      }))
+
+      it('counts the next poll from a cache write in between', fakeAsync(() => {
+        const queryFn = jasmine.createSpy('queryFn').and.returnValue(of(1))
+        const { fixture } = mount(() => ({
+          queryKey: ['todos'],
+          queryFn,
+          refetchInterval: 100,
+        }))
+
+        tick(60)
+        client.setQueryData(['todos'], 2)
+
+        // The data is 40 ms old: no poll at 100.
+        tick(40)
+        expect(queryFn).toHaveBeenCalledTimes(1)
+
+        // 100 ms after the write.
+        tick(60)
+        expect(queryFn).toHaveBeenCalledTimes(2)
+
+        fixture.destroy()
+      }))
+
+      it('makes one request per interval for all observers of a key', fakeAsync(() => {
+        // Two components polling the same key, the second one shown 50 ms
+        // later: their timers are out of step.
+        const { queryFn, starts } = timed(20)
+        const options = (): QueryOptions<number> => ({
+          queryKey: ['todos'],
+          queryFn,
+          refetchInterval: 100,
+        })
+        const first = mount(options)
+
+        elapse(50, first.fixture)
+
+        const second = mount(options)
+
+        elapse(400, first.fixture, second.fixture)
+
+        // Each fetches on mount (staleTime 0). Then one poll 100 ms after
+        // each response, whichever timer comes due first.
+        expect(starts).toEqual([0, 50, 170, 290, 410])
+
+        first.fixture.destroy()
+        second.fixture.destroy()
+      }))
+
+      it("polls at the shortest interval among a key's observers, then at the next one once that observer is gone", fakeAsync(() => {
+        const { queryFn, starts } = timed(30)
+        const options = (interval: Signal<number>): QueryOptions<number> => ({
+          queryKey: ['todos'],
+          queryFn,
+          refetchInterval: interval(),
+        })
+        // Two components on one key, asking for different intervals.
+        const fast = mount(options, 100)
+        const slow = mount(options, 300)
+
+        elapse(1000, fast.fixture, slow.fixture)
+
+        // The 100 ms one sets the pace: the 300 ms one adds no requests.
+        expect(starts).toEqual([0, 130, 260, 390, 520, 650, 780, 910])
+
+        fast.fixture.destroy()
+        elapse(1500, slow.fixture)
+
+        // 300 ms after the last response (at 940), then every 330 ms.
+        expect(starts.slice(8)).toEqual([1240, 1570, 1900, 2230])
+
+        slow.fixture.destroy()
+      }))
+
+      it('joins a request still in flight instead of sending another', fakeAsync(() => {
+        // The request hangs: polls that come due meanwhile mustn't pile up.
+        const { queryFn, inFlight, cancelled } = requests<number>()
+        const { fixture } = mount(() => ({
+          queryKey: ['todos'],
+          queryFn,
+          refetchInterval: 100,
+        }))
+
+        elapse(350, fixture)
+
+        expect(queryFn).toHaveBeenCalledTimes(1)
+        expect(inFlight()).toBe(1)
+        expect(cancelled()).toBe(0)
+
+        fixture.destroy()
+      }))
+
+      it('keeps its schedule while requests fail', fakeAsync(() => {
+        // Only new data pushes the next poll back: a request that fails
+        // doesn't (TanStack counts from the failure).
+        const start = Date.now()
+        const starts: number[] = []
+        const queryFn = jasmine.createSpy('queryFn').and.callFake(() => {
+          starts.push(Date.now() - start)
+
+          return timer(30).pipe(
+            map(() => {
+              throw new Error('down')
+            }),
+          )
+        })
+        const { fixture } = mount(() => ({
+          queryKey: ['todos'],
+          queryFn,
+          refetchInterval: 100,
+          retry: false,
+        }))
+
+        elapse(300, fixture)
+
+        expect(starts).toEqual([0, 100, 200, 300])
+
+        fixture.destroy()
+      }))
+    })
+
+    // A change reaches the effects only with change detection, which a
+    // zoneless app runs a moment after the signal write, so a poll can come
+    // due in between. It has to go by the live options.
+    describe('before change detection', () => {
+      it("does not store the next key's data under the previous one", fakeAsync(() => {
+        // The key reads a plain signal: an input only changes with change
+        // detection, and this has to happen before it.
+        const id = signal(1)
+        const { fixture } = mount(() => ({
+          queryKey: ['item', id()],
+          queryFn: () => of(`v${id()}`),
+          refetchInterval: 100,
+        }))
+
+        // The key has moved on, but change detection hasn't switched the
+        // observer to it yet: queryFn already fetches item 2.
+        id.set(2)
+        tick(100)
+
+        expect(client.getQueryData(['item', 1])).toBe('v1')
+
+        fixture.destroy()
+      }))
+
+      it('does not poll once disabled', fakeAsync(() => {
+        const enabled = signal(true)
+        const queryFn = jasmine.createSpy('queryFn').and.returnValue(of(1))
+        const { fixture } = mount(() => ({
+          queryKey: ['todos'],
+          queryFn,
+          refetchInterval: 100,
+          enabled: enabled(),
+        }))
+
+        enabled.set(false)
+        tick(100)
+
+        expect(queryFn).toHaveBeenCalledTimes(1)
+
+        fixture.destroy()
+      }))
+    })
+
+    it('does not poll without an interval, or with one no timer can hold', async () => {
+      // false, 0 and no interval mean no polling. A browser runs a timer with
+      // any of the other delays at once, over and over; TanStack skips
+      // Infinity and negative intervals too. fakeAsync doesn't mimic the
+      // browser here, hence real timers.
+      const intervals: Array<number | false | undefined> = [
+        false,
+        0,
+        undefined,
+        Infinity,
+        -1,
+        2 ** 31,
+      ]
+      const fetched: typeof intervals = []
+      const fixtures = intervals.map(
+        (interval) =>
+          mount(() => ({
+            queryKey: ['todos', String(interval)],
+            queryFn: () => {
+              fetched.push(interval)
+
+              return of(1)
+            },
+            refetchInterval: interval,
+          })).fixture,
+      )
+
+      await new Promise((resolve) => setTimeout(resolve, 50))
+      fixtures.forEach((fixture) => fixture.destroy())
+
+      // Each fetched once, on mount.
+      expect(fetched).toEqual(intervals)
+    })
   })
 
   describe('cancelRefetch', () => {

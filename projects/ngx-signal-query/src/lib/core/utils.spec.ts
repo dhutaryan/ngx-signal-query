@@ -1,4 +1,9 @@
-import { hashKey, isPlainObject, partialMatchKey } from './utils'
+import {
+  hashKey,
+  isPlainObject,
+  isValidTimeout,
+  partialMatchKey,
+} from './utils'
 
 describe('hashKey', () => {
   it('produces a stable string for the same key', () => {
@@ -60,5 +65,26 @@ describe('isPlainObject', () => {
     expect(isPlainObject([])).toBe(false)
     expect(isPlainObject(null)).toBe(false)
     expect(isPlainObject(new Date())).toBe(false)
+  })
+})
+
+describe('isValidTimeout', () => {
+  it('accepts a delay a timer can hold', () => {
+    expect(isValidTimeout(0)).toBe(true)
+    expect(isValidTimeout(1000)).toBe(true)
+    expect(isValidTimeout(2 ** 31 - 1)).toBe(true)
+  })
+
+  it('rejects a delay a browser would run at once', () => {
+    expect(isValidTimeout(Infinity)).toBe(false)
+    expect(isValidTimeout(-1)).toBe(false)
+    expect(isValidTimeout(2 ** 31)).toBe(false)
+    expect(isValidTimeout(NaN)).toBe(false)
+  })
+
+  it('rejects anything but a number', () => {
+    expect(isValidTimeout(false)).toBe(false)
+    expect(isValidTimeout(undefined)).toBe(false)
+    expect(isValidTimeout('1000')).toBe(false)
   })
 })
