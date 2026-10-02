@@ -1,0 +1,68 @@
+<section class="panel">
+  <h2>
+    Library calls inside an effect
+    <small>(issue #31)</small>
+  </h2>
+
+  <p class="hint">
+    An effect re-runs when a signal it read changes, including the signals a
+    library call read on its behalf. So the call itself shouldn't read any: the
+    effect should depend only on what it reads itself. Each card is an effect
+    from an app, shown without the demo's run counter. After each action its
+    numbers should match the expected ones. The fake server answers in
+    {{ latency }} ms (no network), and the demo stops an effect after
+    {{ runLimit }} runs, so a loop can't run away.
+  </p>
+
+  <div class="cards">
+    <app-prefetch-scenario />
+    <app-reconnect-scenario />
+    <app-push-scenario />
+    <app-optimistic-save-scenario />
+    <app-note-switch-scenario />
+  </div>
+
+  <details>
+    <summary>What to try</summary>
+    <p class="hint">
+      Every action should match the expected numbers. What each card does before
+      the fix:
+    </p>
+    <ul class="hint">
+      <li>
+        <strong>Prefetch the next page</strong>
+        — each response re-runs the effect, which requests the page again: a
+        request every {{ latency }} ms until the demo stops the effect.
+      </li>
+      <li>
+        <strong>Refetch when back online</strong>
+        — each refetch re-runs the effect at once, which cancels it and sends
+        another, until the demo stops the effect.
+      </li>
+      <li>
+        <strong>Refetch on a server push</strong>
+        — the push itself refetches once, as it should. After it, every new
+        entry in the cache re-runs the effect and refetches the list again: open
+        a todo, or click through another card.
+      </li>
+      <li>
+        <strong>Auto-save with an optimistic update</strong>
+        — one keystroke saves until the demo stops the effect: the update
+        re-runs the effect, which saves and updates again.
+      </li>
+      <li>
+        <strong>Auto-save, then open another note</strong>
+        — type, then open the other note: the effect re-runs and saves the draft
+        into the note you just opened.
+      </li>
+    </ul>
+    <p class="hint">
+      To see a change in the library here, rebuild it with
+      <code>pnpm build:lib</code>
+      or keep
+      <code>pnpm watch</code>
+      running: the playground uses the build in
+      <code>dist</code>
+    </p>
+  </details>
+</section>

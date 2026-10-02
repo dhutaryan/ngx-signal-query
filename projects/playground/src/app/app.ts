@@ -6,6 +6,7 @@ import {
 } from '@angular/core'
 
 import { Log } from './core/log/log'
+import { EffectsDemo } from './effects/effects-demo/effects-demo'
 import { InvalidationDemo } from './invalidation/invalidation-demo/invalidation-demo'
 import { LazyOptionsDemo } from './lazy-options/lazy-options-demo/lazy-options-demo'
 import { MutationDemo } from './mutations/mutation-demo/mutation-demo'
@@ -22,6 +23,7 @@ import { TodosApi } from './mutations/todos-api'
     LazyOptionsDemo,
     InvalidationDemo,
     PollingDemo,
+    EffectsDemo,
   ],
   templateUrl: './app.html',
   styleUrl: './app.scss',
