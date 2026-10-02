@@ -1,0 +1,220 @@
+<section class="panel">
+  <h2>
+    Polling
+    <small>(issue #16)</small>
+  </h2>
+
+  <p class="hint">
+    The observers below poll one key with
+    <code>refetchInterval</code>
+    , against a fake server that answers in {{ latency }} ms (no network). A
+    poll should fire {{ interval / 1000 }} s after the last response, whatever
+    else the options read, and once per interval however many components poll.
+    <strong>noise</strong>
+    changes a value the options read, unrelated to polling: through
+    <code>injectQuery</code>
+    it's the observer's own
+    <code>retry</code>
+    , through
+    <code>injectQueries</code>
+    a neighbour query in the same list reads it.
+  </p>
+
+  <div class="controls">
+    <span class="label">via</span>
+    @for (choice of viaChoices; track choice) {
+      <button
+        (click)="setVia(choice)"
+        [class.on]="via() === choice"
+        [disabled]="running()"
+      >
+        {{ choice }}
+      </button>
+    }
+
+    <span class="label">observers</span>
+    @for (count of observerChoices; track count) {
+      <button
+        (click)="setObserverCount(count)"
+        [class.on]="observerCount() === count"
+        [disabled]="running()"
+      >
+        {{ count }}
+      </button>
+    }
+  </div>
+
+  <div class="controls">
+    <span class="label">refetchInterval</span>
+    @for (choice of intervalChoices; track choice) {
+      <button
+        (click)="chooseInterval(choice)"
+        [class.on]="intervalChoice() === choice"
+      >
+        <code>{{ intervalLabels[choice] }}</code>
+      </button>
+    }
+
+    <span class="label">noise</span>
+    @for (ms of noiseChoices; track ms) {
+      <button (click)="setNoise(ms)" [class.on]="noisePeriod() === ms">
+        {{ ms === 0 ? 'off' : 'every ' + ms + ' ms' }}
+      </button>
+    }
+  </div>
+
+  <div class="controls">
+    <button (click)="invalidate()" [disabled]="!running()">
+      invalidateQueries
+    </button>
+    <button class="primary" (click)="toggleRunning()">
+      {{ running() ? 'Stop' : 'Start' }}
+    </button>
+  </div>
+
+  <div class="observers">
+    @for (n of observers(); track n) {
+      @if (via() === 'injectQuery') {
+        <app-polling-query-observer
+          [n]="n"
+          [interval]="intervalChoice()"
+          [noise]="noise()"
+        />
+      } @else {
+        <app-polling-queries-observer
+          [n]="n"
+          [interval]="intervalChoice()"
+          [noise]="noise()"
+        />
+      }
+    } @empty {
+      <p class="hint">
+        Not running. Pick a setup and press
+        <strong>Start</strong>
+        .
+      </p>
+    }
+  </div>
+
+  <table class="counters">
+    <thead>
+      <tr>
+        <th></th>
+        <th>requests in the last 5 s</th>
+        <th>since the last response</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>actual</td>
+        <td [class.bad]="perWindowOff()">{{ perWindow() }}</td>
+        <td [class.bad]="stalled()">
+          @if (sinceLastResponse() !== null) {
+            {{ sinceLastResponse() | number: '1.1-1' }} s
+          } @else {
+            —
+          }
+        </td>
+      </tr>
+      <tr class="expected">
+        <td>expected</td>
+        <td>≈ {{ expectedPerWindow }}</td>
+        <td>≤ {{ (interval + latency) / 1000 }} s</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <table class="timeline">
+    <thead>
+      <tr>
+        <th>sent at</th>
+        <th>by</th>
+        <th>after the last response</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+      @for (row of timeline(); track row.id) {
+        <tr>
+          <td>{{ row.at | number: '1.2-2' }} s</td>
+          <td>#{{ row.observer }}</td>
+          <td [class.bad]="isOffBeat(row)">
+            @if (row.cause) {
+              <span class="cause">{{ row.cause }}</span>
+            } @else if (row.sinceResponse === null) {
+              —
+            } @else {
+              {{ row.sinceResponse }} ms
+            }
+          </td>
+          <td class="state">{{ row.state }}</td>
+        </tr>
+      } @empty {
+        <tr>
+          <td colspan="4" class="hint">No requests yet.</td>
+        </tr>
+      }
+    </tbody>
+  </table>
+
+  <p class="hint">
+    A poll should come {{ interval }} ms (± {{ tolerance }}) after the last
+    response; red marks the ones that don't. The fetch on mount and requests you
+    trigger are labelled instead.
+  </p>
+
+  <details>
+    <summary>What to try</summary>
+    <p class="hint">
+      Start with one setting changed at a time. What each one does before the
+      fix, and what it should do:
+    </p>
+    <ul class="hint">
+      <li>
+        <strong>defaults</strong>
+        (1 observer,
+        <code>{{ interval }}</code>
+        , noise off) — polls {{ interval - latency }} ms after each response:
+        the timer ticks every second, however long the request took. Should be
+        {{ interval }} ms.
+      </li>
+      <li>
+        <strong>noise every 300 ms</strong>
+        — no polls at all, and "since the last response" keeps growing: every
+        change restarts the timer before it fires. Should make no difference.
+      </li>
+      <li>
+        <strong>noise every 1.5 s</strong>
+        — polls follow the noise, {{ interval / 1000 }} s after each change
+        rather than after the response.
+      </li>
+      <li>
+        <strong>injectQueries · noise every 300 ms</strong>
+        — the same stall, although only the neighbour query reads the noise.
+      </li>
+      <li>
+        <strong>
+          <code>({{ '{' }} state {{ '}' }}) => {{ interval }}</code>
+        </strong>
+        — unlike the number, polls about {{ interval }} ms after each response,
+        give or take change detection. Both forms should behave the same.
+      </li>
+      <li>
+        <strong>3 observers</strong>
+        — three timers out of step, a request every third of a second. Should be
+        one request per interval.
+      </li>
+      <li>
+        <strong>invalidateQueries</strong>
+        in the middle of an interval — the next poll keeps its slot, often right
+        after the refetch. It should come {{ interval }} ms after the refetch's
+        response.
+      </li>
+      <li>
+        <strong><code>Infinity</code></strong>
+        — requests back to back: the browser takes the delay as 0. Should not
+        poll at all.
+      </li>
+    </ul>
+  </details>
+</section>
