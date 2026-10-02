@@ -52,6 +52,12 @@ export type PlaceholderDataFunction<TData> = (
 /**
  * Polling interval in ms, `false` to disable, or a function of the current
  * query snapshot returning the next interval (e.g. stop polling on error).
+ *
+ * Each poll comes this many ms after the query's last update, a response or a
+ * cache write, so a fetch made for any other reason pushes it back. `0` means
+ * no polling, and so does a value no timer can hold: `Infinity`, a negative
+ * number, or more than 2³¹−1 ms. The function runs again on every update of
+ * the query, and the signals it reads are tracked.
  */
 export type RefetchIntervalValue<TData, TError> =
   | number
@@ -88,7 +94,11 @@ export type QueryOptions<TData, TError = Error> = {
   retry?: RetryValue<TError>
   /** Delay between retries. See {@link RetryDelayValue}. */
   retryDelay?: RetryDelayValue<TError>
-  /** Poll on an interval. See {@link RefetchIntervalValue}. */
+  /**
+   * Refetch on a timer while the query is observed and enabled, whatever its
+   * `staleTime`. The timer restarts only when the key, `enabled` or the
+   * interval changes. See {@link RefetchIntervalValue}.
+   */
   refetchInterval?: RefetchIntervalValue<TData, TError>
   /** Seed data to render immediately (treated as already-resolved). */
   initialData?: TData | (() => TData)

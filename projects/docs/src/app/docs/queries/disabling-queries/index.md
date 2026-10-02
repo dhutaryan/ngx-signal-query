@@ -11,7 +11,7 @@ With `enabled: false`, the query:
 
 - **won't fetch** when the component is created;
 - **won't refetch** when its key changes;
-- **won't poll**, even with `refetchInterval` set;
+- **won't poll**, even with [`refetchInterval`](/queries/polling) set;
 - **won't react to invalidation** — `invalidateQueries()` still marks it stale,
   but nothing is fetched until it's enabled again.
 

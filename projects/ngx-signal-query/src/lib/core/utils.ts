@@ -90,3 +90,15 @@ export function isPlainObject(o: any): o is Record<PropertyKey, unknown> {
 function hasObjectPrototype(o: any): boolean {
   return Object.prototype.toString.call(o) === '[object Object]'
 }
+
+// The longest delay a browser timer holds, in ms. A longer one overflows and
+// the timer fires at once.
+const MAX_TIMEOUT = 2 ** 31 - 1
+
+// True for a delay a timer can hold. For anything else, Infinity and negative
+// numbers included, a browser runs the timer at once. TanStack's
+// isValidTimeout checks the same, without the upper bound.
+/** @internal */
+export function isValidTimeout(value: unknown): value is number {
+  return typeof value === 'number' && value >= 0 && value <= MAX_TIMEOUT
+}

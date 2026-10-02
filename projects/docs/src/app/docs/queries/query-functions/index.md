@@ -48,8 +48,8 @@ piped through `take(1)`, so if your `Observable` emits more than once, only the
 
 So don't hand a query a long-lived stream (a WebSocket, an interval): it won't
 keep the cache in sync, it'll just take the first value and unsubscribe. To
-keep data fresh, use polling (`refetchInterval`) or write to the cache
-yourself with `setQueryData`.
+keep data fresh, use [polling](/queries/polling) (`refetchInterval`) or write
+to the cache yourself with `setQueryData`.
 
 Conversely, the `Observable` **must** produce a value. If it completes without
 emitting anything, the query fails with:

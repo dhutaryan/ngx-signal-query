@@ -283,6 +283,37 @@ describe('injectQueries', () => {
       expect(results()).toBe(before)
     })
 
+    it('keeps polling a query while the list changes around it', fakeAsync(() => {
+      const queryFn = jasmine
+        .createSpy('queryFn')
+        .and.callFake((id: number) => of(id))
+      const { fixture, value } = mount(
+        (ids) => ({
+          queries: ids().map((id) => ({
+            queryKey: ['todo', id],
+            queryFn: () => queryFn(id),
+            // Only the first todo polls.
+            refetchInterval: id === 1 ? 100 : false,
+          })),
+        }),
+        [1],
+      )
+
+      // A todo joins the list every 50 ms, twice per interval.
+      for (let next = 2; next <= 6; next++) {
+        tick(50)
+        value.update((ids) => [...ids, next])
+        fixture.detectChanges()
+      }
+
+      // 250 ms in: todo 1 was fetched on mount, then polled at 100 and 200.
+      const first = queryFn.calls.allArgs().filter(([id]) => id === 1)
+
+      expect(first.length).toBe(3)
+
+      fixture.destroy()
+    }))
+
     it('forwards changed options to the matching query', () => {
       const enabled = signal(false)
       const queryFn = jasmine.createSpy('queryFn').and.returnValue(of(1))
