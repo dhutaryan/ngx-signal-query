@@ -1,4 +1,4 @@
-import { Component, Injector } from '@angular/core'
+import { Component, Injector, type Signal, effect, signal } from '@angular/core'
 import {
   type ComponentFixture,
   TestBed,
@@ -439,6 +439,155 @@ describe('injectMutation', () => {
 
       expect(second).toHaveBeenCalledTimes(1)
       expect(m.data()).toBe(2)
+    })
+  })
+
+  // An effect that mutates or resets should depend only on what it reads
+  // itself, not on what mutate() or reset() read to do their job.
+  describe('called in an effect', () => {
+    // Mounts a component whose effect saves `draft()` as it changes, as an
+    // auto-save does. Stopped after 20 runs, so a loop fails the expectations
+    // rather than change detection.
+    function autoSave<TContext>(
+      draft: Signal<string>,
+      optionsFn: () => MutationOptions<string, Error, string, TContext>,
+    ): ComponentFixture<unknown> {
+      let runs = 0
+
+      @Component({ template: '' })
+      class Host {
+        readonly save = injectMutation(optionsFn)
+
+        constructor() {
+          effect(() => {
+            runs++
+
+            if (runs > 20) return
+
+            this.save.mutate(draft())
+          })
+        }
+      }
+
+      const fixture = TestBed.createComponent(Host)
+
+      fixture.detectChanges()
+
+      return fixture
+    }
+
+    it('saves once per change with an optimistic update', () => {
+      const draft = signal('a')
+      const mutationFn = jasmine
+        .createSpy('mutationFn')
+        .and.callFake((title: string) => of(title))
+
+      client.setQueryData<string[]>(['todos'], [])
+
+      const fixture = autoSave(draft, () => ({
+        mutationFn,
+        onMutate: (title) => {
+          const prev = client.getQueryData<string[]>(['todos']) ?? []
+
+          client.setQueryData(['todos'], [...prev, title])
+
+          return { prev }
+        },
+      }))
+
+      expect(mutationFn).toHaveBeenCalledTimes(1)
+
+      draft.set('b')
+      fixture.detectChanges()
+
+      expect(mutationFn).toHaveBeenCalledTimes(2)
+      expect(client.getQueryData(['todos'])).toEqual(['a', 'b'])
+    })
+
+    it("mutate() doesn't track what the options, onMutate or mutationFn read", () => {
+      const draft = signal('a')
+      const retries = signal(0)
+      const locale = signal('en')
+      const noteId = signal(1)
+      const mutationFn = jasmine
+        .createSpy('mutationFn')
+        .and.callFake((title: string) => of(`${noteId()}: ${title}`))
+
+      const fixture = autoSave(draft, () => ({
+        mutationFn,
+        retry: retries(),
+        onMutate: () => locale(),
+      }))
+
+      retries.set(1)
+      locale.set('nl')
+      noteId.set(2)
+      fixture.detectChanges()
+
+      // Only a new draft is a reason to save.
+      expect(mutationFn).toHaveBeenCalledTimes(1)
+    })
+
+    it('saves each change once while an earlier save is in flight', () => {
+      const draft = signal('a')
+      const saves: Array<Subject<string>> = []
+      const mutationFn = jasmine
+        .createSpy<(title: string) => Subject<string>>('mutationFn')
+        .and.callFake(() => {
+          const save = new Subject<string>()
+
+          saves.push(save)
+
+          return save
+        })
+      const fixture = autoSave(draft, () => ({ mutationFn }))
+
+      // Typed on before the first save landed, as fast typing does.
+      draft.set('ab')
+      fixture.detectChanges()
+
+      // The first save lands while the second is in flight, then the second.
+      for (const save of saves.slice(0, 2)) {
+        save.next('saved')
+        save.complete()
+        fixture.detectChanges()
+      }
+
+      expect(mutationFn.calls.allArgs()).toEqual([['a'], ['ab']])
+    })
+
+    it("reset() doesn't re-run the effect when the forgotten save lands", () => {
+      const open = signal(true)
+      const response = new Subject<string>()
+      let runs = 0
+
+      @Component({ template: '' })
+      class Host {
+        readonly save = injectMutation(() => ({ mutationFn: () => response }))
+
+        constructor() {
+          // Clears what the save left behind once the form closes.
+          effect(() => {
+            runs++
+
+            if (!open()) this.save.reset()
+          })
+        }
+      }
+
+      const fixture = TestBed.createComponent(Host)
+
+      fixture.detectChanges()
+      fixture.componentInstance.save.mutate()
+      open.set(false)
+      fixture.detectChanges()
+
+      response.next('saved')
+      response.complete()
+      fixture.detectChanges()
+
+      // Once on mount, once for the close.
+      expect(runs).toBe(2)
     })
   })
 

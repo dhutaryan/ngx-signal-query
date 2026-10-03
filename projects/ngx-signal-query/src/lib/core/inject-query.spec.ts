@@ -334,6 +334,40 @@ describe('injectQuery', () => {
 
       expect(queryFn).toHaveBeenCalledTimes(1)
     })
+
+    it('sends one request for a refetch() made in an effect', fakeAsync(() => {
+      const { queryFn } = timed(100)
+      const online = signal(false)
+      let runs = 0
+
+      @Component({ template: '' })
+      class Host {
+        readonly result = injectQuery(() => ({ queryKey: ['todos'], queryFn }))
+
+        constructor() {
+          // Refetches once the connection is back. Stopped after 20 runs, so
+          // a loop fails the expectation rather than change detection.
+          effect(() => {
+            runs++
+
+            if (runs > 20) return
+
+            if (online()) this.result.refetch()
+          })
+        }
+      }
+
+      const fixture = TestBed.createComponent(Host)
+
+      fixture.detectChanges()
+      elapse(100, fixture)
+      online.set(true)
+      fixture.detectChanges()
+      elapse(100, fixture)
+
+      // One on mount, one for the reconnect.
+      expect(queryFn).toHaveBeenCalledTimes(2)
+    }))
   })
 
   // One invalidateQueries() call costs one request per query, however many

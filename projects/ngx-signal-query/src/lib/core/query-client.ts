@@ -23,9 +23,21 @@ import { QUERY_CLIENT_CONFIG } from './injection-tokens'
  * {@link injectQueryClient}. Offers imperative cache access — reading and
  * writing data, and invalidating, cancelling, or removing queries — that
  * complements the reactive {@link injectQuery} / {@link injectMutation} APIs.
+ *
+ * Its methods aren't reactive. Called from an effect, a method doesn't make
+ * the effect depend on the cache, on a query's state, or on what `queryFn` or
+ * an updater reads: the effect re-runs only when what it reads itself
+ * changes. A read is a snapshot, in a template or a `computed` too; for state
+ * that updates, use {@link injectQuery}, {@link injectIsFetching} and
+ * {@link injectIsMutating}.
  */
 @Injectable()
 export class QueryClient {
+  // Every method that reads or writes the cache runs its body untracked. A
+  // call made from an effect mustn't make the effect depend on what the
+  // method reads to do its job: the cache, a query's state, or what queryFn
+  // or an updater reads. Otherwise a change to any of them re-runs the effect,
+  // and the effect repeats the call.
   readonly #cache = inject(QueryCache)
   readonly #mutationCache = inject(MutationCache)
   readonly #config = inject(QUERY_CLIENT_CONFIG, { optional: true }) ?? {}
@@ -63,7 +75,7 @@ export class QueryClient {
   /**
    * Imperatively fetches and caches a query, unless fresh data already exists
    * (governed by `staleTime`). Prefer {@link injectQuery} in components; use
-   * this for prefetching outside the reactive flow.
+   * this to prefetch, from an event handler or an effect.
    *
    * @param key - The query key to fetch and cache under.
    * @param queryFn - Function returning the data as an `Observable` or `Promise`.
@@ -82,28 +94,32 @@ export class QueryClient {
       cancelRefetch?: boolean
     } = {},
   ): void {
-    const defaults = this.#config.defaultOptions?.queries
-    const staleTime = options.staleTime ?? defaults?.staleTime ?? 0
-    const retry = options.retry ?? defaults?.retry ?? 3
-    const retryDelay =
-      options.retryDelay ?? defaults?.retryDelay ?? defaultRetryDelay
+    untracked(() => {
+      const defaults = this.#config.defaultOptions?.queries
+      const staleTime = options.staleTime ?? defaults?.staleTime ?? 0
+      const retry = options.retry ?? defaults?.retry ?? 3
+      const retryDelay =
+        options.retryDelay ?? defaults?.retryDelay ?? defaultRetryDelay
 
-    const query = this.#cache.getOrCreate<TData>(key)
+      const query = this.#cache.getOrCreate<TData>(key)
 
-    if (query.shouldFetch(staleTime)) {
-      query.fetch(queryFn, retry, retryDelay, options.cancelRefetch)
-    }
+      if (query.shouldFetch(staleTime)) {
+        query.fetch(queryFn, retry, retryDelay, options.cancelRefetch)
+      }
+    })
   }
 
   /**
    * Reads the current cached data for a query key, or `undefined` if the query
-   * is not cached yet.
+   * is not cached yet. A snapshot: it doesn't update a template, a `computed`
+   * or an effect when the data changes. For data that updates, use
+   * {@link injectQuery}.
    *
    * @param key - The query key to read.
    * @returns The cached data, or `undefined`.
    */
   getQueryData<TData>(key: QueryKey): TData | undefined {
-    return this.#cache.get<TData>(key)?.state().data
+    return untracked(() => this.#cache.get<TData>(key)?.state().data)
   }
 
   /**
@@ -123,13 +139,15 @@ export class QueryClient {
     key: QueryKey,
     updater: Updater<TData | undefined, TData>,
   ): void {
-    const query = this.#cache.getOrCreate<TData>(key)
-    const data = functionalUpdate(updater, query.state().data)
+    untracked(() => {
+      const query = this.#cache.getOrCreate<TData>(key)
+      const data = functionalUpdate(updater, query.state().data)
 
-    // Matches TanStack: an updater returning undefined is a no-op.
-    if (data === undefined) return
+      // Matches TanStack: an updater returning undefined is a no-op.
+      if (data === undefined) return
 
-    query.setData(data)
+      query.setData(data)
+    })
   }
 
   /**
@@ -148,25 +166,23 @@ export class QueryClient {
    * ```
    */
   invalidateQueries(filters?: QueryFilters): void {
-    const queries = this.#cache.findAll(filters)
+    untracked(() => {
+      const queries = this.#cache.findAll(filters)
 
-    queries.forEach((query) => query.invalidate())
+      queries.forEach((query) => query.invalidate())
 
-    // Refetch each active query once, however many observers watch it; an
-    // inactive one refetches when next observed, as shouldFetch sees the flag.
-    // cancelRefetch: a fetch already in flight started before the
-    // invalidation, so it may have missed the change. untracked: queryFn runs
-    // synchronously here, and an effect calling this mustn't start tracking
-    // what it reads.
-    untracked(() =>
+      // Refetch each active query once, however many observers watch it; an
+      // inactive one refetches when next observed, as shouldFetch sees the
+      // flag. cancelRefetch: a fetch already in flight started before the
+      // invalidation, so it may have missed the change.
       queries.forEach((query) => {
         const options = query.activeFetchOptions()
 
         if (options) {
           query.fetch(options.queryFn, options.retry, options.retryDelay, true)
         }
-      }),
-    )
+      })
+    })
   }
 
   /**
@@ -175,7 +191,9 @@ export class QueryClient {
    * @param filters - Which queries to cancel; omit to cancel all.
    */
   cancelQueries(filters?: QueryFilters): void {
-    this.#cache.findAll(filters).forEach((query) => query.cancel())
+    untracked(() =>
+      this.#cache.findAll(filters).forEach((query) => query.cancel()),
+    )
   }
 
   /**
@@ -184,29 +202,39 @@ export class QueryClient {
    * @param filters - Which queries to remove; omit to remove all.
    */
   removeQueries(filters?: QueryFilters): void {
-    this.#cache.findAll(filters).forEach((query) => {
-      query.destroy()
-      this.#cache.remove(query)
-    })
+    untracked(() =>
+      this.#cache.findAll(filters).forEach((query) => {
+        query.destroy()
+        this.#cache.remove(query)
+      }),
+    )
   }
 
   /**
-   * Returns the number of matching queries currently fetching. For a reactive
-   * count, prefer {@link injectIsFetching}.
+   * Returns the number of matching queries currently fetching. A snapshot: it
+   * doesn't update a template, a `computed` or an effect. For a count that
+   * updates, use {@link injectIsFetching}.
    *
    * @param filters - Which queries to count; omit to count all.
    */
   isFetching(filters?: QueryFilters): number {
-    return this.#cache
-      .findAll(filters)
-      .filter((query) => query.state().isFetching).length
+    return untracked(() => {
+      const fetching = this.#cache
+        .findAll(filters)
+        .filter((query) => query.state().isFetching)
+
+      return fetching.length
+    })
   }
 
   /**
-   * Returns the number of mutations currently pending. For a reactive count,
-   * prefer {@link injectIsMutating}.
+   * Returns the number of mutations currently pending. A snapshot: it doesn't
+   * update a template, a `computed` or an effect. For a count that updates,
+   * use {@link injectIsMutating}.
    */
   isMutating(): number {
-    return this.#mutationCache.findAll({ status: 'pending' }).length
+    return untracked(
+      () => this.#mutationCache.findAll({ status: 'pending' }).length,
+    )
   }
 }
