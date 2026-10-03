@@ -13,9 +13,10 @@ const todos = this.#client.getQueryData<Todo[]>(['todos'])
 ```
 
 This is a one-time read, **not** reactive. It doesn't subscribe, doesn't trigger
-a fetch, and won't update when the data changes. For live data in a component,
-use `injectQuery`; reach for `getQueryData` inside imperative code — a mutation
-hook, an event handler — where you just need the value as it stands.
+a fetch, and won't update when the data changes, not even in a template or a
+`computed`. For live data in a component, use `injectQuery`; reach for
+`getQueryData` inside imperative code — a mutation hook, an event handler, an
+effect — where you just need the value as it stands.
 
 > The type is on you: `getQueryData<Todo[]>(...)`. Keys carry no type
 > information, so the generic isn't inferred — pass it explicitly and make sure
@@ -98,6 +99,10 @@ protected prefetchTodo(id: number): void {
 It respects `staleTime`: if the key already holds fresh-enough data, it does
 nothing, so prefetching on every hover won't spam the network. It returns
 `void` — fire-and-forget, populating the cache in the background.
+
+It's safe to call from an effect as well, to prefetch the next page whenever the
+page changes, say: see
+[Calling it from an effect](/query-client/overview#calling-it-from-an-effect).
 
 When the real `injectQuery` mounts, it finds the data already cached and renders
 without a loading state.

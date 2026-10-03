@@ -25,7 +25,9 @@ import {
  * to trigger `mutationFn`. The `onMutate` / `onSuccess` / `onError` /
  * `onSettled` lifecycle hooks make optimistic updates and cache invalidation
  * straightforward. Mutations do not retry by default (a retried write is not
- * idempotent); opt in via `options.retry`. Bound to the current injection
+ * idempotent); opt in via `options.retry`. `mutate()` and `reset()` are safe
+ * to call from an effect: neither makes the effect depend on what it reads,
+ * such as the options or the previous run. Bound to the current injection
  * context and cancelled when that context is destroyed.
  *
  * Must run in an injection context, or be given an explicit `injector`.
@@ -90,28 +92,35 @@ export function injectMutation<
     )
 
     return {
-      mutate: (variables) => {
-        // Stop observing the previous run. It isn't cancelled — if it's still
-        // in flight it finishes and fires its hooks; it just no longer feeds
-        // the signals below.
-        untracked(current)?.removeObserver()
+      // mutate() and reset() run untracked, as the QueryClient's methods do. A
+      // call made from an effect mustn't make the effect depend on what they
+      // read to do their job: the previous run's state, the options, or what
+      // onMutate and mutationFn read. Otherwise a change to any of them
+      // re-runs the effect, and the effect repeats the call.
+      mutate: (variables) =>
+        untracked(() => {
+          // Stop observing the previous run. It isn't cancelled — if it's
+          // still in flight it finishes and fires its hooks; it just no longer
+          // feeds the signals below.
+          current()?.removeObserver()
 
-        // Options are read per call, so a signal used in them stays live.
-        const run = cache.build(optionsFn())
+          // Options are read per call, so a signal used in them stays live.
+          const run = cache.build(optionsFn())
 
-        run.addObserver()
-        current.set(run)
-        run.execute(variables)
-      },
-      reset: () => {
-        // "Forget the result", not "stop the request". A run still in flight
-        // keeps going and fires its hooks, so the cache stays in step with the
-        // server — cancelling could not un-send the write anyway, it could only
-        // hide the fact that it happened.
-        untracked(current)?.removeObserver()
+          run.addObserver()
+          current.set(run)
+          run.execute(variables)
+        }),
+      reset: () =>
+        untracked(() => {
+          // "Forget the result", not "stop the request". A run still in
+          // flight keeps going and fires its hooks, so the cache stays in step
+          // with the server — cancelling could not un-send the write anyway,
+          // it could only hide the fact that it happened.
+          current()?.removeObserver()
 
-        current.set(null)
-      },
+          current.set(null)
+        }),
       data: computed(() => state().data),
       error: computed(() => state().error as TError | null),
       variables: computed(() => state().variables),

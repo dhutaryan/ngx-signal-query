@@ -1,9 +1,47 @@
-import { fakeAsync, TestBed, tick } from '@angular/core/testing'
-import { of } from 'rxjs'
+import { Component, effect, signal } from '@angular/core'
+import {
+  type ComponentFixture,
+  fakeAsync,
+  TestBed,
+  tick,
+} from '@angular/core/testing'
+import { of, Subject } from 'rxjs'
 
 import { withDefaultOptions } from '../features/with-default-options'
+import { injectMutation } from './inject-mutation'
 import { provideQueryClient } from './provider'
 import { QueryClient } from './query-client'
+
+// Runs `body` in an effect of a mounted component, the way an app calls the
+// client from one. Returns the fixture (detectChanges() flushes the effect
+// after a change) and how many times the effect has run. An effect that keeps
+// re-running itself is stopped after 20 runs, so a spec fails on its
+// expectations rather than on change detection giving up (NG0103).
+function inEffect(body: () => void): {
+  fixture: ComponentFixture<unknown>
+  runs: () => number
+} {
+  let runs = 0
+
+  @Component({ template: '' })
+  class Host {
+    constructor() {
+      effect(() => {
+        runs++
+
+        if (runs > 20) return
+
+        body()
+      })
+    }
+  }
+
+  const fixture = TestBed.createComponent(Host)
+
+  fixture.detectChanges()
+
+  return { fixture, runs: () => runs }
+}
 
 describe('QueryClient', () => {
   let client: QueryClient
@@ -258,6 +296,165 @@ describe('QueryClient', () => {
 
       expect(client.isFetching()).toBe(1)
       expect(client.isFetching({ queryKey: ['other'] })).toBe(0)
+    })
+  })
+
+  // An effect that calls the client should depend only on what it reads
+  // itself. What the call reads to do its job, the cache or a query's state,
+  // mustn't become a dependency of the effect, or the call repeats whenever
+  // that changes.
+  describe('called in an effect', () => {
+    it('fetchQuery prefetches the next page once, not once per response', () => {
+      const page = signal(1)
+      const responses: Array<Subject<string>> = []
+      const fetchPage = jasmine
+        .createSpy<(page: number) => Subject<string>>('fetchPage')
+        .and.callFake(() => {
+          const response = new Subject<string>()
+
+          responses.push(response)
+
+          return response
+        })
+      const { fixture } = inEffect(() => {
+        const next = page() + 1
+
+        client.fetchQuery(['todos', next], () => fetchPage(next))
+      })
+
+      // Answer the latest request, three times over: an answer mustn't send
+      // the request again.
+      for (let i = 0; i < 3; i++) {
+        responses.at(-1)?.next('page')
+        responses.at(-1)?.complete()
+        fixture.detectChanges()
+      }
+
+      expect(fetchPage.calls.allArgs()).toEqual([[2]])
+
+      page.set(2)
+      fixture.detectChanges()
+
+      expect(fetchPage.calls.allArgs()).toEqual([[2], [3]])
+    })
+
+    it("fetchQuery doesn't make the effect depend on the query or on what queryFn reads", () => {
+      const version = signal(1)
+      const { fixture, runs } = inEffect(() =>
+        client.fetchQuery(['todos'], () => of(version()), {
+          staleTime: Infinity,
+        }),
+      )
+
+      // The call itself updated the query: fetching, then success.
+      expect(runs()).toBe(1)
+
+      version.set(2)
+      fixture.detectChanges()
+
+      expect(runs()).toBe(1)
+    })
+
+    it("setQueryData runs an updater once, and doesn't track what it reads", () => {
+      const step = signal(1)
+      const { fixture, runs } = inEffect(() =>
+        client.setQueryData<number>(['count'], (count = 0) => count + step()),
+      )
+
+      expect(runs()).toBe(1)
+      expect(client.getQueryData(['count'])).toBe(1)
+
+      step.set(2)
+      fixture.detectChanges()
+
+      expect(runs()).toBe(1)
+      expect(client.getQueryData(['count'])).toBe(1)
+    })
+
+    it("getQueryData doesn't re-run the effect when the data changes", () => {
+      const seen: unknown[] = []
+
+      client.setQueryData(['todos'], ['a'])
+
+      const { fixture } = inEffect(() =>
+        seen.push(client.getQueryData(['todos'])),
+      )
+
+      client.setQueryData(['todos'], ['a', 'b'])
+      fixture.detectChanges()
+
+      expect(seen).toEqual([['a']])
+    })
+
+    it("invalidateQueries doesn't re-run the effect when another query enters the cache", () => {
+      client.setQueryData(['todos'], ['a'])
+
+      const { fixture, runs } = inEffect(() =>
+        client.invalidateQueries({ queryKey: ['todos'] }),
+      )
+
+      // Fresh data clears the mark; only another invalidation sets it again.
+      client.setQueryData(['todos'], ['a', 'b'])
+      client.setQueryData(['user'], 'Ann')
+      fixture.detectChanges()
+
+      expect(runs()).toBe(1)
+      expect(client.getQueryCache().get(['todos'])?.state().isInvalidated).toBe(
+        false,
+      )
+    })
+
+    it("cancelQueries doesn't cancel a fetch that starts after it", () => {
+      const { fixture } = inEffect(() =>
+        client.cancelQueries({ queryKey: ['todos'] }),
+      )
+
+      client.fetchQuery(['todos'], () => new Subject<string[]>())
+      fixture.detectChanges()
+
+      expect(client.isFetching({ queryKey: ['todos'] })).toBe(1)
+    })
+
+    it("removeQueries doesn't remove an entry created after it", () => {
+      const { fixture } = inEffect(() =>
+        client.removeQueries({ queryKey: ['todos'] }),
+      )
+
+      client.setQueryData(['todos'], ['a'])
+      fixture.detectChanges()
+
+      expect(client.getQueryData(['todos'])).toEqual(['a'])
+    })
+
+    it("isFetching doesn't re-run the effect as fetches start and settle", () => {
+      const response = new Subject<string[]>()
+      const seen: number[] = []
+      const { fixture } = inEffect(() => seen.push(client.isFetching()))
+
+      client.fetchQuery(['todos'], () => response)
+      fixture.detectChanges()
+      response.next(['a'])
+      response.complete()
+      fixture.detectChanges()
+
+      expect(seen).toEqual([0])
+    })
+
+    it("isMutating doesn't re-run the effect as mutations start and settle", () => {
+      const response = new Subject<string>()
+      const save = TestBed.runInInjectionContext(() =>
+        injectMutation(() => ({ mutationFn: () => response })),
+      )
+      const seen: number[] = []
+      const { fixture } = inEffect(() => seen.push(client.isMutating()))
+
+      save.mutate()
+      fixture.detectChanges()
+      response.next('saved')
+      response.complete()
+      fixture.detectChanges()
+
+      expect(seen).toEqual([0])
     })
   })
 })

@@ -46,6 +46,49 @@ Each of these gets its own page in this section. Most of them take
 [filters](/query-client/filters) to pick which queries they act on — the same
 `queryKey` / `exact` matching that drives invalidation.
 
+## Calling it from an effect
+
+The client's methods aren't reactive, so they're safe to call from an
+`effect()`. A call doesn't make the effect depend on the cache, on a query's
+state, or on what `queryFn` or an updater reads: the effect runs again only when
+a signal it reads itself changes. Prefetching the next page of a list, say:
+
+```ts
+export class TodosComponent {
+  readonly #http = inject(HttpClient)
+  readonly #client = injectQueryClient()
+
+  protected readonly page = signal(1)
+
+  protected readonly todos = injectQuery(() => ({
+    queryKey: ['todos', this.page()],
+    queryFn: () => this.#http.get<Todo[]>(`/api/todos?page=${this.page()}`),
+    placeholderData: keepPreviousData,
+  }))
+
+  constructor() {
+    // Runs again when page() changes, not when the prefetch fills the cache.
+    effect(() => {
+      const next = this.page() + 1
+
+      this.#client.fetchQuery(['todos', next], () =>
+        this.#http.get<Todo[]>(`/api/todos?page=${next}`),
+      )
+    })
+  }
+}
+```
+
+Clicking to the next page then shows its rows at once, while they refetch in
+the background. A mutation's `mutate()` and `reset()`, and a query's
+`refetch()`, are just as safe in an effect.
+
+The flip side: a read is a **snapshot**. `getQueryData()`, `isFetching()` and
+`isMutating()` return the value as it is when you call them, and a template, a
+`computed` or an effect that calls them doesn't update when it changes. For
+state that updates, use `injectQuery` — with `enabled: false` if you only want
+to watch what's in the cache — and `injectIsFetching()` / `injectIsMutating()`.
+
 ## For loading indicators, prefer the signals
 
 The client also exposes `isFetching()` and `isMutating()` as plain numbers, but
