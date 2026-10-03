@@ -83,7 +83,10 @@ export type MutationOptions<TData, TError, TVariables, TContext> = {
 export type MutationResult<TData, TError, TVariables> = {
   /** Triggers the mutation with the given variables. */
   mutate: (variables: TVariables) => void
-  /** Resets state back to `idle`, cancelling any in-flight run. */
+  /**
+   * Resets the state to `idle`. It forgets the result and doesn't stop the
+   * request: a run in flight finishes and fires its hooks.
+   */
   reset: () => void
   /** Data from the last successful run, or `undefined`. */
   data: Signal<TData | undefined>

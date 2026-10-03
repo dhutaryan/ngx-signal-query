@@ -28,7 +28,8 @@ import {
  * idempotent); opt in via `options.retry`. `mutate()` and `reset()` are safe
  * to call from an effect: neither makes the effect depend on what it reads,
  * such as the options or the previous run. Bound to the current injection
- * context and cancelled when that context is destroyed.
+ * context. Destroying it doesn't cancel a run in flight: the write has most
+ * likely reached the server, so the run finishes and fires its hooks.
  *
  * Must run in an injection context, or be given an explicit `injector`.
  *
