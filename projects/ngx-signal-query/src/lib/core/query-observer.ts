@@ -71,7 +71,10 @@ export function createQueryObserver<TData, TError = Error>(
   // it renders immediately as 'success'. Without an explicit
   // initialDataUpdatedAt the seed is treated as fetched right now, so
   // staleTime applies to it as it would to any other data (a staleTime of 0
-  // still means "stale immediately" → background refetch).
+  // still means "stale immediately" → background refetch). A function that
+  // returns undefined has nothing to seed, so the query stays 'pending' and
+  // fetches; it is asked again whenever the key is resolved while the query
+  // is still pending, and seeds it if it has data by then, as in TanStack.
   const applyInitialData = (q: Query<TData, TError>): void => {
     const { initialData, initialDataUpdatedAt } = untracked(defaultedOptions)
 
@@ -79,8 +82,11 @@ export function createQueryObserver<TData, TError = Error>(
 
     const data =
       typeof initialData === 'function'
-        ? (initialData as () => TData)()
+        ? (initialData as () => TData | undefined)()
         : initialData
+
+    if (data === undefined) return
+
     const updatedAt =
       typeof initialDataUpdatedAt === 'function'
         ? initialDataUpdatedAt()

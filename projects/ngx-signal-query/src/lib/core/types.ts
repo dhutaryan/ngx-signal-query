@@ -100,8 +100,12 @@ export type QueryOptions<TData, TError = Error> = {
    * interval changes. See {@link RefetchIntervalValue}.
    */
   refetchInterval?: RefetchIntervalValue<TData, TError>
-  /** Seed data to render immediately (treated as already-resolved). */
-  initialData?: TData | (() => TData)
+  /**
+   * Seed data to render immediately (treated as already-resolved). A
+   * function runs only while the query has no data yet; returning `undefined`
+   * seeds nothing, so the query stays `'pending'` and fetches.
+   */
+  initialData?: TData | (() => TData | undefined)
   /**
    * Data shown while the query is `'pending'` with no data yet, either a value
    * or a function of the previous query's data (see {@link keepPreviousData}).

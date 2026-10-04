@@ -97,7 +97,9 @@ export class TodoDetailComponent {
 ```
 
 The detail view renders instantly from the list's data, then refetches in the
-background to fill in whatever the list row didn't have.
+background to fill in whatever the list row didn't have. If the list isn't
+cached, or has no such row, `find` returns `undefined`: nothing is seeded, and
+the query starts `'pending'` as usual.
 
 This works with a reactive key too: the seed function runs again for each new
 id, so navigating between todos keeps seeding from the list.
