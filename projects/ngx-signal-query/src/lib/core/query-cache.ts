@@ -24,6 +24,16 @@ export class QueryCache extends Cache<Query<unknown, unknown>> {
     return this.getEntry(hashKey(key)) as Query<TData, TError> | undefined
   }
 
+  /**
+   * Like get(), but reactive, as findAll() is: a computed or an effect that
+   * calls it re-runs when an entry is added or removed.
+   */
+  find<TData, TError = Error>(key: QueryKey): Query<TData, TError> | undefined {
+    this.entries()
+
+    return this.get<TData, TError>(key)
+  }
+
   findAll(filters: QueryFilters = {}): Array<Query<unknown, unknown>> {
     const { queryKey, exact } = filters
 
