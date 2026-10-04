@@ -100,7 +100,8 @@ export function createQueryObserver<TData, TError = Error>(
     return q
   }
 
-  // The query the key effect below last switched to; unset until it first runs.
+  // The query the observer last switched to, by the key effect or the follow
+  // effect below; unset until the key effect first runs.
   const switched = signal<Query<TData, TError> | undefined>(undefined)
 
   // The observed query, resolved lazily: on the first read of a result signal
@@ -108,20 +109,20 @@ export function createQueryObserver<TData, TError = Error>(
   // optionsFn, which may read inputs or fields that don't exist yet while the
   // owner is being constructed. A read before the key effect's first run
   // resolves the current key on the spot, so it already sees cached data and
-  // initialData; from then on only the key effect switches queries.
+  // initialData; from then on the key and follow effects switch queries.
   const query = computed(
     () => switched() ?? untracked(() => resolve(defaultedOptions().queryKey)),
   )
 
   // Data of the last query that had any, fed to the placeholderData function
-  // on key change (mirrors TanStack's lastQueryWithDefinedData). Captured
-  // synchronously before the switch so it can't miss a just-resolved value.
+  // on a switch: a key change, or the key coming back after a removal
+  // (mirrors TanStack's lastQueryWithDefinedData). Captured synchronously
+  // before the switch so it can't miss a just-resolved value.
   const lastData = signal<TData | undefined>(undefined)
 
-  track(() => {
-    const key = defaultedOptions().queryKey
-    const q = untracked(() => resolve(key))
-
+  // Switches the observer to q, first keeping the data of the query it
+  // leaves for the placeholderData function.
+  const switchTo = (q: Query<TData, TError>): void => {
     untracked(() => {
       const prev = switched()
 
@@ -130,6 +131,33 @@ export function createQueryObserver<TData, TError = Error>(
       }
     })
     switched.set(q)
+  }
+
+  track(() => {
+    const key = defaultedOptions().queryKey
+
+    switchTo(untracked(() => resolve(key)))
+  })
+
+  // The query cached under the key right now, read reactively: undefined once
+  // removeQueries drops it, and the new entry once something brings the key
+  // back.
+  const cached = computed(() =>
+    cache.find<TData, TError>(defaultedOptions().queryKey),
+  )
+
+  // After removeQueries the observer keeps the query the cache dropped and
+  // shows what it had: nothing here brings the key back, as in TanStack, where
+  // a removal doesn't refetch. Whatever does bring it back (a write, a refetch,
+  // another component, a poll), the observer follows it there as on a key
+  // change: resolve() seeds initialData into an entry still pending. Without
+  // this, it would see the new entry only once its options change.
+  track(() => {
+    const entry = cached()
+
+    if (!entry || entry === untracked(switched)) return
+
+    switchTo(untracked(() => resolve(entry.key)))
   })
 
   // How this observer would fetch q right now, from the live options; null
@@ -233,12 +261,17 @@ export function createQueryObserver<TData, TError = Error>(
 
     if (!ms) return
 
-    // Fetches q with the options as they are when it fires, which may have
-    // changed since the effect ran.
+    // Fetches the key with the options as they are when it fires, which may
+    // have changed since the effect ran. The key's entry is q, unless
+    // removeQueries dropped it: then the poll puts the key back, as TanStack's
+    // observer does before every fetch, and the follow effect moves this
+    // observer there.
     const poll = (): void => {
       const options = fetchOptionsFor(q)
 
-      if (options) q.fetch(options.queryFn, options.retry, options.retryDelay)
+      if (options) {
+        resolve(q.key).fetch(options.queryFn, options.retry, options.retryDelay)
+      }
     }
 
     onCleanup(startPolling(ms, () => q.state().updatedAt, poll))

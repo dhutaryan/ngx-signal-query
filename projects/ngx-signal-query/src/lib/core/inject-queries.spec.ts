@@ -441,6 +441,28 @@ describe('injectQueries', () => {
   // optionsFn may read what a component only has once it's rendered: its
   // inputs, and fields declared after the call. So it must not run while the
   // host is being constructed.
+  describe('after removeQueries', () => {
+    it('follows a query of the list back into the cache', () => {
+      const { fixture, results } = mount(
+        (ids) => ({
+          queries: ids().map((id) => ({
+            queryKey: ['todo', id],
+            queryFn: () => of(`todo-${id}`),
+            staleTime: Infinity,
+          })),
+        }),
+        [1, 2],
+      )
+
+      client.removeQueries({ queryKey: ['todo', 1], exact: true })
+      fixture.detectChanges()
+      client.setQueryData(['todo', 1], 'edited')
+      fixture.detectChanges()
+
+      expect(results().map((todo) => todo.data())).toEqual(['edited', 'todo-2'])
+    })
+  })
+
   describe('options evaluation', () => {
     it('does not call optionsFn while the host is being constructed', () => {
       const optionsFn = jasmine.createSpy('optionsFn').and.returnValue({

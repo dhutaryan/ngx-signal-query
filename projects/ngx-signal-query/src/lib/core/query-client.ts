@@ -197,7 +197,11 @@ export class QueryClient {
   }
 
   /**
-   * Removes matching queries from the cache entirely, discarding their data.
+   * Removes matching queries from the cache entirely, discarding their data
+   * and cancelling their fetches. Nothing is refetched: a component still
+   * showing a removed key keeps what it shows until something puts the key
+   * back in the cache (a write, a refetch, another component, its own
+   * polling), then shows what the cache holds, as after a key change.
    *
    * @param filters - Which queries to remove; omit to remove all.
    */

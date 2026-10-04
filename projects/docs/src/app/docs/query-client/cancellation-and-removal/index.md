@@ -38,8 +38,11 @@ this.#client.removeQueries({ queryKey: ['todos', 5], exact: true })
 this.#client.removeQueries()
 ```
 
-The next time a query needs one of those keys, there's nothing cached, so it's a
-cold fetch — a loading state, no stale data to show in the meantime.
+A component that shows one of those keys afterwards finds nothing cached: a cold
+fetch, with a loading state. A component already showing one keeps what it
+shows — removal refetches nothing — until something puts the key back in the
+cache: a refetch, `setQueryData`, another component, or its own polling. From
+then on it shows what the cache holds again.
 
 Reach for it when data should be **gone**, not merely refreshed:
 
@@ -53,11 +56,24 @@ Reach for it when data should be **gone**, not merely refreshed:
   }
   ```
 
+  A component that stays on screen through the logout, such as a header, keeps
+  what it shows. Put the user's id in the key of queries that belong to the
+  user, and gate them with `enabled`: logging out disables them, so they show
+  nothing, and the next user's data is fetched under its own key.
+
+  ```ts
+  readonly profile = injectQuery(() => ({
+    queryKey: ['profile', this.auth.userId()],
+    queryFn: () => this.#api.profile(),
+    enabled: this.auth.userId() !== null,
+  }))
+  ```
+
 - **Leaving a feature area** for good, to free memory you won't need again.
 
 For the everyday "this data changed, go get it again", you want
-[invalidation](/query-client/query-invalidation), not removal — removal blanks
-the screen, invalidation refreshes in place.
+[invalidation](/query-client/query-invalidation), not removal — removal throws
+the data away, invalidation refreshes it in place.
 
 ## Which to reach for
 

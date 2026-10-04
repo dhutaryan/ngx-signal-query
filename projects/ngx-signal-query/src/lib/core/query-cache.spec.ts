@@ -1,3 +1,5 @@
+import { computed } from '@angular/core'
+
 import { QueryCache } from './query-cache'
 
 describe('QueryCache', () => {
@@ -35,6 +37,22 @@ describe('QueryCache', () => {
   describe('get', () => {
     it('returns undefined for an unknown key', () => {
       expect(cache.get(['nope'])).toBeUndefined()
+    })
+  })
+
+  describe('find', () => {
+    it("updates a computed as the key's entry is added and removed", () => {
+      const found = computed(() => cache.find(['x']))
+
+      expect(found()).toBeUndefined()
+
+      const query = cache.getOrCreate(['x'])
+
+      expect(found()).toBe(query)
+
+      cache.remove(query)
+
+      expect(found()).toBeUndefined()
     })
   })
 

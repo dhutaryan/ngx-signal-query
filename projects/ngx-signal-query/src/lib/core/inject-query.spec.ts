@@ -760,6 +760,281 @@ describe('injectQuery', () => {
     })
   })
 
+  describe('after removeQueries', () => {
+    // A component showing the removed key may keep what it shows: nothing
+    // puts the key back on its own. Once something does, it shows what the
+    // cache holds, as after a key change.
+
+    it('keeps its data and brings nothing back on its own', () => {
+      const { queryFn, resolve } = requests<string>()
+      const { fixture, result } = mount(
+        // At the default staleTime the data is stale at once, so anything
+        // that refetched it after the removal would show up.
+        (id) => ({ queryKey: ['todo', id()], queryFn }),
+        1,
+      )
+
+      resolve('v1')
+      fixture.detectChanges()
+      client.removeQueries({ queryKey: ['todo', 1] })
+      fixture.detectChanges()
+
+      expect(result.data()).toBe('v1')
+      expect(queryFn).toHaveBeenCalledTimes(1)
+      expect(client.getQueryCache().get(['todo', 1])).toBeUndefined()
+    })
+
+    it('stays without data when removed during its first load', () => {
+      const { queryFn, inFlight, cancelled } = requests<string>()
+      const { fixture, result } = mount(
+        (id) => ({ queryKey: ['todo', id()], queryFn }),
+        1,
+      )
+
+      client.removeQueries({ queryKey: ['todo', 1] })
+      fixture.detectChanges()
+
+      // The removal cancels the request, and nothing sends another.
+      expect(cancelled()).toBe(1)
+      expect(inFlight()).toBe(0)
+      expect(queryFn).toHaveBeenCalledTimes(1)
+      expect(result.isPending()).toBe(true)
+      expect(result.isFetching()).toBe(false)
+    })
+
+    it('shows the refetched data once refetch() brings the key back', () => {
+      const { queryFn, resolve } = requests<string>()
+      const { fixture, result } = mount(
+        (id) => ({ queryKey: ['todo', id()], queryFn, staleTime: Infinity }),
+        1,
+      )
+
+      resolve('v1')
+      fixture.detectChanges()
+      client.removeQueries({ queryKey: ['todo', 1] })
+      fixture.detectChanges()
+      result.refetch()
+      fixture.detectChanges()
+      resolve('v2')
+      fixture.detectChanges()
+
+      expect(result.data()).toBe('v2')
+      expect(client.getQueryData(['todo', 1])).toBe('v2')
+      expect(queryFn).toHaveBeenCalledTimes(2)
+    })
+
+    it('shows what setQueryData writes', () => {
+      const { queryFn, resolve } = requests<string>()
+      const { fixture, result } = mount(
+        (id) => ({ queryKey: ['todo', id()], queryFn, staleTime: Infinity }),
+        1,
+      )
+
+      resolve('v1')
+      fixture.detectChanges()
+      client.removeQueries({ queryKey: ['todo', 1] })
+      fixture.detectChanges()
+      client.setQueryData(['todo', 1], 'edited')
+      fixture.detectChanges()
+
+      expect(result.data()).toBe('edited')
+      expect(queryFn).toHaveBeenCalledTimes(1)
+    })
+
+    it('refetches on invalidateQueries once the key is back', () => {
+      const { queryFn, resolve } = requests<string>()
+      const { fixture, result } = mount(
+        (id) => ({ queryKey: ['todo', id()], queryFn, staleTime: Infinity }),
+        1,
+      )
+
+      resolve('v1')
+      fixture.detectChanges()
+      client.removeQueries({ queryKey: ['todo', 1] })
+      fixture.detectChanges()
+      client.setQueryData(['todo', 1], 'edited')
+      fixture.detectChanges()
+      client.invalidateQueries({ queryKey: ['todo', 1] })
+      fixture.detectChanges()
+
+      expect(queryFn).toHaveBeenCalledTimes(2)
+
+      resolve('v2')
+      fixture.detectChanges()
+
+      expect(result.data()).toBe('v2')
+    })
+
+    it('shows the same data as a component mounted after the removal', () => {
+      const { queryFn, resolve } = requests<string>()
+      const options = (id: Signal<number>): QueryOptions<string> => ({
+        queryKey: ['todo', id()],
+        queryFn,
+        staleTime: Infinity,
+      })
+      const a = mount(options, 1)
+
+      resolve('v1')
+      a.fixture.detectChanges()
+      client.removeQueries({ queryKey: ['todo', 1] })
+      a.fixture.detectChanges()
+
+      // The new component fetches the key; its request is still in flight
+      // when the first one follows the key, which sends none of its own.
+      const b = mount(options, 1)
+
+      a.fixture.detectChanges()
+      resolve('v2')
+      a.fixture.detectChanges()
+      b.fixture.detectChanges()
+
+      expect(a.result.data()).toBe('v2')
+      expect(b.result.data()).toBe('v2')
+      expect(queryFn).toHaveBeenCalledTimes(2)
+    })
+
+    it('follows the key back with every component on it, in one request', () => {
+      const { queryFn, inFlight, resolve } = requests<string>()
+      const { fixture, results } = mountMany(
+        3,
+        (id) => ({ queryKey: ['todo', id()], queryFn, staleTime: Infinity }),
+        1,
+      )
+
+      resolve('v1')
+      fixture.detectChanges()
+      client.removeQueries({ queryKey: ['todo', 1] })
+      fixture.detectChanges()
+      results[0].refetch()
+      fixture.detectChanges()
+
+      expect(queryFn).toHaveBeenCalledTimes(2)
+      expect(inFlight()).toBe(1)
+
+      resolve('v2')
+      fixture.detectChanges()
+
+      expect(results.map((result) => result.data())).toEqual(['v2', 'v2', 'v2'])
+    })
+
+    it('keeps the removed data as previous data while the key reloads', () => {
+      const { queryFn, resolve } = requests<string>()
+      const { fixture, result } = mount(
+        (id) => ({
+          queryKey: ['todo', id()],
+          queryFn,
+          staleTime: Infinity,
+          placeholderData: keepPreviousData,
+        }),
+        1,
+      )
+
+      resolve('v1')
+      fixture.detectChanges()
+      client.removeQueries({ queryKey: ['todo', 1] })
+      fixture.detectChanges()
+      result.refetch()
+      fixture.detectChanges()
+
+      expect(result.data()).toBe('v1')
+      expect(result.isPlaceholderData()).toBe(true)
+      expect(result.isFetching()).toBe(true)
+
+      resolve('v2')
+      fixture.detectChanges()
+
+      expect(result.data()).toBe('v2')
+      expect(result.isPlaceholderData()).toBe(false)
+    })
+
+    it('seeds initialData into the entry it follows, as on a key change', () => {
+      const { queryFn, resolve } = requests<string>()
+      const a = mount(
+        (id) => ({ queryKey: ['todo', id()], queryFn, initialData: 'seed' }),
+        1,
+      )
+
+      // The seed is stale at once: replaced by the fetch on mount.
+      resolve('v1')
+      a.fixture.detectChanges()
+      client.removeQueries({ queryKey: ['todo', 1] })
+      a.fixture.detectChanges()
+
+      // Another component brings the key back with a request in flight.
+      mount((id) => ({ queryKey: ['todo', id()], queryFn }), 1)
+      a.fixture.detectChanges()
+
+      expect(a.result.data()).toBe('seed')
+      expect(queryFn).toHaveBeenCalledTimes(2)
+    })
+
+    it('polls the key back into the cache', fakeAsync(() => {
+      const { queryFn, starts } = timed(30)
+      const { fixture, result } = mount(
+        (id) => ({ queryKey: ['todo', id()], queryFn, refetchInterval: 100 }),
+        1,
+      )
+
+      elapse(50, fixture)
+      client.removeQueries({ queryKey: ['todo', 1] })
+      // The next poll is due 100 ms after the response at 30.
+      elapse(150, fixture)
+
+      expect(starts).toEqual([0, 130])
+      expect(client.getQueryData(['todo', 1])).toBe(2)
+      expect(result.data()).toBe(2)
+
+      fixture.destroy()
+    }))
+
+    it('polls once per interval with a component mounted after the removal', fakeAsync(() => {
+      const { queryFn, starts } = timed(30)
+      const options = (id: Signal<number>): QueryOptions<number> => ({
+        queryKey: ['todo', id()],
+        queryFn,
+        refetchInterval: 100,
+      })
+      const a = mount(options, 1)
+
+      elapse(50, a.fixture)
+      client.removeQueries({ queryKey: ['todo', 1] })
+
+      // It fetches the key at once, and both poll it from then on.
+      const b = mount(options, 1)
+
+      elapse(400, a.fixture, b.fixture)
+
+      // 100 ms after each response at 80, 210 and 340.
+      expect(starts).toEqual([0, 50, 180, 310, 440])
+      expect(a.result.data()).toBe(b.result.data())
+
+      a.fixture.destroy()
+      b.fixture.destroy()
+    }))
+
+    it('shows nothing once a sign-out removes the key it is gated on', () => {
+      const signedIn = signal(true)
+      const { queryFn, resolve } = requests<string>()
+      const { fixture, result } = mount(
+        (id) => ({
+          queryKey: ['todo', id()],
+          queryFn,
+          enabled: signedIn(),
+        }),
+        1,
+      )
+
+      resolve('v1')
+      fixture.detectChanges()
+      signedIn.set(false)
+      client.removeQueries()
+      fixture.detectChanges()
+
+      expect(result.data()).toBeUndefined()
+      expect(queryFn).toHaveBeenCalledTimes(1)
+    })
+  })
+
   describe('initialData', () => {
     it('renders success immediately and skips fetch when fresh', () => {
       const queryFn = jasmine
