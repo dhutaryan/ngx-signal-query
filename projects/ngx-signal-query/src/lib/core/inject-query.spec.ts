@@ -174,6 +174,9 @@ function elapse(
   }
 }
 
+// A row of a cached list, for the specs that seed a detail query from it.
+type Todo = { id: number; title: string }
+
 describe('injectQuery', () => {
   let client: QueryClient
 
@@ -1125,6 +1128,168 @@ describe('injectQuery', () => {
       expect(result.data()).toBe('seed-2')
       expect(result.isSuccess()).toBe(true)
     })
+
+    // A function that returns undefined has nothing to seed: the query loads
+    // as if it had no initialData. That's how a detail query seeded from a
+    // cached list skips a row the list lacks, or a list too old to trust.
+
+    it('stays pending and fetches when the function returns undefined', () => {
+      const { queryFn, resolve } = requests<string>()
+      const { result } = mount(() => ({
+        queryKey: ['todo'],
+        queryFn,
+        initialData: () => undefined,
+      }))
+
+      expect(result.status()).toBe('pending')
+      expect(result.isLoading()).toBe(true)
+      expect(queryFn).toHaveBeenCalledTimes(1)
+
+      resolve('fetched')
+
+      expect(result.data()).toBe('fetched')
+    })
+
+    it('fetches despite a staleTime when the function returns undefined', () => {
+      const { queryFn, resolve } = requests<string>()
+      const { result } = mount(() => ({
+        queryKey: ['todo'],
+        queryFn,
+        initialData: () => undefined,
+        // Nothing was seeded, so there's nothing to keep fresh.
+        staleTime: 60_000,
+      }))
+
+      expect(result.status()).toBe('pending')
+      expect(result.isLoading()).toBe(true)
+      expect(queryFn).toHaveBeenCalledTimes(1)
+
+      resolve('fetched')
+
+      expect(result.data()).toBe('fetched')
+    })
+
+    it('seeds a row from a cached list and loads one the list lacks', () => {
+      const { queryFn, resolve } = requests<Todo>()
+
+      client.setQueryData<Todo[]>(['todos'], [{ id: 1, title: 'listed' }])
+
+      // Explicit TData: a seed function that may return undefined must
+      // type-check.
+      const { fixture, result, value } = mount<Todo>(
+        (id) => ({
+          queryKey: ['todo', id()],
+          queryFn,
+          initialData: () =>
+            client
+              .getQueryData<Todo[]>(['todos'])
+              ?.find((todo) => todo.id === id()),
+          staleTime: 60_000,
+        }),
+        1,
+      )
+
+      expect(result.data()).toEqual({ id: 1, title: 'listed' })
+      expect(queryFn).not.toHaveBeenCalled()
+
+      value.set(3)
+      fixture.detectChanges()
+
+      expect(result.status()).toBe('pending')
+      expect(result.isLoading()).toBe(true)
+      expect(queryFn).toHaveBeenCalledTimes(1)
+
+      resolve({ id: 3, title: 'fetched' })
+
+      expect(result.data()).toEqual({ id: 3, title: 'fetched' })
+    })
+
+    it('seeds from a list only while it is fresh', fakeAsync(() => {
+      const { queryFn, resolve } = requests<Todo>()
+
+      client.setQueryData<Todo[]>(
+        ['todos'],
+        [
+          { id: 1, title: 'listed' },
+          { id: 2, title: 'listed' },
+        ],
+      )
+
+      const { fixture, result, value } = mount<Todo>(
+        (id) => ({
+          queryKey: ['todo', id()],
+          queryFn,
+          // Older than 10 s? Don't seed: fetch instead.
+          initialData: () => {
+            const list = client.getQueryCache().get(['todos'])
+
+            if (Date.now() - (list?.state().updatedAt ?? 0) > 10_000) {
+              return undefined
+            }
+
+            return client
+              .getQueryData<Todo[]>(['todos'])
+              ?.find((todo) => todo.id === id())
+          },
+        }),
+        1,
+      )
+
+      expect(result.data()).toEqual({ id: 1, title: 'listed' })
+
+      tick(20_000)
+      value.set(2)
+      fixture.detectChanges()
+
+      expect(result.status()).toBe('pending')
+      expect(result.isLoading()).toBe(true)
+
+      resolve({ id: 2, title: 'fetched' })
+
+      expect(result.data()).toEqual({ id: 2, title: 'fetched' })
+    }))
+
+    it('seeds null: only undefined means no initial data', () => {
+      const queryFn = jasmine
+        .createSpy('queryFn')
+        .and.returnValue(of('fetched'))
+      const { result } = mount(() => ({
+        queryKey: ['todo'],
+        queryFn,
+        initialData: () => null,
+        staleTime: Infinity,
+      }))
+
+      expect(result.status()).toBe('success')
+      expect(result.data()).toBeNull()
+      expect(queryFn).not.toHaveBeenCalled()
+    })
+
+    it("doesn't call the function for a key that already has data", () => {
+      const initialData = jasmine
+        .createSpy('initialData')
+        .and.returnValue('seed')
+
+      client.setQueryData(['todo'], 'cached')
+
+      const { fixture, result, value } = mount((filter) => {
+        // Read only so that changing it re-evaluates the options.
+        filter()
+
+        return {
+          queryKey: ['todo'],
+          queryFn: () => of('fetched'),
+          initialData,
+          staleTime: Infinity,
+        }
+      }, 'a')
+
+      value.set('b')
+      fixture.detectChanges()
+
+      expect(result.data()).toBe('cached')
+      expect(initialData).not.toHaveBeenCalled()
+    })
   })
 
   describe('placeholderData', () => {
@@ -1255,6 +1420,37 @@ describe('injectQuery', () => {
       }))
 
       expect(result.data()).toBe('init')
+      expect(result.isPlaceholderData()).toBe(false)
+    })
+
+    it("keeps the previous data while a key initialData can't seed loads", () => {
+      const { queryFn, resolve } = requests<Todo>()
+
+      client.setQueryData<Todo[]>(['todos'], [{ id: 1, title: 'listed' }])
+
+      const { fixture, result, value } = mount(
+        (id) => ({
+          queryKey: ['todo', id()],
+          queryFn,
+          initialData: () =>
+            client
+              .getQueryData<Todo[]>(['todos'])
+              ?.find((todo) => todo.id === id()),
+          placeholderData: keepPreviousData,
+          staleTime: 60_000,
+        }),
+        1,
+      )
+
+      value.set(3)
+      fixture.detectChanges()
+
+      expect(result.data()).toEqual({ id: 1, title: 'listed' })
+      expect(result.isPlaceholderData()).toBe(true)
+
+      resolve({ id: 3, title: 'fetched' })
+
+      expect(result.data()).toEqual({ id: 3, title: 'fetched' })
       expect(result.isPlaceholderData()).toBe(false)
     })
 

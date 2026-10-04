@@ -137,5 +137,7 @@ The rule of thumb from the [Initial Data](../initial-data) guide still holds:
 - Data you'd be happy to keep and share across the app? `initialData`.
 - Data that's just a stand-in until the real thing loads? `placeholderData`.
 
-If the two are set together, `initialData` wins — it seeds the cache, so the
-query has real data and the placeholder is never consulted.
+If the two are set together, `initialData` wins whenever it seeds the cache: the
+query has real data, so the placeholder is never consulted. An `initialData`
+function that returns `undefined` seeds nothing, and the placeholder shows while
+the query loads.
