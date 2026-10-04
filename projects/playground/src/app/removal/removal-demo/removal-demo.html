@@ -1,0 +1,66 @@
+<section class="panel">
+  <h2>
+    removeQueries while a component shows the key
+    <small>(issue #37)</small>
+  </h2>
+
+  <p class="hint">
+    A component looks its query up in the cache when its options change, and
+    only then.
+    <code>removeQueries</code>
+    drops the query from the cache but leaves the options alone, so a component
+    showing the key keeps watching the dropped query. Whatever goes through the
+    cache by key afterwards — a refetch, a write, an invalidation, another
+    component, a poll — lands in a new entry that component doesn't watch.
+  </p>
+
+  <p class="hint">
+    Right after the removal a component may keep what it shows: nothing puts the
+    key back on its own, as in TanStack. Once something does, every component on
+    the key should show what the cache holds, so that's what
+    <em>expected</em>
+    says; red marks a component that shows something else. The fake server
+    answers in {{ latency }} ms (no network), each time with a new version.
+  </p>
+
+  <div class="cards">
+    <app-reset-scenario />
+    <app-polling-widget-scenario />
+  </div>
+
+  <details>
+    <summary>What to try</summary>
+    <p class="hint">What each card does before the fix:</p>
+    <ul class="hint">
+      <li>
+        <strong>Reset, then edit</strong>
+        — press
+        <code>removeQueries</code>
+        , then
+        <code>refetch()</code>
+        : list A stays on its version while the cache holds the new one.
+        <code>setQueryData</code>
+        : the cache holds the edit, list A doesn't.
+        <code>invalidateQueries</code>
+        : no request, because no component watches the cache's entry. Mount list
+        B: it shows what the cache holds, list A doesn't.
+      </li>
+      <li>
+        <strong>Polling widget</strong>
+        — start it, then press
+        <code>removeQueries</code>
+        : widget A keeps polling, but into the query the cache dropped, so its
+        version climbs while the cache stays empty. Mount widget B: two polls
+        per interval, and the widgets show different versions.
+      </li>
+    </ul>
+    <p class="hint">
+      To see a change in the library here, rebuild it with
+      <code>pnpm build:lib</code>
+      or keep
+      <code>pnpm watch</code>
+      running: the playground uses the build in
+      <code>dist</code>
+    </p>
+  </details>
+</section>

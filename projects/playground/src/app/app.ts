@@ -12,6 +12,7 @@ import { LazyOptionsDemo } from './lazy-options/lazy-options-demo/lazy-options-d
 import { MutationDemo } from './mutations/mutation-demo/mutation-demo'
 import { PollingDemo } from './polling/polling-demo/polling-demo'
 import { QueriesDemo } from './queries/queries-demo/queries-demo'
+import { RemovalDemo } from './removal/removal-demo/removal-demo'
 import { TodosApi } from './mutations/todos-api'
 
 @Component({
@@ -24,6 +25,7 @@ import { TodosApi } from './mutations/todos-api'
     InvalidationDemo,
     PollingDemo,
     EffectsDemo,
+    RemovalDemo,
   ],
   templateUrl: './app.html',
   styleUrl: './app.scss',

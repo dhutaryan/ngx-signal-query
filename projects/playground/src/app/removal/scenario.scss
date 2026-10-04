@@ -1,0 +1,28 @@
+// The controls every scenario projects into its card.
+:host {
+  display: block;
+}
+
+button {
+  padding: 0.3rem 0.6rem;
+  border: 1px solid #d0d7de;
+  border-radius: 6px;
+  background: #f6f8fa;
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.85rem;
+
+  &:hover:not(:disabled) {
+    background: #eef1f4;
+  }
+
+  &:disabled {
+    cursor: default;
+    opacity: 0.5;
+  }
+
+  &.on {
+    background: #fff1e5;
+    border-color: #d4a72c;
+  }
+}
