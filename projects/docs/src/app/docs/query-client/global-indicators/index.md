@@ -66,6 +66,9 @@ export class AppComponent {
 Handy for a global "saving…" indicator, or to warn before navigating away while
 a write is still in flight.
 
+A mutation counts until its hooks are done, so an async `onSuccess` keeps the
+indicator on.
+
 Unlike `injectIsFetching`, it takes **no filters** — it always counts mutations
 in the `'pending'` state, nothing else. Mutations have no key to scope by, and
 "how many writes are in flight" is the one question a global indicator asks.

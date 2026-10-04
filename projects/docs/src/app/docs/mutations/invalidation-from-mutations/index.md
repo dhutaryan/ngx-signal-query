@@ -83,7 +83,8 @@ refetch. That means:
 
 - there's nothing to `await`, and no `Promise.all` for multiple invalidations —
   just call it;
-- the mutation reaches `'success'` as soon as the write lands, **not** after the
+- the mutation reaches `'success'` as soon as the write lands — `onSuccess`
+  returns at once, since there's nothing to wait for — **not** after the
   refetch completes.
 
 If a component needs to know the fresh data has arrived, it reads that from the

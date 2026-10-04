@@ -1,6 +1,9 @@
+import { of } from 'rxjs'
+
 import {
   hashKey,
   isPlainObject,
+  isPromiseLike,
   isValidTimeout,
   partialMatchKey,
 } from './utils'
@@ -86,5 +89,23 @@ describe('isValidTimeout', () => {
     expect(isValidTimeout(false)).toBe(false)
     expect(isValidTimeout(undefined)).toBe(false)
     expect(isValidTimeout('1000')).toBe(false)
+  })
+})
+
+describe('isPromiseLike', () => {
+  it('accepts a promise or any other thenable', () => {
+    expect(isPromiseLike(Promise.resolve(1))).toBe(true)
+    expect(isPromiseLike({ then: () => {} })).toBe(true)
+  })
+
+  it('rejects anything without a then method', () => {
+    expect(isPromiseLike(undefined)).toBe(false)
+    expect(isPromiseLike(null)).toBe(false)
+    expect(isPromiseLike(1)).toBe(false)
+    expect(isPromiseLike({ then: true })).toBe(false)
+  })
+
+  it('rejects an Observable, so a hook that returns one is not waited on', () => {
+    expect(isPromiseLike(of(1))).toBe(false)
   })
 })

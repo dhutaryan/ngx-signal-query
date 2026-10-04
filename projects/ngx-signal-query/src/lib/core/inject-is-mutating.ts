@@ -9,8 +9,8 @@ import {
 import { QueryClient } from './query-client'
 
 /**
- * Returns a signal with the number of mutations currently pending — useful for
- * a global "saving…" indicator.
+ * Returns a signal with the number of mutations currently pending, including
+ * those still running their hooks — useful for a global "saving…" indicator.
  *
  * Must run in an injection context, or be given an explicit `injector`.
  *
