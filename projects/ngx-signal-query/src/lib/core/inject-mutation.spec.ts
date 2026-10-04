@@ -3,6 +3,8 @@ import {
   type ComponentFixture,
   TestBed,
   fakeAsync,
+  flush,
+  flushMicrotasks,
   tick,
 } from '@angular/core/testing'
 import { EMPTY, of, Subject, throwError } from 'rxjs'
@@ -11,6 +13,23 @@ import { injectMutation } from './inject-mutation'
 import type { MutationOptions, MutationResult } from './mutation'
 import { provideQueryClient } from './provider'
 import { QueryClient } from './query-client'
+
+// A promise the spec settles by hand. A hook that returns it keeps running
+// until the spec resolves or rejects it.
+function deferred<T = void>(): {
+  promise: Promise<T>
+  resolve: (value: T) => void
+  reject: (error: unknown) => void
+} {
+  let resolve!: (value: T) => void
+  let reject!: (error: unknown) => void
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res
+    reject = rej
+  })
+
+  return { promise, resolve, reject }
+}
 
 describe('injectMutation', () => {
   let client: QueryClient
@@ -271,6 +290,424 @@ describe('injectMutation', () => {
       // Optimistically added 'b', then rolled back to the snapshot on error.
       expect(client.getQueryData(['todos'])).toEqual(['a'])
     })
+  })
+
+  // A hook may return a promise. The run waits for it before moving on, and
+  // stays pending until its last hook is done.
+  describe('async hooks', () => {
+    it('stays pending until an async onSuccess resolves', fakeAsync(() => {
+      const response = new Subject<string>()
+      const audit = deferred()
+      const m = setup(() => ({
+        mutationFn: () => response,
+        // Logs the saved record somewhere, e.g. to an audit trail.
+        onSuccess: () => audit.promise,
+      }))
+
+      m.mutate()
+      response.next('saved')
+      response.complete()
+      flushMicrotasks()
+
+      // The write landed, but its onSuccess is still running.
+      expect(m.isPending()).toBe(true)
+      expect(m.data()).toBeUndefined()
+
+      audit.resolve()
+      flushMicrotasks()
+
+      expect(m.isSuccess()).toBe(true)
+      expect(m.data()).toBe('saved')
+    }))
+
+    it('runs onSettled once an async onSuccess resolves', fakeAsync(() => {
+      const audit = deferred()
+      const onSettled = jasmine.createSpy('onSettled')
+      const m = setup<string, Error, void>(() => ({
+        mutationFn: () => of('saved'),
+        onSuccess: () => audit.promise,
+        onSettled,
+      }))
+
+      m.mutate()
+      flushMicrotasks()
+
+      expect(onSettled).not.toHaveBeenCalled()
+
+      audit.resolve()
+      flushMicrotasks()
+
+      expect(onSettled).toHaveBeenCalledOnceWith(
+        'saved',
+        null,
+        undefined,
+        undefined,
+      )
+    }))
+
+    it('stays pending until an async onError resolves, then runs onSettled', fakeAsync(() => {
+      const error = new Error('boom')
+      const rollback = deferred()
+      const onSettled = jasmine.createSpy('onSettled')
+      const m = setup<string, Error, void>(() => ({
+        mutationFn: () => throwError(() => error),
+        onError: () => rollback.promise,
+        onSettled,
+      }))
+
+      m.mutate()
+      flushMicrotasks()
+
+      expect(m.isPending()).toBe(true)
+      expect(onSettled).not.toHaveBeenCalled()
+
+      rollback.resolve()
+      flushMicrotasks()
+
+      expect(m.isError()).toBe(true)
+      expect(m.error()).toBe(error)
+      expect(onSettled).toHaveBeenCalledOnceWith(
+        undefined,
+        error,
+        undefined,
+        undefined,
+      )
+    }))
+
+    it('stays pending until an async onSettled resolves', fakeAsync(() => {
+      const cleanup = deferred()
+      const m = setup(() => ({
+        mutationFn: () => of('saved'),
+        onSettled: () => cleanup.promise,
+      }))
+
+      m.mutate()
+      flushMicrotasks()
+
+      expect(m.isPending()).toBe(true)
+
+      cleanup.resolve()
+      flushMicrotasks()
+
+      expect(m.isSuccess()).toBe(true)
+    }))
+
+    it('sends the write once an async onMutate resolves, and passes its value on as the context', fakeAsync(() => {
+      const snapshot = deferred<{ previous: string[] }>()
+      const sent: string[] = []
+      const contexts: Array<{ previous: string[] } | undefined> = []
+      const m = setup(() => ({
+        mutationFn: (title: string) => {
+          sent.push(title)
+
+          return throwError(() => new Error('boom'))
+        },
+        // Snapshots the list for a rollback; getting it may take a while.
+        onMutate: () => snapshot.promise,
+        onError: (_error, _title, context) => contexts.push(context),
+        onSettled: (_data, _error, _title, context) => contexts.push(context),
+      }))
+
+      m.mutate('b')
+      flushMicrotasks()
+
+      // Nothing goes out while onMutate is still running.
+      expect(sent).toEqual([])
+
+      snapshot.resolve({ previous: ['a'] })
+      flushMicrotasks()
+
+      expect(sent).toEqual(['b'])
+      expect(contexts).toEqual([{ previous: ['a'] }, { previous: ['a'] }])
+    }))
+
+    it('settles inside mutate() when no hook returns a promise', () => {
+      const saved: string[] = []
+      const m = setup(() => ({
+        mutationFn: () => of('note'),
+        // Returns the new length, a plain value: nothing to wait for.
+        onSuccess: (note) => saved.push(note),
+      }))
+
+      m.mutate()
+
+      expect(m.isSuccess()).toBe(true)
+      expect(saved).toEqual(['note'])
+    })
+
+    it('counts an earlier run until its onSuccess is done, while the signals follow the latest call', fakeAsync(() => {
+      const responses = { a: new Subject<string>(), b: new Subject<string>() }
+      const audits = { a: deferred(), b: deferred() }
+      const m = setup(() => ({
+        mutationFn: (title: 'a' | 'b') => responses[title],
+        onSuccess: (_saved, title) => audits[title].promise,
+      }))
+
+      m.mutate('a')
+      responses.a.next('a saved')
+      responses.a.complete()
+      m.mutate('b')
+
+      // 'a' landed and its onSuccess is still running; 'b' is in flight.
+      expect(client.isMutating()).toBe(2)
+      expect(m.variables()).toBe('b')
+
+      audits.a.resolve()
+      flushMicrotasks()
+
+      // 'a' is done and leaves the cache. The signals still follow 'b'.
+      expect(client.isMutating()).toBe(1)
+      expect(client.getMutationCache().getAll().length).toBe(1)
+      expect(m.isPending()).toBe(true)
+      expect(m.variables()).toBe('b')
+    }))
+
+    it('forgets a run whose onSuccess is still running, and counts it until that is done', fakeAsync(() => {
+      const audit = deferred()
+      const onSettled = jasmine.createSpy('onSettled')
+      const m = setup<string, Error, void>(() => ({
+        mutationFn: () => of('saved'),
+        onSuccess: () => audit.promise,
+        onSettled,
+      }))
+
+      m.mutate()
+      m.reset()
+
+      expect(m.isIdle()).toBe(true)
+      expect(client.isMutating()).toBe(1)
+
+      audit.resolve()
+      flushMicrotasks()
+
+      expect(onSettled).toHaveBeenCalled()
+      expect(client.isMutating()).toBe(0)
+      expect(client.getMutationCache().getAll().length).toBe(0)
+      expect(m.isIdle()).toBe(true)
+    }))
+
+    it('lets a run finish its async onSuccess after the host is destroyed', fakeAsync(() => {
+      const audit = deferred()
+      const onSettled = jasmine.createSpy('onSettled')
+
+      @Component({ template: '' })
+      class Host {
+        readonly save = injectMutation<string, Error, void>(() => ({
+          mutationFn: () => of('saved'),
+          onSuccess: () => audit.promise,
+          onSettled,
+        }))
+      }
+
+      const fixture = TestBed.createComponent(Host)
+
+      fixture.detectChanges()
+      fixture.componentInstance.save.mutate()
+      fixture.destroy()
+
+      expect(client.isMutating()).toBe(1)
+      expect(onSettled).not.toHaveBeenCalled()
+
+      audit.resolve()
+      flushMicrotasks()
+
+      expect(onSettled).toHaveBeenCalled()
+      expect(client.getMutationCache().getAll().length).toBe(0)
+    }))
+
+    it('still sends the write when reset() comes while an async onMutate runs', fakeAsync(() => {
+      const snapshot = deferred()
+      const sent: string[] = []
+      const onSuccess = jasmine.createSpy('onSuccess')
+      const m = setup(() => ({
+        mutationFn: (title: string) => {
+          sent.push(title)
+
+          return of(title)
+        },
+        onMutate: () => snapshot.promise,
+        onSuccess,
+      }))
+
+      m.mutate('b')
+      m.reset()
+      snapshot.resolve()
+      flushMicrotasks()
+
+      // reset() forgets the result; it doesn't call off the write.
+      expect(sent).toEqual(['b'])
+      expect(onSuccess).toHaveBeenCalled()
+      expect(m.isIdle()).toBe(true)
+      expect(client.getMutationCache().getAll().length).toBe(0)
+    }))
+  })
+
+  // A hook that fails doesn't change what happened to the write, and the
+  // hooks after it still run. A failing onMutate stops the run before the
+  // write is sent.
+  describe('failing hooks', () => {
+    it('fails the run without sending the write when onMutate throws', () => {
+      const error = new Error('onMutate failed')
+      const sent: string[] = []
+      const onError = jasmine.createSpy('onError')
+      const onSettled = jasmine.createSpy('onSettled')
+      const m = setup(() => ({
+        mutationFn: (title: string) => {
+          sent.push(title)
+
+          return of(title)
+        },
+        onMutate: () => {
+          throw error
+        },
+        onError,
+        onSettled,
+      }))
+
+      m.mutate('b')
+
+      expect(sent).toEqual([])
+      expect(m.isError()).toBe(true)
+      expect(m.error()).toBe(error)
+      expect(onError).toHaveBeenCalledOnceWith(error, 'b', undefined)
+      expect(onSettled).toHaveBeenCalledOnceWith(
+        undefined,
+        error,
+        'b',
+        undefined,
+      )
+    })
+
+    it('fails the run without sending the write when an async onMutate rejects', fakeAsync(() => {
+      const error = new Error('onMutate failed')
+      const snapshot = deferred<{ previous: string[] }>()
+      const sent: string[] = []
+      const onError = jasmine.createSpy('onError')
+      const m = setup<string, Error, string, { previous: string[] }>(() => ({
+        mutationFn: (title: string) => {
+          sent.push(title)
+
+          return of(title)
+        },
+        onMutate: () => snapshot.promise,
+        onError,
+      }))
+
+      m.mutate('b')
+      snapshot.reject(error)
+      flushMicrotasks()
+
+      expect(sent).toEqual([])
+      expect(m.isError()).toBe(true)
+      expect(m.error()).toBe(error)
+      expect(onError).toHaveBeenCalledOnceWith(error, 'b', undefined)
+    }))
+
+    it('keeps the success when onSuccess throws, still runs onSettled and reports the error', fakeAsync(() => {
+      const onSettled = jasmine.createSpy('onSettled')
+      const m = setup<string, Error, void>(() => ({
+        mutationFn: () => of('saved'),
+        onSuccess: () => {
+          throw new Error('onSuccess failed')
+        },
+        onSettled,
+      }))
+
+      m.mutate()
+
+      // The write went through; a broken hook doesn't undo that.
+      expect(m.isSuccess()).toBe(true)
+      expect(m.data()).toBe('saved')
+      expect(onSettled).toHaveBeenCalledOnceWith(
+        'saved',
+        null,
+        undefined,
+        undefined,
+      )
+      // The error isn't swallowed: the app's error handling still sees it.
+      expect(() => flush()).toThrowError(/onSuccess failed/)
+    }))
+
+    it('keeps the error when onError throws, still runs onSettled and reports the error', fakeAsync(() => {
+      const error = new Error('write failed')
+      const onSettled = jasmine.createSpy('onSettled')
+      const m = setup<string, Error, void>(() => ({
+        mutationFn: () => throwError(() => error),
+        onError: () => {
+          throw new Error('rollback failed')
+        },
+        onSettled,
+      }))
+
+      m.mutate()
+
+      expect(m.isError()).toBe(true)
+      expect(m.error()).toBe(error)
+      expect(onSettled).toHaveBeenCalledOnceWith(
+        undefined,
+        error,
+        undefined,
+        undefined,
+      )
+      expect(() => flush()).toThrowError(/rollback failed/)
+    }))
+
+    it('keeps the success when an async onSuccess rejects, and reports the error', fakeAsync(() => {
+      const audit = deferred()
+      const onSettled = jasmine.createSpy('onSettled')
+      const m = setup<string, Error, void>(() => ({
+        mutationFn: () => of('saved'),
+        onSuccess: () => audit.promise,
+        onSettled,
+      }))
+
+      m.mutate()
+      audit.reject(new Error('audit failed'))
+
+      expect(() => flush()).toThrowError(/audit failed/)
+      expect(m.isSuccess()).toBe(true)
+      expect(m.data()).toBe('saved')
+      expect(onSettled).toHaveBeenCalledOnceWith(
+        'saved',
+        null,
+        undefined,
+        undefined,
+      )
+    }))
+
+    it('keeps the outcome when onSettled throws, and reports the error', fakeAsync(() => {
+      const m = setup(() => ({
+        mutationFn: () => of('saved'),
+        onSettled: () => {
+          throw new Error('onSettled failed')
+        },
+      }))
+
+      m.mutate()
+
+      expect(m.isSuccess()).toBe(true)
+      expect(m.data()).toBe('saved')
+      expect(() => flush()).toThrowError(/onSettled failed/)
+    }))
+
+    it('drops a forgotten run from the cache even when its hook throws', fakeAsync(() => {
+      const response = new Subject<string>()
+      const m = setup(() => ({
+        mutationFn: () => response,
+        onSuccess: () => {
+          throw new Error('onSuccess failed')
+        },
+      }))
+
+      m.mutate()
+      m.reset()
+      response.next('saved')
+      response.complete()
+
+      expect(() => flush()).toThrowError(/onSuccess failed/)
+      expect(client.getMutationCache().getAll().length).toBe(0)
+      expect(client.isMutating()).toBe(0)
+    }))
   })
 
   describe('independent instances', () => {

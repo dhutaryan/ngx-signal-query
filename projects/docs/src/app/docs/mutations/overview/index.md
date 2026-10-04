@@ -110,7 +110,8 @@ onMutate  →  mutationFn  →  onSuccess | onError  →  onSettled
 
 - **`onMutate(variables)`** — runs *before* the request. Whatever it returns
   becomes the **context** passed to the later hooks. This is how optimistic
-  updates and rollbacks work.
+  updates and rollbacks work. If it returns a promise, the request waits for
+  it, and the context is what it resolves to.
 - **`onSuccess(data, variables, context)`** — the request succeeded.
 - **`onError(error, variables, context)`** — it failed.
 - **`onSettled(data, error, variables, context)`** — runs either way, for
@@ -166,9 +167,20 @@ value.
 you can't pass `{ onSuccess }` alongside them. All side effects live in the
 options, next to `mutationFn`.
 
-**Hooks are synchronous.** Returning a promise from `onSuccess` won't delay
-`onSettled` — the return value is ignored. If you need something to happen after
-an async step, do the awaiting inside the hook itself.
+**Hooks can be async.** A hook that returns a promise holds up the next one:
+`onSettled` waits for an async `onSuccess`, and the mutation stays `'pending'`
+— and counted by `injectIsMutating` — until its last hook is done. Return a
+promise, not an Observable: an Observable a hook returns isn't subscribed, so
+`onSuccess: () => this.#http.post(…)` sends nothing. Wrap it in
+`firstValueFrom()`.
+
+**A failing hook doesn't undo the write.** If `onSuccess` throws, the mutation
+still ends in `'success'`, because the write went through, and `onSettled`
+still runs; the same goes for `onError` and `onSettled`. The error isn't
+swallowed: it's rethrown as an unhandled rejection, like any other error your
+app doesn't catch. Only `onMutate` is different: if it fails, the request isn't
+sent and the mutation ends in `'error'`. (In TanStack Query, a failing
+`onSuccess` turns the mutation into an error.)
 
 **Calls aren't serialized.** Each `mutate()` is its own independent run, so two
 of them can be in flight at once and there's no `scope` option to queue them.

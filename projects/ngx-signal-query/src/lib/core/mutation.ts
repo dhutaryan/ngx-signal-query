@@ -1,9 +1,18 @@
 import { type Signal, signal } from '@angular/core'
 import {
+  catchError,
+  concat,
+  concatMap,
   defer,
+  EMPTY,
+  endWith,
   from,
+  ignoreElements,
+  map,
+  of,
   retry as retryOperator,
   take,
+  tap,
   throwIfEmpty,
   timer,
   type Observable,
@@ -13,8 +22,9 @@ import {
 import type { MutationCache } from './mutation-cache'
 import { defaultRetryDelay, resolveRetryDelay, shouldRetry } from './retryer'
 import type { RetryDelayValue, RetryValue } from './types'
+import { isPromiseLike } from './utils'
 
-/** Lifecycle status of a mutation: not yet run, running, succeeded, or failed. */
+/** Lifecycle status of a mutation: not yet run, running (hooks included), succeeded, or failed. */
 export type MutationStatus = 'idle' | 'pending' | 'success' | 'error'
 
 /** Selects which mutations an operation applies to (e.g. `injectIsMutating`). */
@@ -33,7 +43,7 @@ export type MutationState<TData, TError, TVariables, TContext> = {
   error: TError | null
   /** Variables passed to the most recent `mutate()` call. */
   variables: TVariables | undefined
-  /** Value returned by `onMutate` for the current run. */
+  /** Value returned by `onMutate` for the current run, or what its promise resolved to. */
   context: TContext | undefined
   /** Number of failed attempts in the current run. */
   failureCount: number
@@ -43,11 +53,22 @@ export type MutationState<TData, TError, TVariables, TContext> = {
   submittedAt: number
 }
 
+/** What a run's write came to: its data, or the error it failed with. */
+type Outcome<TData, TError> =
+  | { status: 'success'; data: TData; error: null }
+  | { status: 'error'; data: undefined; error: TError }
+
 /**
  * Configuration for a mutation, passed to {@link injectMutation} /
  * {@link mutationOptions}. The hooks fire in order: `onMutate` →
  * (`onSuccess` | `onError`) → `onSettled`. The value returned by `onMutate`
  * is passed as `context` to the later hooks — handy for rollback.
+ *
+ * A hook may return a promise: the next step waits for it, and the mutation
+ * stays pending until the last hook is done. A hook that fails doesn't change
+ * the outcome: its error is rethrown as an unhandled rejection, and the hooks
+ * after it still run. Only a failing `onMutate` fails the mutation, before the
+ * write is sent.
  */
 export type MutationOptions<TData, TError, TVariables, TContext> = {
   /** Performs the write; receives `mutate()`'s argument. Returns `Observable`/`Promise`. */
@@ -56,27 +77,37 @@ export type MutationOptions<TData, TError, TVariables, TContext> = {
   retry?: RetryValue<TError>
   /** Delay between retries. See {@link RetryDelayValue}. */
   retryDelay?: RetryDelayValue<TError>
-  /** Runs before `mutationFn`; its return value becomes `context` (e.g. for optimistic rollback). */
-  onMutate?: (variables: TVariables) => TContext | undefined
-  /** Runs after a successful `mutationFn`. */
+  /**
+   * Runs before `mutationFn`; what it returns becomes `context` (e.g. for
+   * optimistic rollback). If it returns a promise, the write waits for it,
+   * and `context` is what it resolves to. If it fails, the mutation fails
+   * without sending the write.
+   */
+  onMutate?: (
+    variables: TVariables,
+  ) => Promise<TContext | undefined> | TContext | undefined
+  /** Runs after a successful `mutationFn`. If it returns a promise, `onSettled` waits for it. */
   onSuccess?: (
     data: TData,
     variables: TVariables,
     context: TContext | undefined,
-  ) => void
-  /** Runs after a failed `mutationFn`. */
+  ) => Promise<unknown> | unknown
+  /** Runs after a failed `mutationFn` or `onMutate`. If it returns a promise, `onSettled` waits for it. */
   onError?: (
     error: TError,
     variables: TVariables,
     context: TContext | undefined,
-  ) => void
-  /** Runs after success or error — for cleanup that should happen either way. */
+  ) => Promise<unknown> | unknown
+  /**
+   * Runs after success or error — for cleanup that should happen either way.
+   * If it returns a promise, the mutation stays pending until it settles.
+   */
   onSettled?: (
     data: TData | undefined,
     error: TError | null,
     variables: TVariables,
     context: TContext | undefined,
-  ) => void
+  ) => Promise<unknown> | unknown
 }
 
 /** Reactive result returned by {@link injectMutation}; state fields are signals. */
@@ -98,7 +129,7 @@ export type MutationResult<TData, TError, TVariables> = {
   status: Signal<MutationStatus>
   /** Whether the mutation has not been run yet. */
   isIdle: Signal<boolean>
-  /** Whether the mutation is currently running. */
+  /** Whether the mutation is running, its hooks included. */
   isPending: Signal<boolean>
   /** Whether the last run succeeded. */
   isSuccess: Signal<boolean>
@@ -184,79 +215,116 @@ export class Mutation<
 
   /** Runs the mutation once. `variables` are passed straight to `mutationFn`. */
   execute(variables: TVariables): void {
-    const context = this.#options.onMutate?.(variables)
-    // Mutations default to no retry (not idempotent — a retried POST could
-    // create a duplicate); opt in explicitly via options.retry.
-    const retry = this.#options.retry ?? 0
-    const retryDelay = this.#options.retryDelay ?? defaultRetryDelay
-
     this.#state.set({
       status: 'pending',
       data: undefined,
       error: null,
       variables,
-      context,
+      context: undefined,
       failureCount: 0,
       failureReason: null,
       submittedAt: Date.now(),
     })
 
-    // defer + from: normalize Observable/Promise and re-invoke mutationFn on
-    // each retry (a Promise is one-shot, so retry must produce a fresh one).
-    this.#subscription = defer(() => from(this.#options.mutationFn(variables)))
+    // The outcome is fixed before the hooks that report it run: by onMutate,
+    // whose failure calls off the write, then by the write. A hook that fails
+    // after that can't turn a write that went through into an error. The run
+    // stays pending, and in the cache, until its last hook is done.
+    this.#subscription = awaitHook(() => this.#options.onMutate?.(variables))
       .pipe(
-        take(1),
-        retryOperator({
-          delay: (error, retryCount) => {
-            this.#state.update((state) => ({
-              ...state,
-              failureCount: retryCount,
-              failureReason: error as TError,
-            }))
-
-            const attemptIndex = retryCount - 1
-
-            if (!shouldRetry(retry, attemptIndex, error as TError)) throw error
-
-            return timer(
-              resolveRetryDelay(retryDelay, attemptIndex, error as TError),
-            )
-          },
-        }),
-        throwIfEmpty(
-          () =>
-            new Error('Mutation function completed without emitting a value'),
+        tap((context) =>
+          this.#state.update((state) => ({ ...state, context })),
+        ),
+        concatMap(() => this.#request(variables)),
+        map(
+          (data): Outcome<TData, TError> => ({
+            status: 'success',
+            data,
+            error: null,
+          }),
+        ),
+        catchError((error: TError) =>
+          of<Outcome<TData, TError>>({
+            status: 'error',
+            data: undefined,
+            error,
+          }),
+        ),
+        concatMap((outcome) =>
+          this.#runHooks(outcome, variables).pipe(endWith(outcome)),
         ),
       )
-      .subscribe({
-        // `finally`: a hook that throws must not leave the mutation stranded in
-        // the cache (where injectIsMutating would keep counting it forever).
-        next: (data) => {
-          this.#state.update((state) => ({ ...state, status: 'success', data }))
-
-          try {
-            this.#options.onSuccess?.(data, variables, context)
-            this.#options.onSettled?.(data, null, variables, context)
-          } finally {
-            this.#disposeIfDone()
-          }
-        },
-        error: (error: TError) => {
-          this.#state.update((state) => ({ ...state, status: 'error', error }))
-
-          try {
-            this.#options.onError?.(error, variables, context)
-            this.#options.onSettled?.(undefined, error, variables, context)
-          } finally {
-            this.#disposeIfDone()
-          }
-        },
+      .subscribe((outcome) => {
+        this.#state.update((state) => ({ ...state, ...outcome }))
+        this.#disposeIfDone()
       })
   }
 
   cancel(): void {
     this.#subscription?.unsubscribe()
     this.#subscription = null
+  }
+
+  /** Sends the write, retrying as `retry` allows, and emits its data once. */
+  #request(variables: TVariables): Observable<TData> {
+    // Mutations default to no retry (not idempotent — a retried POST could
+    // create a duplicate); opt in explicitly via options.retry.
+    const retry = this.#options.retry ?? 0
+    const retryDelay = this.#options.retryDelay ?? defaultRetryDelay
+
+    // defer + from: normalize Observable/Promise and re-invoke mutationFn on
+    // each retry (a Promise is one-shot, so retry must produce a fresh one).
+    return defer(() => from(this.#options.mutationFn(variables))).pipe(
+      take(1),
+      retryOperator({
+        delay: (error, retryCount) => {
+          this.#state.update((state) => ({
+            ...state,
+            failureCount: retryCount,
+            failureReason: error as TError,
+          }))
+
+          const attemptIndex = retryCount - 1
+
+          if (!shouldRetry(retry, attemptIndex, error as TError)) throw error
+
+          return timer(
+            resolveRetryDelay(retryDelay, attemptIndex, error as TError),
+          )
+        },
+      }),
+      throwIfEmpty(
+        () => new Error('Mutation function completed without emitting a value'),
+      ),
+    )
+  }
+
+  /**
+   * Runs the hooks that report an outcome, in order: onSuccess or onError,
+   * then onSettled. A hook that returns a promise holds the next one until it
+   * settles. One that fails is reported, and the next still runs.
+   */
+  #runHooks(
+    outcome: Outcome<TData, TError>,
+    variables: TVariables,
+  ): Observable<never> {
+    const { context } = this.state()
+
+    return concat(
+      runHook(() =>
+        outcome.status === 'success'
+          ? this.#options.onSuccess?.(outcome.data, variables, context)
+          : this.#options.onError?.(outcome.error, variables, context),
+      ),
+      runHook(() =>
+        this.#options.onSettled?.(
+          outcome.data,
+          outcome.error,
+          variables,
+          context,
+        ),
+      ),
+    )
   }
 
   /**
@@ -271,4 +339,29 @@ export class Mutation<
 
     this.#cache.remove(this)
   }
+}
+
+// Calls a hook and waits for the promise it returns, if any. Anything else
+// it returns doesn't wait, so a run whose mutationFn emits synchronously
+// still settles inside mutate().
+function awaitHook<T>(hook: () => T | PromiseLike<T>): Observable<T> {
+  return defer(() => {
+    const result = hook()
+
+    return isPromiseLike(result) ? from(result) : of(result)
+  })
+}
+
+// Runs a hook that reports an outcome. Only its end matters: what it
+// returns is dropped, and an error it throws is rethrown as an unhandled
+// rejection, so the app's error handling sees it while the run carries on.
+function runHook(hook: () => unknown): Observable<never> {
+  return awaitHook(hook).pipe(
+    ignoreElements(),
+    catchError((error: unknown) => {
+      void Promise.reject(error)
+
+      return EMPTY
+    }),
+  )
 }

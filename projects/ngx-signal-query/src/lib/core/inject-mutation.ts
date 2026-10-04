@@ -24,7 +24,8 @@ import {
  * Unlike queries, a mutation does not run on its own — call `mutate(variables)`
  * to trigger `mutationFn`. The `onMutate` / `onSuccess` / `onError` /
  * `onSettled` lifecycle hooks make optimistic updates and cache invalidation
- * straightforward. Mutations do not retry by default (a retried write is not
+ * straightforward. A hook may return a promise; the mutation stays pending
+ * until it settles. Mutations do not retry by default (a retried write is not
  * idempotent); opt in via `options.retry`. `mutate()` and `reset()` are safe
  * to call from an effect: neither makes the effect depend on what it reads,
  * such as the options or the previous run. Bound to the current injection

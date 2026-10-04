@@ -1,6 +1,11 @@
 import { Injector } from '@angular/core'
-import { TestBed, fakeAsync, tick } from '@angular/core/testing'
-import { Subject } from 'rxjs'
+import {
+  TestBed,
+  fakeAsync,
+  flushMicrotasks,
+  tick,
+} from '@angular/core/testing'
+import { of, Subject } from 'rxjs'
 
 import { injectIsMutating } from './inject-is-mutating'
 import { injectMutation } from './inject-mutation'
@@ -40,6 +45,32 @@ describe('injectIsMutating', () => {
       subject.next(1)
       subject.complete()
       tick()
+
+      expect(isMutating()).toBe(0)
+    })
+  }))
+
+  it('keeps counting a mutation until its hooks are done', fakeAsync(() => {
+    let finishAudit!: () => void
+    const audit = new Promise<void>((resolve) => {
+      finishAudit = resolve
+    })
+
+    TestBed.runInInjectionContext(() => {
+      const isMutating = injectIsMutating()
+      const m = injectMutation(() => ({
+        mutationFn: () => of('saved'),
+        onSuccess: () => audit,
+      }))
+
+      m.mutate()
+      flushMicrotasks()
+
+      // The write landed, but its onSuccess is still running.
+      expect(isMutating()).toBe(1)
+
+      finishAudit()
+      flushMicrotasks()
 
       expect(isMutating()).toBe(0)
     })

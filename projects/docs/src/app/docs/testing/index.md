@@ -141,6 +141,9 @@ it('adds a todo and invalidates the list', () => {
 })
 ```
 
+If a hook returns a promise, the mutation settles only after it — run the test
+in `fakeAsync` and call `flushMicrotasks()` before asserting.
+
 ## Test the definitions directly
 
 If you keep queries and mutations in a service with `queryOptions` /

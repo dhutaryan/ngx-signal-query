@@ -102,3 +102,9 @@ const MAX_TIMEOUT = 2 ** 31 - 1
 export function isValidTimeout(value: unknown): value is number {
   return typeof value === 'number' && value >= 0 && value <= MAX_TIMEOUT
 }
+
+// True for a promise, or for anything else with a then method.
+/** @internal */
+export function isPromiseLike(value: unknown): value is PromiseLike<unknown> {
+  return typeof (value as PromiseLike<unknown> | null)?.then === 'function'
+}
