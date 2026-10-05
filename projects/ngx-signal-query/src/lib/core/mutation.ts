@@ -45,7 +45,7 @@ export type MutationState<TData, TError, TVariables, TContext> = {
   variables: TVariables | undefined
   /** Value returned by `onMutate` for the current run, or what its promise resolved to. */
   context: TContext | undefined
-  /** Number of failed attempts in the current run. */
+  /** Number of consecutive failed attempts in the current run. */
   failureCount: number
   /** Error of the most recent failed attempt, or `null`. */
   failureReason: TError | null
@@ -53,9 +53,18 @@ export type MutationState<TData, TError, TVariables, TContext> = {
   submittedAt: number
 }
 
-/** What a run's write came to: its data, or the error it failed with. */
+/**
+ * What a run's write came to: its data, or the error it failed with. A
+ * success also clears the failed attempts that came before it.
+ */
 type Outcome<TData, TError> =
-  | { status: 'success'; data: TData; error: null }
+  | {
+      status: 'success'
+      data: TData
+      error: null
+      failureCount: 0
+      failureReason: null
+    }
   | { status: 'error'; data: undefined; error: TError }
 
 /**
@@ -241,6 +250,8 @@ export class Mutation<
             status: 'success',
             data,
             error: null,
+            failureCount: 0,
+            failureReason: null,
           }),
         ),
         catchError((error: TError) =>
