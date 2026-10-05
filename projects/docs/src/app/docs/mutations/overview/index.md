@@ -139,6 +139,10 @@ The `context` returned by `onMutate` is what makes rollbacks possible — snapsh
 the old data, restore it if the request fails. That's covered in Optimistic
 Updates.
 
+A hook every mutation needs, such as reporting failed writes, doesn't have to
+be repeated on each one: set it once in
+[Default Options](/query-client/default-options).
+
 ## Mutations don't retry
 
 Queries retry three times by default. Mutations **don't retry at all**, and
@@ -153,6 +157,10 @@ injectMutation(() => ({
   retry: 2,
 }))
 ```
+
+To turn retries on for every mutation, set `mutations: { retry }` in
+[Default Options](/query-client/default-options), but only if every write in
+your app is safe to repeat.
 
 ## Things to know
 

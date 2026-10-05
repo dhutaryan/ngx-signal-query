@@ -24,7 +24,3 @@ export type {
 export { QueryClientFeatureKind } from './lib/features/feature'
 export type { QueryClientFeature } from './lib/features/feature'
 export { withDefaultOptions } from './lib/features/with-default-options'
-export type {
-  DefaultOptions,
-  DefaultQueryOptions,
-} from './lib/features/with-default-options'

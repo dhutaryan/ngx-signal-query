@@ -26,7 +26,9 @@ import {
  * `onSettled` lifecycle hooks make optimistic updates and cache invalidation
  * straightforward. A hook may return a promise; the mutation stays pending
  * until it settles. Mutations do not retry by default (a retried write is not
- * idempotent); opt in via `options.retry`. `mutate()` and `reset()` are safe
+ * idempotent); opt in via `options.retry`. Whatever of `retry`, `retryDelay`
+ * and the `onSuccess` / `onError` / `onSettled` hooks a mutation leaves unset
+ * comes from {@link withDefaultOptions}. `mutate()` and `reset()` are safe
  * to call from an effect: neither makes the effect depend on what it reads,
  * such as the options or the previous run. Bound to the current injection
  * context. Destroying it doesn't cancel a run in flight: the write has most
@@ -69,7 +71,8 @@ export function injectMutation<
   const injector = options?.injector ?? inject(Injector)
 
   return runInInjectionContext(injector, () => {
-    const cache = inject(QueryClient).getMutationCache()
+    const client = inject(QueryClient)
+    const cache = client.getMutationCache()
 
     // Every mutate() builds its own Mutation. Sharing one across calls meant a
     // second call overwrote the first's subscription (orphaning the request)
@@ -107,7 +110,7 @@ export function injectMutation<
           current()?.removeObserver()
 
           // Options are read per call, so a signal used in them stays live.
-          const run = cache.build(optionsFn())
+          const run = cache.build(client.defaultMutationOptions(optionsFn()))
 
           run.addObserver()
           current.set(run)
