@@ -160,3 +160,58 @@ export type QueryResult<TData, TError = Error> = {
   /** Forces a fresh fetch, cancelling any in-flight request. */
   refetch: () => void
 }
+
+/** Default query options applied to every query unless overridden per-query. */
+export interface DefaultQueryOptions {
+  /** How long fetched data is considered fresh, in ms. Defaults to `0`. */
+  staleTime?: number
+  /** How long unused (unobserved) data is kept before garbage collection, in ms. */
+  gcTime?: number
+  /** Retry policy on failure: a boolean, a count, or a predicate. Defaults to `3`. */
+  retry?: RetryValue<unknown>
+  /** Delay between retries, in ms or a function of the attempt. */
+  retryDelay?: RetryDelayValue<unknown>
+}
+
+/**
+ * Default mutation options applied to every mutation. A mutation's own value
+ * replaces the default for that field only; a field it leaves `undefined`
+ * keeps the default.
+ *
+ * The hooks run in the injection context of the injector that provides the
+ * client, so they can call `inject()` before their first `await`. Once that
+ * injector is destroyed, they no longer run.
+ */
+export interface DefaultMutationOptions {
+  /** Retry policy on failure. Defaults to `0`: writes aren't retried. */
+  retry?: RetryValue<unknown>
+  /** Delay between retries, in ms or a function of the attempt. */
+  retryDelay?: RetryDelayValue<unknown>
+  /** Runs after a successful write, for a mutation without its own `onSuccess`. */
+  onSuccess?: (
+    data: unknown,
+    variables: unknown,
+    context: unknown,
+  ) => Promise<unknown> | unknown
+  /** Runs after a failed write or `onMutate`, for a mutation without its own `onError`. */
+  onError?: (
+    error: unknown,
+    variables: unknown,
+    context: unknown,
+  ) => Promise<unknown> | unknown
+  /** Runs after success or error, for a mutation without its own `onSettled`. */
+  onSettled?: (
+    data: unknown,
+    error: unknown,
+    variables: unknown,
+    context: unknown,
+  ) => Promise<unknown> | unknown
+}
+
+/** Application-wide defaults configured via {@link withDefaultOptions}. */
+export interface DefaultOptions {
+  /** Defaults applied to all queries. */
+  queries?: DefaultQueryOptions
+  /** Defaults applied to all mutations. */
+  mutations?: DefaultMutationOptions
+}

@@ -1,4 +1,12 @@
-import { Component, Injector, type Signal, effect, signal } from '@angular/core'
+import {
+  Component,
+  InjectionToken,
+  Injector,
+  type Signal,
+  effect,
+  inject,
+  signal,
+} from '@angular/core'
 import {
   type ComponentFixture,
   TestBed,
@@ -9,10 +17,13 @@ import {
 } from '@angular/core/testing'
 import { EMPTY, of, Subject, throwError } from 'rxjs'
 
+import { withDefaultOptions } from '../features/with-default-options'
 import { injectMutation } from './inject-mutation'
 import type { MutationOptions, MutationResult } from './mutation'
+import { mutationOptions } from './mutation-options'
 import { provideQueryClient } from './provider'
 import { QueryClient } from './query-client'
+import type { DefaultOptions } from './types'
 
 // A promise the spec settles by hand. A hook that returns it keeps running
 // until the spec resolves or rejects it.
@@ -880,6 +891,278 @@ describe('injectMutation', () => {
       expect(second).toHaveBeenCalledTimes(1)
       expect(m.data()).toBe(2)
     })
+  })
+
+  // withDefaultOptions({ mutations }) fills in what a mutation leaves unset,
+  // field by field. Its hooks run in the injection context of the injector
+  // that provides the client.
+  describe('default options', () => {
+    const REPORTS = new InjectionToken<unknown[]>('REPORTS')
+
+    // Provides a client with these defaults, and a list the default hooks can
+    // report to through inject(REPORTS). Returns that list.
+    function provideDefaults(defaultOptions: DefaultOptions): unknown[] {
+      const reports: unknown[] = []
+
+      TestBed.resetTestingModule()
+      TestBed.configureTestingModule({
+        providers: [
+          provideQueryClient(withDefaultOptions(defaultOptions)),
+          { provide: REPORTS, useValue: reports },
+        ],
+      })
+
+      return reports
+    }
+
+    it('runs the default onError and onSettled when the mutation has none, with its variables and context', () => {
+      const error = new Error('boom')
+      const onError = jasmine.createSpy('onError')
+      const onSettled = jasmine.createSpy('onSettled')
+
+      provideDefaults({ mutations: { onError, onSettled } })
+
+      const m = setup<string, Error, string, { previous: string[] }>(() => ({
+        mutationFn: () => throwError(() => error),
+        onMutate: () => ({ previous: ['a'] }),
+      }))
+
+      m.mutate('b')
+
+      expect(onError).toHaveBeenCalledOnceWith(error, 'b', { previous: ['a'] })
+      expect(onSettled).toHaveBeenCalledOnceWith(undefined, error, 'b', {
+        previous: ['a'],
+      })
+    })
+
+    it('runs the default onSuccess and onSettled when the mutation has none', () => {
+      const onSuccess = jasmine.createSpy('onSuccess')
+      const onSettled = jasmine.createSpy('onSettled')
+
+      provideDefaults({ mutations: { onSuccess, onSettled } })
+
+      const m = setup(() => ({
+        mutationFn: (title: string) => of(`${title} saved`),
+      }))
+
+      m.mutate('b')
+
+      expect(onSuccess).toHaveBeenCalledOnceWith('b saved', 'b', undefined)
+      expect(onSettled).toHaveBeenCalledOnceWith(
+        'b saved',
+        null,
+        'b',
+        undefined,
+      )
+    })
+
+    it("replaces a default hook with the mutation's own", () => {
+      const defaultOnError = jasmine.createSpy('default onError')
+      const onError = jasmine.createSpy('onError')
+
+      provideDefaults({ mutations: { onError: defaultOnError } })
+
+      const m = setup<string, Error, void>(() => ({
+        mutationFn: () => throwError(() => new Error('boom')),
+        // Handles the error itself, e.g. rolls back an optimistic update.
+        onError,
+      }))
+
+      m.mutate()
+
+      expect(onError).toHaveBeenCalledTimes(1)
+      expect(defaultOnError).not.toHaveBeenCalled()
+    })
+
+    it("replaces hooks one by one: the mutation's own onSuccess keeps the default onError", () => {
+      const error = new Error('boom')
+      const defaultOnError = jasmine.createSpy('default onError')
+
+      provideDefaults({ mutations: { onError: defaultOnError } })
+
+      const m = setup<string, Error, void>(() => ({
+        mutationFn: () => throwError(() => error),
+        onSuccess: jasmine.createSpy('onSuccess'),
+      }))
+
+      m.mutate()
+
+      expect(defaultOnError).toHaveBeenCalledOnceWith(
+        error,
+        undefined,
+        undefined,
+      )
+    })
+
+    it('treats a hook set to undefined as not set', () => {
+      const defaultOnError = jasmine.createSpy('default onError')
+
+      provideDefaults({ mutations: { onError: defaultOnError } })
+
+      // A shared definition that passes an optional hook on, used here
+      // without one.
+      const saveTodo = (onError?: (error: Error) => void) =>
+        mutationOptions({
+          mutationFn: () => throwError(() => new Error('boom')),
+          onError,
+        })
+      const m = setup(() => saveTodo())
+
+      m.mutate()
+
+      expect(defaultOnError).toHaveBeenCalledTimes(1)
+    })
+
+    it('stays pending until an async default hook resolves', fakeAsync(() => {
+      const report = deferred()
+
+      provideDefaults({ mutations: { onSuccess: () => report.promise } })
+
+      const m = setup(() => ({ mutationFn: () => of('saved') }))
+
+      m.mutate()
+      flushMicrotasks()
+
+      expect(m.isPending()).toBe(true)
+
+      report.resolve()
+      flushMicrotasks()
+
+      expect(m.isSuccess()).toBe(true)
+    }))
+
+    it('retries with the default retry and retryDelay', fakeAsync(() => {
+      let attempts = 0
+
+      provideDefaults({ mutations: { retry: 1, retryDelay: 50 } })
+
+      const m = setup(() => ({
+        mutationFn: () => {
+          attempts++
+
+          return throwError(() => new Error('fail'))
+        },
+      }))
+
+      m.mutate()
+      tick(49)
+
+      expect(attempts).toBe(1)
+
+      tick(1)
+
+      expect(attempts).toBe(2)
+      expect(m.isError()).toBe(true)
+    }))
+
+    it("lets the mutation's own retry override the default, 0 included", fakeAsync(() => {
+      let attempts = 0
+
+      provideDefaults({ mutations: { retry: 2, retryDelay: 10 } })
+
+      const m = setup(() => ({
+        mutationFn: () => {
+          attempts++
+
+          return throwError(() => new Error('fail'))
+        },
+        // This write isn't safe to send twice.
+        retry: 0,
+      }))
+
+      m.mutate()
+      tick(100)
+
+      expect(attempts).toBe(1)
+      expect(m.isError()).toBe(true)
+    }))
+
+    it('ignores the query defaults', fakeAsync(() => {
+      let attempts = 0
+
+      provideDefaults({ queries: { retry: 3, retryDelay: 10 } })
+
+      const m = setup(() => ({
+        mutationFn: () => {
+          attempts++
+
+          return throwError(() => new Error('fail'))
+        },
+      }))
+
+      m.mutate()
+      tick(100)
+
+      expect(attempts).toBe(1)
+    }))
+
+    it('runs each default hook in an injection context', fakeAsync(() => {
+      const reports = provideDefaults({
+        mutations: {
+          onSuccess: () => inject(REPORTS).push('success'),
+          onError: () => inject(REPORTS).push('error'),
+          onSettled: () => inject(REPORTS).push('settled'),
+        },
+      })
+      const save = setup(() => ({ mutationFn: () => of('saved') }))
+      const remove = setup(() => ({
+        mutationFn: () => throwError(() => new Error('boom')),
+      }))
+
+      save.mutate()
+      remove.mutate()
+      flush()
+
+      expect(reports).toEqual(['success', 'settled', 'error', 'settled'])
+    }))
+
+    it('resolves inject() from the injector that provides the client, not the component that started the run', fakeAsync(() => {
+      const response = new Subject<string>()
+      const hostReports: unknown[] = []
+      const reports = provideDefaults({
+        mutations: { onSuccess: (saved) => inject(REPORTS).push(saved) },
+      })
+
+      @Component({
+        template: '',
+        providers: [{ provide: REPORTS, useValue: hostReports }],
+      })
+      class Host {
+        readonly save = injectMutation(() => ({ mutationFn: () => response }))
+      }
+
+      const fixture = TestBed.createComponent(Host)
+
+      fixture.detectChanges()
+      fixture.componentInstance.save.mutate()
+      // The user leaves the page before the save lands.
+      fixture.destroy()
+      response.next('saved')
+      response.complete()
+      flush()
+
+      expect(reports).toEqual(['saved'])
+      expect(hostReports).toEqual([])
+    }))
+
+    it('skips the default hooks once that injector is destroyed', fakeAsync(() => {
+      const response = new Subject<string>()
+      const onSuccess = jasmine.createSpy('onSuccess')
+
+      provideDefaults({ mutations: { onSuccess } })
+
+      const m = setup(() => ({ mutationFn: () => response }))
+
+      m.mutate()
+      // The test ends, or the app is destroyed, while the save is in flight.
+      TestBed.resetTestingModule()
+      response.next('saved')
+      response.complete()
+
+      expect(() => flush()).not.toThrow()
+      expect(onSuccess).not.toHaveBeenCalled()
+      expect(m.isSuccess()).toBe(true)
+    }))
   })
 
   // An effect that mutates or resets should depend only on what it reads

@@ -136,4 +136,6 @@ Individual queries can still override it.
 
 Mutations default to **no retry at all** (`retry: 0`). That's deliberate: a
 write isn't necessarily idempotent, and blindly re-sending a `POST` can create
-two records. Opt in only when you know the operation is safe to repeat.
+two records. Opt in only when you know the operation is safe to repeat: per
+mutation, or for all of them with `mutations: { retry }` in
+[Default Options](/query-client/default-options).

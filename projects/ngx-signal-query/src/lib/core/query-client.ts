@@ -1,8 +1,16 @@
-import { inject, Injectable, untracked } from '@angular/core'
+import {
+  DestroyRef,
+  EnvironmentInjector,
+  inject,
+  Injectable,
+  runInInjectionContext,
+  untracked,
+} from '@angular/core'
 import type { Observable } from 'rxjs'
 
 import { QueryCache } from './query-cache'
 import { MutationCache } from './mutation-cache'
+import type { MutationOptions } from './mutation'
 import { defaultRetryDelay } from './retryer'
 import { functionalUpdate } from './utils'
 import type {
@@ -41,6 +49,20 @@ export class QueryClient {
   readonly #cache = inject(QueryCache)
   readonly #mutationCache = inject(MutationCache)
   readonly #config = inject(QUERY_CLIENT_CONFIG, { optional: true }) ?? {}
+  /** @internal */
+  readonly #injector = inject(EnvironmentInjector)
+  /**
+   * Set once #injector is destroyed. TODO: read DestroyRef.destroyed instead
+   * once the minimum supported Angular is 20.1, where it became public.
+   *
+   * @internal
+   */
+  #destroyed = false
+
+  /** @internal */
+  constructor() {
+    inject(DestroyRef).onDestroy(() => (this.#destroyed = true))
+  }
 
   /** Returns the underlying query cache. Advanced/internal use. */
   getQueryCache(): QueryCache {
@@ -69,6 +91,29 @@ export class QueryClient {
       retry: options.retry ?? defaults?.retry ?? 3,
       retryDelay:
         options.retryDelay ?? defaults?.retryDelay ?? defaultRetryDelay,
+    }
+  }
+
+  /**
+   * Fills in what a mutation leaves unset from the configured mutation
+   * defaults, field by field. A field set to `undefined` counts as unset. A
+   * default hook runs in the injection context of the injector that provides
+   * the client.
+   *
+   * @internal
+   */
+  defaultMutationOptions<TData, TError, TVariables, TContext>(
+    options: MutationOptions<TData, TError, TVariables, TContext>,
+  ): MutationOptions<TData, TError, TVariables, TContext> {
+    const defaults = this.#config.defaultOptions?.mutations
+
+    return {
+      ...options,
+      retry: options.retry ?? defaults?.retry,
+      retryDelay: options.retryDelay ?? defaults?.retryDelay,
+      onSuccess: options.onSuccess ?? this.#inContext(defaults?.onSuccess),
+      onError: options.onError ?? this.#inContext(defaults?.onError),
+      onSettled: options.onSettled ?? this.#inContext(defaults?.onSettled),
     }
   }
 
@@ -240,5 +285,27 @@ export class QueryClient {
     return untracked(
       () => this.#mutationCache.findAll({ status: 'pending' }).length,
     )
+  }
+
+  /**
+   * Runs a default hook in the injection context of the injector that
+   * provides the client, so it can call inject(). The defaults belong to the
+   * app, so it's this injector, not the component that started the run.
+   *
+   * @internal
+   */
+  #inContext<TArgs extends unknown[]>(
+    hook: ((...args: TArgs) => unknown) | undefined,
+  ): ((...args: TArgs) => unknown) | undefined {
+    if (!hook) return
+
+    return (...args) => {
+      // Once that injector is destroyed, the app the defaults belong to is
+      // gone: a run that lands after it, e.g. after its test has ended,
+      // skips them.
+      if (this.#destroyed) return
+
+      return runInInjectionContext(this.#injector, () => hook(...args))
+    }
   }
 }
