@@ -205,6 +205,9 @@ describe('injectMutation', () => {
       expect(attempts).toBe(3)
       expect(m.isSuccess()).toBe(true)
       expect(m.data()).toBe('ok')
+      // The failed attempts led to a success, so there's no failure to show.
+      expect(m.failureCount()).toBe(0)
+      expect(m.failureReason()).toBeNull()
     }))
 
     it('tracks failureCount and failureReason when retries are exhausted', fakeAsync(() => {
