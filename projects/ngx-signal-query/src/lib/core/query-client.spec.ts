@@ -151,6 +151,24 @@ describe('QueryClient', () => {
 
       expect(client.getQueryData(['n'])).toBe(5)
     })
+
+    // JSON data can have a field named `constructor`, e.g. a filter of cars
+    // by the team that builds them, null while none is picked.
+    it('accepts a key whose object has a null constructor field', () => {
+      client.setQueryData(['cars', { constructor: null, year: 2024 }], 1)
+
+      expect(
+        client.getQueryData(['cars', { constructor: null, year: 2024 }]),
+      ).toBe(1)
+    })
+
+    it('ignores property order in an object with a constructor field', () => {
+      client.setQueryData(['cars', { constructor: 'ferrari', year: 2024 }], 1)
+
+      expect(
+        client.getQueryData(['cars', { year: 2024, constructor: 'ferrari' }]),
+      ).toBe(1)
+    })
   })
 
   describe('fetchQuery', () => {

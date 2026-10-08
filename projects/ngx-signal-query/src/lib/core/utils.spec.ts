@@ -17,6 +17,12 @@ describe('hashKey', () => {
     expect(hashKey([{ a: 1, b: 2 }])).toBe(hashKey([{ b: 2, a: 1 }]))
   })
 
+  it('is order-independent for an object with a constructor field', () => {
+    expect(hashKey([{ constructor: 'x', a: 1 }])).toBe(
+      hashKey([{ a: 1, constructor: 'x' }]),
+    )
+  })
+
   it('distinguishes different keys', () => {
     expect(hashKey(['todos', 1])).not.toBe(hashKey(['todos', 2]))
   })
@@ -62,6 +68,15 @@ describe('isPlainObject', () => {
 
   it('returns true for null-prototype objects', () => {
     expect(isPlainObject(Object.create(null))).toBe(true)
+  })
+
+  it('returns true for an object with its own constructor field', () => {
+    expect(isPlainObject(JSON.parse('{"constructor":null}'))).toBe(true)
+    expect(isPlainObject({ constructor: 'x' })).toBe(true)
+  })
+
+  it('returns false for an object whose prototype has no constructor function', () => {
+    expect(isPlainObject(Object.create({ constructor: null }))).toBe(false)
   })
 
   it('returns false for arrays, null and class instances', () => {
