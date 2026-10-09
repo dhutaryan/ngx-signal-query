@@ -51,6 +51,20 @@ describe('partialMatchKey', () => {
     expect(partialMatchKey(['app'], ['app', 1])).toBe(false)
   })
 
+  it('does not match a shorter key when the filter ends in undefined', () => {
+    expect(partialMatchKey(['app'], ['app', undefined])).toBe(false)
+    expect(partialMatchKey([{ ids: [1] }], [{ ids: [1, undefined] }])).toBe(
+      false,
+    )
+  })
+
+  it('matches a key with the same undefined item, or a longer one', () => {
+    expect(partialMatchKey(['app', undefined], ['app', undefined])).toBe(true)
+    expect(partialMatchKey(['app', undefined, 1], ['app', undefined])).toBe(
+      true,
+    )
+  })
+
   it('matches a nested object subset', () => {
     expect(partialMatchKey([{ a: 1, b: 2 }], [{ a: 1 }])).toBe(true)
     expect(partialMatchKey([{ a: 1 }], [{ a: 2 }])).toBe(false)

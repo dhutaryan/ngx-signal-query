@@ -24,6 +24,12 @@ function partialDeepEqual(a: unknown, b: unknown): boolean {
   if (typeof a !== typeof b) return false
 
   if (a && b && typeof a === 'object' && typeof b === 'object') {
+    // An array longer than the key's can't be a prefix of it, even when what
+    // it adds is undefined, which an item the key lacks would equal.
+    if (Array.isArray(a) && Array.isArray(b) && b.length > a.length) {
+      return false
+    }
+
     return Object.keys(b).every((key) =>
       partialDeepEqual(
         (a as Record<string, unknown>)[key],

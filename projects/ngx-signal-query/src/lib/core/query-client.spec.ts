@@ -301,6 +301,19 @@ describe('QueryClient', () => {
 
       expect(client.getQueryCache().getAll().length).toBe(0)
     })
+
+    // e.g. a list keyed by a status the user hasn't picked yet
+    it("doesn't remove a shorter key with a filter that ends in undefined", () => {
+      client.setQueryData(['todos'], 'all')
+      client.setQueryData(['todos', undefined], 'no status')
+
+      client.removeQueries({ queryKey: ['todos', undefined] })
+
+      const cache = client.getQueryCache()
+
+      expect(cache.get(['todos'])).toBeDefined()
+      expect(cache.get(['todos', undefined])).toBeUndefined()
+    })
   })
 
   describe('isFetching', () => {
