@@ -47,6 +47,10 @@ A few things worth knowing:
 - **Returning `undefined` from the updater is a no-op**, not a way to clear the
   entry. It leaves the cache untouched. To actually drop data, use
   `removeQueries`.
+- **Writing what's already there changes nothing.** The data is merged with
+  what the cache holds, like a response: if it's equal, `data()` keeps its
+  reference and nothing that reads it runs again. See
+  [Structural Sharing](/queries/structural-sharing).
 
 ## Updating from a mutation response
 

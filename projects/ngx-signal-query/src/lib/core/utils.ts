@@ -1,4 +1,4 @@
-import type { QueryKey, Updater } from './types'
+import type { QueryKey, StructuralSharingValue, Updater } from './types'
 
 // Resolves an updater: calls it with the previous value if it's a function,
 // otherwise uses it as the value directly.
@@ -95,6 +95,88 @@ export function isPlainObject(o: any): o is Record<PropertyKey, unknown> {
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function hasObjectPrototype(o: any): boolean {
   return Object.prototype.toString.call(o) === '[object Object]'
+}
+
+// Past this many levels replaceEqualDeep takes the new value as is.
+const MAX_SHARING_DEPTH = 500
+
+// Returns `prev` when `next` is deeply equal to it. Otherwise returns `next`
+// with every deeply equal part replaced by the one from `prev`, so whatever
+// didn't change keeps its reference. Only plain objects and arrays are
+// compared, as JSON parsing makes them: any other value (a Date, a class
+// instance, a Map) counts as changed. A value that references itself can't
+// overflow the stack: past MAX_SHARING_DEPTH levels `next` is taken as is.
+// The same algorithm as TanStack Query's replaceEqualDeep.
+/** @internal */
+export function replaceEqualDeep<T>(prev: unknown, next: T, depth?: number): T
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export function replaceEqualDeep(prev: any, next: any, depth = 0): any {
+  if (prev === next) return prev
+  if (depth > MAX_SHARING_DEPTH) return next
+
+  const array = isPlainArray(prev) && isPlainArray(next)
+
+  if (!array && !(isPlainObject(prev) && isPlainObject(next))) return next
+
+  const prevItems = array ? prev : Object.keys(prev)
+  const prevSize = prevItems.length
+  const nextItems = array ? next : Object.keys(next)
+  const nextSize = nextItems.length
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const copy: any = array ? new Array(nextSize) : {}
+
+  let equalItems = 0
+
+  for (let i = 0; i < nextSize; i++) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const key: any = array ? i : nextItems[i]
+    const prevItem = prev[key]
+    const nextItem = next[key]
+
+    if (prevItem === nextItem) {
+      copy[key] = prevItem
+      if (array ? i < prevSize : Object.hasOwn(prev, key)) equalItems++
+      continue
+    }
+
+    if (
+      prevItem === null ||
+      nextItem === null ||
+      typeof prevItem !== 'object' ||
+      typeof nextItem !== 'object'
+    ) {
+      copy[key] = nextItem
+      continue
+    }
+
+    const shared = replaceEqualDeep(prevItem, nextItem, depth + 1)
+
+    copy[key] = shared
+    if (shared === prevItem) equalItems++
+  }
+
+  return prevSize === nextSize && equalItems === prevSize ? prev : copy
+}
+
+// An array without holes or extra properties, as JSON parsing makes.
+function isPlainArray(value: unknown): value is unknown[] {
+  return Array.isArray(value) && value.length === Object.keys(value).length
+}
+
+// Merges new data into the data a query holds, as its structuralSharing
+// option says: shared, as is, or by the option's own function.
+/** @internal */
+export function replaceData<TData>(
+  prevData: TData | undefined,
+  data: TData,
+  structuralSharing: StructuralSharingValue<TData>,
+): TData {
+  if (typeof structuralSharing === 'function') {
+    return structuralSharing(prevData, data)
+  }
+
+  return structuralSharing ? replaceEqualDeep(prevData, data) : data
 }
 
 // The longest delay a browser timer holds, in ms. A longer one overflows and

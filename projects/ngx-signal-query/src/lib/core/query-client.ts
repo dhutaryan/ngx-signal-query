@@ -20,6 +20,7 @@ import type {
   QueryOptions,
   RetryDelayValue,
   RetryValue,
+  StructuralSharingValue,
   Updater,
 } from './types'
 import { QUERY_CLIENT_CONFIG } from './injection-tokens'
@@ -76,8 +77,8 @@ export class QueryClient {
 
   /**
    * Merges per-query options with the configured defaults, filling in
-   * `staleTime`, `gcTime`, `retry`, and `retryDelay`. Used internally by
-   * {@link injectQuery}.
+   * `staleTime`, `gcTime`, `retry`, `retryDelay` and `structuralSharing`.
+   * Used internally by {@link injectQuery}.
    */
   defaultQueryOptions<TData, TError = Error>(
     options: QueryOptions<TData, TError>,
@@ -91,6 +92,8 @@ export class QueryClient {
       retry: options.retry ?? defaults?.retry ?? 3,
       retryDelay:
         options.retryDelay ?? defaults?.retryDelay ?? defaultRetryDelay,
+      structuralSharing:
+        options.structuralSharing ?? this.#defaultStructuralSharing(),
     }
   }
 
@@ -125,7 +128,7 @@ export class QueryClient {
    * @param key - The query key to fetch and cache under.
    * @param queryFn - Function returning the data as an `Observable` or `Promise`.
    * @param options - Fetch tuning (`staleTime`, `retry`, `retryDelay`,
-   *   `cancelRefetch`).
+   *   `structuralSharing`, `cancelRefetch`).
    */
   fetchQuery<TData>(
     key: QueryKey,
@@ -136,6 +139,7 @@ export class QueryClient {
       retry?: RetryValue<any>
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       retryDelay?: RetryDelayValue<any>
+      structuralSharing?: StructuralSharingValue<TData>
       cancelRefetch?: boolean
     } = {},
   ): void {
@@ -145,11 +149,16 @@ export class QueryClient {
       const retry = options.retry ?? defaults?.retry ?? 3
       const retryDelay =
         options.retryDelay ?? defaults?.retryDelay ?? defaultRetryDelay
+      const structuralSharing =
+        options.structuralSharing ?? this.#defaultStructuralSharing<TData>()
 
       const query = this.#cache.getOrCreate<TData>(key)
 
       if (query.shouldFetch(staleTime)) {
-        query.fetch(queryFn, retry, retryDelay, options.cancelRefetch)
+        query.fetch(
+          { queryFn, retry, retryDelay, structuralSharing },
+          { cancelRefetch: options.cancelRefetch },
+        )
       }
     })
   }
@@ -172,6 +181,11 @@ export class QueryClient {
    * The `updater` may be a value or a function of the previous data; returning
    * `undefined` from the function is a no-op. Useful for optimistic updates.
    *
+   * The data is merged like a response (see `structuralSharing`): what didn't
+   * change keeps its reference, so writing what the cache holds changes
+   * nothing. It merges as the query showing the key asks; with none showing
+   * it, the way the cached data was fetched; otherwise by the default.
+   *
    * @param key - The query key to write.
    * @param updater - The new data, or a function `(prev) => next`.
    *
@@ -191,7 +205,12 @@ export class QueryClient {
       // Matches TanStack: an updater returning undefined is a no-op.
       if (data === undefined) return
 
-      query.setData(data)
+      // It has no options of its own: it merges the way the query's data was
+      // fetched, or by the default before any fetch.
+      query.setData(data, {
+        structuralSharing:
+          query.structuralSharing() ?? this.#defaultStructuralSharing<TData>(),
+      })
     })
   }
 
@@ -224,7 +243,7 @@ export class QueryClient {
         const options = query.activeFetchOptions()
 
         if (options) {
-          query.fetch(options.queryFn, options.retry, options.retryDelay, true)
+          query.fetch(options, { cancelRefetch: true })
         }
       })
     })
@@ -285,6 +304,18 @@ export class QueryClient {
     return untracked(
       () => this.#mutationCache.findAll({ status: 'pending' }).length,
     )
+  }
+
+  /**
+   * The configured default structuralSharing, or `true`. One default serves
+   * every query whatever its data, so a function there takes and returns
+   * `unknown`; it's typed as the query's own here.
+   *
+   * @internal
+   */
+  #defaultStructuralSharing<TData>(): StructuralSharingValue<TData> {
+    return (this.#config.defaultOptions?.queries?.structuralSharing ??
+      true) as StructuralSharingValue<TData>
   }
 
   /**

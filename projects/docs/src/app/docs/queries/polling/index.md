@@ -19,6 +19,10 @@ as the query is observed and enabled. It stops when the component that injected
 the query is destroyed, and a [disabled query](/queries/disabling-queries)
 doesn't poll.
 
+A poll that brings the same data as before doesn't change `data()`: the query
+keeps what it holds, so nothing that reads it runs again. See
+[Structural Sharing](/queries/structural-sharing).
+
 ## When the next poll comes
 
 Each poll comes `refetchInterval` ms **after the query's last update**: its
