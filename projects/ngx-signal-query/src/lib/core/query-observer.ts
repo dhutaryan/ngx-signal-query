@@ -92,7 +92,7 @@ export function createQueryObserver<TData, TError = Error>(
         ? initialDataUpdatedAt()
         : (initialDataUpdatedAt ?? Date.now())
 
-    q.setData(data, updatedAt)
+    q.setData(data, { updatedAt })
   }
 
   // Resolves the query for a key, seeding a fresh one with initialData. It
@@ -174,14 +174,14 @@ export function createQueryObserver<TData, TError = Error>(
   const fetchOptionsFor = (
     q: Query<TData, TError>,
   ): ReturnType<QuerySubscriber<TData, TError>['fetchOptions']> => {
-    const { queryKey, queryFn, retry, retryDelay, enabled } =
+    const { queryKey, queryFn, retry, retryDelay, structuralSharing, enabled } =
       untracked(defaultedOptions)
 
     if (enabled === false || hashKey(queryKey) !== q.queryHash) {
       return null
     }
 
-    return { queryFn, retry, retryDelay }
+    return { queryFn, retry, retryDelay, structuralSharing }
   }
 
   track((cleanup) => {
@@ -195,6 +195,7 @@ export function createQueryObserver<TData, TError = Error>(
     // This observer as q sees it.
     const subscriber: QuerySubscriber<TData, TError> = {
       fetchOptions: () => fetchOptionsFor(q),
+      structuralSharing: () => untracked(defaultedOptions).structuralSharing,
     }
 
     q.addObserver(subscriber)
@@ -220,11 +221,22 @@ export function createQueryObserver<TData, TError = Error>(
 
     if (!enabled()) return
 
-    const { queryKey, queryFn, staleTime, retry, retryDelay } =
-      untracked(defaultedOptions)
+    const {
+      queryKey,
+      queryFn,
+      staleTime,
+      retry,
+      retryDelay,
+      structuralSharing,
+    } = untracked(defaultedOptions)
 
     untracked(() =>
-      client.fetchQuery(queryKey, queryFn, { staleTime, retry, retryDelay }),
+      client.fetchQuery(queryKey, queryFn, {
+        staleTime,
+        retry,
+        retryDelay,
+        structuralSharing,
+      }),
     )
   })
 
@@ -276,7 +288,7 @@ export function createQueryObserver<TData, TError = Error>(
       const options = fetchOptionsFor(q)
 
       if (options) {
-        resolve(q.key).fetch(options.queryFn, options.retry, options.retryDelay)
+        resolve(q.key).fetch(options)
       }
     }
 
@@ -335,13 +347,14 @@ export function createQueryObserver<TData, TError = Error>(
       // Force a fresh fetch regardless of staleTime, cancelling any in-flight
       // request (explicit user intent — get current data).
       refetch: () => {
-        const { queryKey, queryFn, retry, retryDelay } =
+        const { queryKey, queryFn, retry, retryDelay, structuralSharing } =
           untracked(defaultedOptions)
 
         client.fetchQuery(queryKey, queryFn, {
           staleTime: 0,
           retry,
           retryDelay,
+          structuralSharing,
           cancelRefetch: true,
         })
       },

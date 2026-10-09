@@ -19,11 +19,12 @@ import {
 } from '@angular/core/testing'
 import { type Observable, map, of, Subject, throwError, timer } from 'rxjs'
 
+import { withDefaultOptions } from '../features/with-default-options'
 import { injectQuery } from './inject-query'
 import { keepPreviousData } from './keep-previous-data'
 import { provideQueryClient } from './provider'
 import { QueryClient } from './query-client'
-import type { QueryOptions, QueryResult } from './types'
+import type { DefaultQueryOptions, QueryOptions, QueryResult } from './types'
 
 // Mounts injectQuery inside a host component so its effects are tied to a real
 // view and flush on detectChanges(). The host is rendered from a parent
@@ -2209,6 +2210,462 @@ describe('injectQuery', () => {
       expect(result.data()).toBeUndefined()
       expect(result.isPending()).toBe(true)
       expect(result.isFetching()).toBe(true)
+    })
+  })
+
+  // Every response is a new object, as JSON parsing makes. Structural sharing
+  // keeps what didn't change from the data the query already holds, so data()
+  // keeps its reference when a refetch brings the same data, and nothing that
+  // reads it runs again.
+  describe('structural sharing', () => {
+    type Row = { id: number; title: string; tags: string[] }
+
+    // What the server returns: a fresh array of fresh rows on every call.
+    const rows = (): Row[] => [
+      { id: 1, title: 'a', tags: ['x'] },
+      { id: 2, title: 'b', tags: ['y'] },
+    ]
+
+    // Mounts a component showing the query with an effect that reads data(),
+    // as one rendering it or filling a form from it does. Returns what the
+    // effect has read, one entry per run.
+    function mountWithEffect<TData>(optionsFn: () => QueryOptions<TData>): {
+      fixture: ComponentFixture<unknown>
+      result: QueryResult<TData>
+      reads: Array<TData | undefined>
+    } {
+      const reads: Array<TData | undefined> = []
+
+      @Component({ template: '' })
+      class Host {
+        readonly result = injectQuery(optionsFn)
+
+        constructor() {
+          effect(() => {
+            reads.push(this.result.data())
+          })
+        }
+      }
+
+      const fixture = TestBed.createComponent(Host)
+
+      fixture.detectChanges()
+
+      return { fixture, result: fixture.componentInstance.result, reads }
+    }
+
+    // Provides a client with these default query options.
+    function provideDefaults(queries: DefaultQueryOptions): void {
+      TestBed.resetTestingModule()
+      TestBed.configureTestingModule({
+        providers: [provideQueryClient(withDefaultOptions({ queries }))],
+      })
+      client = TestBed.inject(QueryClient)
+    }
+
+    it("keeps data() when a refetch brings the same data, so an effect reading it doesn't run again", () => {
+      const { fixture, result, reads } = mountWithEffect(() => ({
+        queryKey: ['rows'],
+        queryFn: () => of(rows()),
+      }))
+      const first = result.data()
+      const runs = reads.length
+
+      result.refetch()
+      fixture.detectChanges()
+
+      expect(result.data()).toBe(first)
+      expect(reads.length).toBe(runs)
+    })
+
+    it("keeps the parts of the data that didn't change", () => {
+      let response = rows()
+      const { fixture, result } = mount(() => ({
+        queryKey: ['rows'],
+        queryFn: () => of(response),
+      }))
+      const before = result.data()!
+
+      response = rows()
+      response[1] = { ...response[1], title: 'b2' }
+      result.refetch()
+      fixture.detectChanges()
+
+      const after = result.data()!
+
+      expect(after).not.toBe(before)
+      expect(after[0]).toBe(before[0])
+      expect(after[1]).not.toBe(before[1])
+      expect(after[1].title).toBe('b2')
+      expect(after[1].tags).toBe(before[1].tags)
+    })
+
+    it("doesn't overwrite an edit made in a form that an effect fills from data() when a poll brings the same data", fakeAsync(() => {
+      const queryFn = jasmine
+        .createSpy<() => Observable<Todo>>('queryFn')
+        .and.callFake(() => of({ id: 1, title: 'Buy milk' }))
+      const title = signal('')
+
+      @Component({ template: '' })
+      class Editor {
+        readonly todo = injectQuery(() => ({
+          queryKey: ['todo', 1],
+          queryFn,
+          refetchInterval: 1000,
+        }))
+
+        constructor() {
+          // Fills the form field whenever the todo changes.
+          effect(() => {
+            const todo = this.todo.data()
+
+            if (todo) title.set(todo.title)
+          })
+        }
+      }
+
+      const fixture = TestBed.createComponent(Editor)
+
+      fixture.detectChanges()
+      title.set('Buy oat milk')
+      elapse(3000, fixture)
+
+      expect(queryFn).toHaveBeenCalledTimes(4)
+      expect(title()).toBe('Buy oat milk')
+
+      fixture.destroy()
+      flush()
+    }))
+
+    it('keeps data() when an invalidation refetch brings the same data', () => {
+      const queryFn = jasmine
+        .createSpy('queryFn')
+        .and.callFake(() => of(rows()))
+      const { fixture, result } = mount(() => ({
+        queryKey: ['rows'],
+        queryFn,
+      }))
+      const first = result.data()
+
+      client.invalidateQueries({ queryKey: ['rows'] })
+      fixture.detectChanges()
+
+      expect(queryFn).toHaveBeenCalledTimes(2)
+      expect(result.data()).toBe(first)
+    })
+
+    it('merges a response with the data the query holds when it lands, a write made during the fetch included', () => {
+      const server = requests<Row[]>()
+      const { fixture, result } = mount(() => ({
+        queryKey: ['rows'],
+        queryFn: server.queryFn,
+      }))
+
+      server.resolve(rows())
+      result.refetch()
+
+      // An optimistic write while the refetch is in flight, which the
+      // response then confirms.
+      const added = (): Row => ({ id: 3, title: 'c', tags: [] })
+
+      client.setQueryData<Row[]>(['rows'], (current = []) => [
+        ...current,
+        added(),
+      ])
+
+      const optimistic = client.getQueryData<Row[]>(['rows'])
+
+      server.resolve([...rows(), added()])
+      fixture.detectChanges()
+
+      expect(result.data()).toBe(optimistic)
+    })
+
+    it('merges with a structuralSharing function, which gets the cached data and the response', () => {
+      const calls: Array<[Row[] | undefined, Row[]]> = []
+      const { fixture, result } = mount(() => ({
+        queryKey: ['rows'],
+        queryFn: () => of(rows()),
+        // Its parameters are typed from queryFn.
+        structuralSharing: (oldData, newData) => {
+          calls.push([oldData, newData])
+
+          return newData
+        },
+      }))
+      const first = result.data()
+
+      result.refetch()
+      fixture.detectChanges()
+
+      expect(calls.length).toBe(2)
+      expect(calls[0][0]).toBeUndefined()
+      expect(calls[1][0]).toBe(first)
+      // What the function returns is stored, though the data is the same.
+      expect(result.data()).toBe(calls[1][1])
+    })
+
+    it('fails the fetch when the structuralSharing function throws, and keeps the data', fakeAsync(() => {
+      const queryFn = jasmine
+        .createSpy('queryFn')
+        .and.callFake(() => of(rows()))
+      const error = new Error('cannot merge')
+      const { fixture, result } = mount(() => ({
+        queryKey: ['rows'],
+        queryFn,
+        retry: 3,
+        retryDelay: 10,
+        structuralSharing: (oldData, newData) => {
+          if (oldData) throw error
+
+          return newData
+        },
+      }))
+      const first = result.data()
+
+      result.refetch()
+      tick(100)
+      fixture.detectChanges()
+
+      expect(result.status()).toBe('error')
+      expect(result.error()).toBe(error)
+      expect(result.isFetching()).toBe(false)
+      expect(result.data()).toBe(first)
+      // The response arrived; merging it isn't retried.
+      expect(queryFn).toHaveBeenCalledTimes(2)
+    }))
+
+    it('gives every response a new reference with structuralSharing: false', () => {
+      const { fixture, result } = mount(() => ({
+        queryKey: ['rows'],
+        queryFn: () => of(rows()),
+        structuralSharing: false,
+      }))
+      const first = result.data()
+
+      result.refetch()
+      fixture.detectChanges()
+
+      expect(result.data()).not.toBe(first)
+      expect(result.data()).toEqual(first)
+    })
+
+    it("doesn't pass initialData to a structuralSharing function", () => {
+      const structuralSharing = jasmine
+        .createSpy('structuralSharing')
+        .and.callFake((_oldData: Row[] | undefined, newData: Row[]) => newData)
+
+      mount(() => ({
+        queryKey: ['rows'],
+        queryFn: () => of(rows()),
+        initialData: rows(),
+        staleTime: Infinity,
+        structuralSharing,
+      }))
+
+      expect(structuralSharing).not.toHaveBeenCalled()
+    })
+
+    describe('with default options', () => {
+      it('gives every response a new reference with a default of false', () => {
+        provideDefaults({ structuralSharing: false })
+
+        const { fixture, result } = mount(() => ({
+          queryKey: ['rows'],
+          queryFn: () => of(rows()),
+        }))
+        const first = result.data()
+
+        result.refetch()
+        fixture.detectChanges()
+
+        expect(result.data()).not.toBe(first)
+      })
+
+      it('lets a query set structuralSharing: true over a default of false', () => {
+        provideDefaults({ structuralSharing: false })
+
+        const { fixture, result } = mount(() => ({
+          queryKey: ['rows'],
+          queryFn: () => of(rows()),
+          structuralSharing: true,
+        }))
+        const first = result.data()
+
+        result.refetch()
+        fixture.detectChanges()
+
+        expect(result.data()).toBe(first)
+      })
+    })
+
+    // setQueryData has no options of its own: it merges as the query showing
+    // the key says; with none showing it, the way the data the query holds
+    // was fetched; or by the default if it never was.
+    describe('setQueryData', () => {
+      it("keeps data() when it writes the same data, so an effect reading it doesn't run again", () => {
+        const { fixture, result, reads } = mountWithEffect(() => ({
+          queryKey: ['rows'],
+          queryFn: () => of(rows()),
+          staleTime: Infinity,
+        }))
+        const first = result.data()
+        const runs = reads.length
+
+        // e.g. a save whose response repeats what the cache holds
+        client.setQueryData(['rows'], rows())
+        fixture.detectChanges()
+
+        expect(result.data()).toBe(first)
+        expect(reads.length).toBe(runs)
+      })
+
+      it('keeps the data of a key nothing has fetched yet when it writes the same data', () => {
+        // e.g. seeding a detail query from a row of a list
+        client.setQueryData(['row', 1], rows()[0])
+
+        const first = client.getQueryData(['row', 1])
+
+        client.setQueryData(['row', 1], rows()[0])
+
+        expect(client.getQueryData(['row', 1])).toBe(first)
+      })
+
+      it('follows structuralSharing: false of the query showing the key', () => {
+        const { fixture, result } = mount(() => ({
+          queryKey: ['rows'],
+          queryFn: () => of(rows()),
+          structuralSharing: false,
+        }))
+        const first = result.data()
+
+        client.setQueryData(['rows'], rows())
+        fixture.detectChanges()
+
+        expect(result.data()).not.toBe(first)
+      })
+
+      it('follows structuralSharing: false of the query once the component showing it is gone', () => {
+        const { fixture } = mount(() => ({
+          queryKey: ['rows'],
+          queryFn: () => of(rows()),
+          structuralSharing: false,
+        }))
+        const first = client.getQueryData(['rows'])
+
+        fixture.destroy()
+        client.setQueryData(['rows'], rows())
+
+        expect(client.getQueryData(['rows'])).not.toBe(first)
+      })
+
+      it('follows structuralSharing: false of the query while it is disabled', () => {
+        const editing = signal(false)
+        const { fixture, result } = mount(() => ({
+          queryKey: ['rows'],
+          queryFn: () => of(rows()),
+          structuralSharing: false,
+          enabled: !editing(),
+        }))
+        const first = result.data()
+
+        editing.set(true)
+        fixture.detectChanges()
+        client.setQueryData(['rows'], rows())
+        fixture.detectChanges()
+
+        expect(result.data()).not.toBe(first)
+      })
+
+      it("follows structuralSharing: false of a query showing the key though it hasn't fetched it", () => {
+        // e.g. a key only a socket fills, through setQueryData
+        mount(() => ({
+          queryKey: ['rows'],
+          queryFn: () => of(rows()),
+          structuralSharing: false,
+          enabled: false,
+        }))
+
+        client.setQueryData(['rows'], rows())
+
+        const first = client.getQueryData(['rows'])
+
+        client.setQueryData(['rows'], rows())
+
+        expect(client.getQueryData(['rows'])).not.toBe(first)
+      })
+
+      it('keeps following the query showing the key after a prefetch without the option', () => {
+        const { fixture, result } = mount(() => ({
+          queryKey: ['rows'],
+          queryFn: () => of(rows()),
+          structuralSharing: false,
+        }))
+
+        client.fetchQuery(['rows'], () => of(rows()), { staleTime: 0 })
+
+        const first = result.data()
+
+        client.setQueryData(['rows'], rows())
+        fixture.detectChanges()
+
+        expect(result.data()).not.toBe(first)
+      })
+
+      it('keeps following the fetch the data came from when a later fetch fails', () => {
+        const { fixture } = mount(() => ({
+          queryKey: ['rows'],
+          queryFn: () => of(rows()),
+          structuralSharing: false,
+        }))
+
+        fixture.destroy()
+        // A prefetch without the option fails: the data the query holds is
+        // still the one fetched with false.
+        client.fetchQuery(
+          ['rows'],
+          () => throwError(() => new Error('offline')),
+          {
+            staleTime: 0,
+            retry: false,
+          },
+        )
+
+        const first = client.getQueryData(['rows'])
+
+        client.setQueryData(['rows'], rows())
+
+        expect(client.getQueryData(['rows'])).not.toBe(first)
+      })
+
+      it('throws to its caller when the structuralSharing function throws, and keeps the data', () => {
+        const error = new Error('cannot merge')
+        const { result } = mount(() => ({
+          queryKey: ['rows'],
+          queryFn: () => of(rows()),
+          structuralSharing: (oldData, newData) => {
+            if (oldData) throw error
+
+            return newData
+          },
+        }))
+        const first = result.data()
+
+        expect(() => client.setQueryData(['rows'], rows())).toThrow(error)
+        expect(result.data()).toBe(first)
+      })
+
+      it('follows a default of false for a key nothing has fetched yet', () => {
+        provideDefaults({ structuralSharing: false })
+
+        client.setQueryData(['row', 1], rows()[0])
+
+        const first = client.getQueryData(['row', 1])
+
+        client.setQueryData(['row', 1], rows()[0])
+
+        expect(client.getQueryData(['row', 1])).not.toBe(first)
+      })
     })
   })
 

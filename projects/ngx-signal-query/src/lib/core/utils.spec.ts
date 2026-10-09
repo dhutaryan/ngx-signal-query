@@ -6,6 +6,8 @@ import {
   isPromiseLike,
   isValidTimeout,
   partialMatchKey,
+  replaceData,
+  replaceEqualDeep,
 } from './utils'
 
 describe('hashKey', () => {
@@ -83,6 +85,123 @@ describe('isPlainObject', () => {
     expect(isPlainObject([])).toBe(false)
     expect(isPlainObject(null)).toBe(false)
     expect(isPlainObject(new Date())).toBe(false)
+  })
+})
+
+describe('replaceEqualDeep', () => {
+  it('returns the previous value when the new one is deeply equal', () => {
+    const prev = { a: 1, list: [{ id: 1, tags: ['x'] }] }
+
+    expect(
+      replaceEqualDeep(prev, { a: 1, list: [{ id: 1, tags: ['x'] }] }),
+    ).toBe(prev)
+  })
+
+  it("keeps the parts that didn't change", () => {
+    const prev = [
+      { id: 1, title: 'a', tags: ['x'] },
+      { id: 2, title: 'b', tags: ['y'] },
+    ]
+    const next = [
+      { id: 1, title: 'a', tags: ['x'] },
+      { id: 2, title: 'b2', tags: ['y'] },
+    ]
+
+    const shared = replaceEqualDeep(prev, next)
+
+    expect(shared).toEqual(next)
+    expect(shared).not.toBe(prev)
+    expect(shared[0]).toBe(prev[0])
+    expect(shared[1]).not.toBe(prev[1])
+    expect(shared[1].tags).toBe(prev[1].tags)
+  })
+
+  it('makes a new object when a key is added, removed or replaced', () => {
+    const prev = { a: 1, b: undefined }
+
+    expect(replaceEqualDeep(prev, { a: 1 })).not.toBe(prev)
+    expect<unknown>(
+      replaceEqualDeep(prev, { a: 1, b: undefined, c: 2 }),
+    ).not.toBe(prev)
+    // As many keys, and `c` reads undefined in both, but `b` became `c`.
+    expect(replaceEqualDeep(prev, { a: 1, c: undefined })).toEqual({
+      a: 1,
+      c: undefined,
+    })
+  })
+
+  it('makes a new array when items are added or removed, keeping the rest', () => {
+    const prev = [{ id: 1 }, { id: 2 }]
+    const longer = replaceEqualDeep(prev, [{ id: 1 }, { id: 2 }, { id: 3 }])
+    const shorter = replaceEqualDeep(prev, [{ id: 1 }])
+
+    expect(longer).not.toBe(prev)
+    expect(longer[1]).toBe(prev[1])
+    expect(shorter).not.toBe(prev)
+    expect(shorter[0]).toBe(prev[0])
+  })
+
+  it('counts values JSON parsing never makes as changed', () => {
+    const prev = { at: new Date(0), tags: ['x'] }
+    const next = { at: new Date(0), tags: ['x'] }
+
+    const shared = replaceEqualDeep(prev, next)
+
+    expect(shared).not.toBe(prev)
+    expect(shared.at).toBe(next.at)
+    expect(shared.tags).toBe(prev.tags)
+
+    const counts = { size: NaN }
+
+    expect(replaceEqualDeep(counts, { size: NaN })).not.toBe(counts)
+
+    // Comparing it item by item would keep the old total.
+    const nextPage = Object.assign([1, 2], { total: 3 })
+
+    expect(
+      replaceEqualDeep(Object.assign([1, 2], { total: 2 }), nextPage),
+    ).toBe(nextPage)
+  })
+
+  it('returns the new value as is when there is no previous one', () => {
+    const next = { a: 1 }
+
+    expect(replaceEqualDeep(undefined, next)).toBe(next)
+  })
+
+  it('stops comparing a value that references itself instead of overflowing', () => {
+    const cyclic = (): Record<string, unknown> => {
+      const value: Record<string, unknown> = { id: 1 }
+
+      value['self'] = value
+
+      return value
+    }
+
+    expect(() => replaceEqualDeep(cyclic(), cyclic())).not.toThrow()
+  })
+})
+
+describe('replaceData', () => {
+  const prev = { a: 1 }
+
+  it('shares with true', () => {
+    expect(replaceData(prev, { a: 1 }, true)).toBe(prev)
+  })
+
+  it('stores the new data as is with false', () => {
+    const next = { a: 1 }
+
+    expect(replaceData(prev, next, false)).toBe(next)
+  })
+
+  it('returns what a function makes of the previous and the new data', () => {
+    const merged = { a: 2 }
+    const merge = jasmine.createSpy('merge').and.returnValue(merged)
+    const next = { a: 1 }
+
+    expect(replaceData(prev, next, merge)).toBe(merged)
+    expect(merge).toHaveBeenCalledOnceWith(prev, next)
   })
 })
 

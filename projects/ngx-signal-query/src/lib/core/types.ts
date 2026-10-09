@@ -80,6 +80,21 @@ export type RetryDelayValue<TError> =
   | number
   | ((failureCount: number, error: TError) => number)
 
+/**
+ * How new data merges with the data a query holds: `true` keeps every part
+ * that didn't change, and the whole value when nothing did; `false` stores
+ * the new data as is; a function merges them its own way.
+ *
+ * Only plain objects and arrays are compared, as JSON parsing makes them: any
+ * other value, such as a `Date`, counts as changed. A function gets the data
+ * the query holds (`undefined` before the first response) and the new data,
+ * and returns what to store. It also runs for `setQueryData` writes, so it
+ * should merge them rather than keep the old data.
+ */
+export type StructuralSharingValue<TData> =
+  | boolean
+  | ((oldData: TData | undefined, newData: TData) => TData)
+
 /** Configuration for a query, passed to {@link injectQuery} / {@link queryOptions}. */
 export type QueryOptions<TData, TError = Error> = {
   /** Unique cache key for this query. See {@link QueryKey}. */
@@ -115,6 +130,13 @@ export type QueryOptions<TData, TError = Error> = {
   placeholderData?: TData | PlaceholderDataFunction<TData>
   /** Timestamp (ms) for `initialData`; older data is considered stale. */
   initialDataUpdatedAt?: number | (() => number)
+  /**
+   * Whether new data keeps the parts of the cached data that didn't change,
+   * so `data()` keeps its reference when a refetch brings the same data.
+   * Default `true`; turn it off for large responses refetched often. See
+   * {@link StructuralSharingValue}.
+   */
+  structuralSharing?: StructuralSharingValue<TData>
   /** Set `false` to disable fetching (e.g. until a dependency is ready). */
   enabled?: boolean
 }
@@ -131,11 +153,15 @@ export type DefaultedQueryOptions<TData, TError = Error> = QueryOptions<
   staleTime: number
   retry: RetryValue<TError>
   retryDelay: RetryDelayValue<TError>
+  structuralSharing: StructuralSharingValue<TData>
 }
 
 /** Reactive result returned by {@link injectQuery}; every field is a signal. */
 export type QueryResult<TData, TError = Error> = {
-  /** Last resolved data, or `undefined` before the first success. */
+  /**
+   * Last resolved data, or `undefined` before the first success. It keeps its
+   * reference while refetches bring the same data (see `structuralSharing`).
+   */
   data: Signal<TData | undefined>
   /** Current {@link QueryStatus}. */
   status: Signal<QueryStatus>
@@ -171,6 +197,8 @@ export interface DefaultQueryOptions {
   retry?: RetryValue<unknown>
   /** Delay between retries, in ms or a function of the attempt. */
   retryDelay?: RetryDelayValue<unknown>
+  /** Whether new data keeps the parts of the cached data that didn't change. Defaults to `true`. */
+  structuralSharing?: StructuralSharingValue<unknown>
 }
 
 /**

@@ -19,14 +19,22 @@ function createQuery<TData, TError = Error>() {
 // An observer that never wants the query fetched, for specs that only count
 // observers.
 function stubObserver(): QuerySubscriber<number> {
-  return { fetchOptions: () => null }
+  return { fetchOptions: () => null, structuralSharing: () => true }
 }
 
 // An observer that wants the query fetched with `queryFn`.
 function activeObserver(
   queryFn: () => Observable<number>,
 ): QuerySubscriber<number> {
-  return { fetchOptions: () => ({ queryFn, retry: 0, retryDelay: 0 }) }
+  return {
+    fetchOptions: () => ({
+      queryFn,
+      retry: 0,
+      retryDelay: 0,
+      structuralSharing: true,
+    }),
+    structuralSharing: () => true,
+  }
 }
 
 describe('Query', () => {
@@ -42,7 +50,7 @@ describe('Query', () => {
   it('resolves an Observable queryFn to success', () => {
     const { query } = createQuery<number>()
 
-    query.fetch(() => of(42))
+    query.fetch({ queryFn: () => of(42) })
 
     const state = query.state()
 
@@ -54,8 +62,8 @@ describe('Query', () => {
   it('allows a new fetch once the previous one has completed', () => {
     const { query } = createQuery<number>()
 
-    query.fetch(() => of(1))
-    query.fetch(() => of(2))
+    query.fetch({ queryFn: () => of(1) })
+    query.fetch({ queryFn: () => of(2) })
 
     expect(query.state().data).toBe(2)
   })
@@ -63,7 +71,7 @@ describe('Query', () => {
   it('cancel() aborts an in-flight fetch without resolving it', fakeAsync(() => {
     const { query } = createQuery<number>()
 
-    query.fetch(() => Promise.resolve(1))
+    query.fetch({ queryFn: () => Promise.resolve(1) })
     query.cancel()
     tick()
 
@@ -76,7 +84,7 @@ describe('Query', () => {
   it('resolves a Promise queryFn to success', fakeAsync(() => {
     const { query } = createQuery<number>()
 
-    query.fetch(() => Promise.resolve(7))
+    query.fetch({ queryFn: () => Promise.resolve(7) })
     tick()
 
     expect(query.state().status).toBe('success')
@@ -86,7 +94,7 @@ describe('Query', () => {
   it('sets isFetching while a Promise is in flight', fakeAsync(() => {
     const { query } = createQuery<number>()
 
-    query.fetch(() => Promise.resolve(1))
+    query.fetch({ queryFn: () => Promise.resolve(1) })
     expect(query.state().isFetching).toBe(true)
 
     tick()
@@ -98,8 +106,8 @@ describe('Query', () => {
     const first = jasmine.createSpy('first').and.returnValue(Promise.resolve(1))
     const second = jasmine.createSpy('second')
 
-    query.fetch(first)
-    query.fetch(second)
+    query.fetch({ queryFn: first })
+    query.fetch({ queryFn: second })
     tick()
 
     expect(first).toHaveBeenCalledTimes(1)
@@ -110,7 +118,7 @@ describe('Query', () => {
     const { query } = createQuery<number>()
     const err = new Error('boom')
 
-    query.fetch(() => throwError(() => err))
+    query.fetch({ queryFn: () => throwError(() => err) })
 
     const state = query.state()
 
@@ -122,7 +130,7 @@ describe('Query', () => {
   it('errors when the queryFn completes without emitting', () => {
     const { query } = createQuery<number>()
 
-    query.fetch(() => of<number>())
+    query.fetch({ queryFn: () => of<number>() })
 
     expect(query.state().status).toBe('error')
     expect(query.state().error?.message).toContain('without emitting')
@@ -137,7 +145,7 @@ describe('Query', () => {
       return attempts < 3 ? throwError(() => new Error('fail')) : of(99)
     }
 
-    query.fetch(queryFn, 3, () => 10)
+    query.fetch({ queryFn, retry: 3, retryDelay: () => 10 })
     tick(100)
 
     expect(attempts).toBe(3)
@@ -150,11 +158,11 @@ describe('Query', () => {
     const err = new Error('nope')
 
     // retry: 2 -> 3 attempts total before giving up.
-    query.fetch(
-      () => throwError(() => err),
-      2,
-      () => 10,
-    )
+    query.fetch({
+      queryFn: () => throwError(() => err),
+      retry: 2,
+      retryDelay: () => 10,
+    })
     tick(100)
 
     const state = query.state()
@@ -173,8 +181,8 @@ describe('Query', () => {
         .and.returnValue(new Promise<number>(() => {})) // never resolves
       const second = jasmine.createSpy('second')
 
-      query.fetch(first)
-      query.fetch(second) // no cancelRefetch → ignored
+      query.fetch({ queryFn: first })
+      query.fetch({ queryFn: second }) // no cancelRefetch → ignored
 
       expect(first).toHaveBeenCalledTimes(1)
       expect(second).not.toHaveBeenCalled()
@@ -189,8 +197,8 @@ describe('Query', () => {
         .createSpy('second')
         .and.returnValue(Promise.resolve(2))
 
-      query.fetch(first)
-      query.fetch(second, 0, undefined, true) // force: cancel first, run second
+      query.fetch({ queryFn: first })
+      query.fetch({ queryFn: second }, { cancelRefetch: true }) // force: cancel first, run second
       tick()
 
       expect(first).toHaveBeenCalledTimes(1)
@@ -207,8 +215,8 @@ describe('Query', () => {
         })
       const second = () => Promise.resolve(2)
 
-      query.fetch(first)
-      query.fetch(second, 0, undefined, true) // cancel first, start second
+      query.fetch({ queryFn: first })
+      query.fetch({ queryFn: second }, { cancelRefetch: true }) // cancel first, start second
       tick()
       expect(query.state().data).toBe(2)
 
@@ -235,7 +243,7 @@ describe('Query', () => {
     it('seeds success state with the given updatedAt', () => {
       const { query } = createQuery<number>()
 
-      query.setData(1, 0)
+      query.setData(1, { updatedAt: 0 })
 
       expect(query.state().status).toBe('success')
       expect(query.state().data).toBe(1)
@@ -245,7 +253,7 @@ describe('Query', () => {
     it('is immediately stale when seeded with updatedAt 0', () => {
       const { query } = createQuery<number>()
 
-      query.setData(1, 0)
+      query.setData(1, { updatedAt: 0 })
 
       // updatedAt 0 → stale for any finite staleTime → background refetch.
       expect(query.shouldFetch(1000)).toBe(true)
@@ -287,7 +295,7 @@ describe('Query', () => {
     it('fetches when the last fetch errored', () => {
       const { query } = createQuery<number>()
 
-      query.fetch(() => throwError(() => new Error('boom')))
+      query.fetch({ queryFn: () => throwError(() => new Error('boom')) })
 
       expect(query.state().status).toBe('error')
       expect(query.shouldFetch(Infinity)).toBe(true)
@@ -330,7 +338,7 @@ describe('Query', () => {
       const observer = stubObserver()
 
       query.addObserver(observer)
-      query.fetch(() => Promise.resolve(1))
+      query.fetch({ queryFn: () => Promise.resolve(1) })
 
       query.removeObserver(observer)
       tick()
