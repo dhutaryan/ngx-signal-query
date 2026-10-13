@@ -14,8 +14,8 @@ they don't affect each other.
 
 ## The lifecycle
 
-Follow one query key through its whole life. Defaults: `staleTime: 0`,
-`gcTime: 5 minutes`.
+Follow one query key through its whole life. [Defaults](/important-defaults):
+`staleTime: 0`, `gcTime: 5 minutes`.
 
 1. **First mount.** A component does `injectQuery(() => todos())`. Nothing is
    cached, so the query fetches. The result is stored under `['todos']`, stamped

@@ -145,9 +145,9 @@ be repeated on each one: set it once in
 
 ## Mutations don't retry
 
-Queries retry three times by default. Mutations **don't retry at all**, and
-that's deliberate: a write isn't necessarily idempotent, and quietly re-sending
-a `POST` can create the same record twice.
+Queries retry three times [by default](/important-defaults). Mutations **don't
+retry at all**, and that's deliberate: a write isn't necessarily idempotent, and
+quietly re-sending a `POST` can create the same record twice.
 
 Opt in only when you know the operation is safe to repeat:
 

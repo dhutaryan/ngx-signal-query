@@ -4,7 +4,7 @@ import { type NgDocCategory } from '@ng-doc/core'
 // sidebar until its first page lands.
 const QueryClient: NgDocCategory = {
   title: 'Query Client',
-  order: 5,
+  order: 6,
   expandable: true,
   expanded: false,
 }

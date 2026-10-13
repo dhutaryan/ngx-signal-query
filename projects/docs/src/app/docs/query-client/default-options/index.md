@@ -32,7 +32,7 @@ export const appConfig: ApplicationConfig = {
 
 From then on, every query and mutation starts from those values. Anything you
 don't set keeps the built-in default: [`staleTime: 0`, `gcTime: 5 min`,
-`retry: 3`](/query-client/caching) and
+`retry: 3`](/important-defaults) and
 [structural sharing](/queries/structural-sharing) for queries, no retries and
 no hooks for mutations.
 

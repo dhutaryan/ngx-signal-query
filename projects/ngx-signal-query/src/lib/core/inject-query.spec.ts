@@ -2669,6 +2669,117 @@ describe('injectQuery', () => {
     })
   })
 
+  // What a query does when it sets none of these options. The Important
+  // Defaults docs page states each of them, so a change here goes there too.
+  describe('built-in defaults', () => {
+    it('removes a query 5 minutes after the last component showing it is gone', fakeAsync(() => {
+      const { fixture } = mount(() => ({
+        queryKey: ['todos'],
+        queryFn: () => of('v1'),
+      }))
+
+      fixture.destroy()
+
+      tick(5 * 60_000 - 1)
+      expect(client.getQueryData(['todos'])).toBe('v1')
+
+      tick(1)
+      expect(client.getQueryData(['todos'])).toBeUndefined()
+    }))
+
+    it('retries a failing query 3 times, 1 s, 2 s and 4 s apart, and shows the error after the last', fakeAsync(() => {
+      const start = Date.now()
+      const sent: number[] = []
+      const { result } = mount<string>(() => ({
+        queryKey: ['todos'],
+        queryFn: () => {
+          sent.push(Date.now() - start)
+
+          return throwError(() => new Error('down'))
+        },
+      }))
+
+      tick(6_999)
+      expect(result.isError()).toBe(false)
+      expect(result.failureCount()).toBe(3)
+
+      tick(1)
+      expect(result.isError()).toBe(true)
+      expect(result.failureCount()).toBe(4)
+
+      tick(60_000)
+      expect(sent).toEqual([0, 1_000, 3_000, 7_000])
+    }))
+
+    it('refetches cached data in the background when another component shows the key', () => {
+      const { queryFn, resolve } = requests<string>()
+      const first = mount(() => ({ queryKey: ['todos'], queryFn }))
+
+      resolve('v1')
+      first.fixture.detectChanges()
+
+      const second = mount(() => ({ queryKey: ['todos'], queryFn }))
+
+      expect(queryFn).toHaveBeenCalledTimes(2)
+      // The cached data shows while the refetch runs.
+      expect(second.result.data()).toBe('v1')
+      expect(second.result.isFetching()).toBe(true)
+    })
+
+    it('refetches cached data in the background when the key switches back to it', () => {
+      const { queryFn, resolve } = requests<string>()
+      const { fixture, result, value } = mount(
+        (id) => ({ queryKey: ['todo', id()], queryFn }),
+        1,
+      )
+
+      resolve('todo 1')
+      fixture.detectChanges()
+      value.set(2)
+      fixture.detectChanges()
+      resolve('todo 2')
+      fixture.detectChanges()
+      value.set(1)
+      fixture.detectChanges()
+
+      expect(queryFn).toHaveBeenCalledTimes(3)
+      expect(result.data()).toBe('todo 1')
+      expect(result.isFetching()).toBe(true)
+    })
+
+    it('refetches cached data in the background when enabled turns true', () => {
+      const { queryFn } = requests<string>()
+
+      client.setQueryData(['todos'], 'cached')
+
+      const { fixture, result, value } = mount<string, Error, boolean>(
+        (enabled) => ({ queryKey: ['todos'], queryFn, enabled: enabled() }),
+        false,
+      )
+
+      expect(queryFn).not.toHaveBeenCalled()
+
+      value.set(true)
+      fixture.detectChanges()
+
+      expect(queryFn).toHaveBeenCalledTimes(1)
+      expect(result.data()).toBe('cached')
+      expect(result.isFetching()).toBe(true)
+    })
+
+    it("doesn't refetch the data on screen as time passes", fakeAsync(() => {
+      const queryFn = jasmine.createSpy('queryFn').and.returnValue(of('v1'))
+      const { fixture } = mount(() => ({ queryKey: ['todos'], queryFn }))
+
+      for (let minute = 1; minute <= 10; minute++) {
+        tick(60_000)
+        fixture.detectChanges()
+      }
+
+      expect(queryFn).toHaveBeenCalledTimes(1)
+    }))
+  })
+
   describe('injection context', () => {
     it('throws when called outside an injection context', () => {
       expect(() =>

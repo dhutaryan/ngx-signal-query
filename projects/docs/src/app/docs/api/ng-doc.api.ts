@@ -2,7 +2,7 @@ import { type NgDocApi } from '@ng-doc/core'
 
 const Api: NgDocApi = {
   title: 'API Reference',
-  order: 7,
+  order: 8,
   scopes: [
     {
       name: 'ngx-signal-query',

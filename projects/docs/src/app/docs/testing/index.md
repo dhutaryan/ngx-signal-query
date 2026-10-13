@@ -23,9 +23,10 @@ special teardown needed.
 
 ## Turn retries off
 
-This is the one that bites. By default a failed query retries **three times with
-exponential backoff** — so a test for an error state would sit through seconds of
-retries before the query ever reaches `'error'`, and likely time out.
+This is the one that bites. [By default](/important-defaults) a failed query
+retries **three times with exponential backoff** — so a test for an error state
+would sit through seconds of retries before the query ever reaches `'error'`,
+and likely time out.
 
 Disable retries for the whole test client:
 
