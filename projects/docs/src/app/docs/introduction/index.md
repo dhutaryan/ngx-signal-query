@@ -1,9 +1,9 @@
-**ngx-signal-query** is a tiny, signal-native library for data fetching,
-caching, and mutations in Angular — inspired by
-[TanStack Query](https://tanstack.com/query), but built from scratch directly on
-Angular Signals, with first-class RxJS support. Your `queryFn` can return an
-`Observable` (hello, `HttpClient`) or a `Promise`, and the result is exposed as
-plain signals you can compose with everything else Angular gives you.
+**ngx-signal-query** is a data fetching, caching and mutation library for
+Angular, built on signals and RxJS. Your `queryFn` and `mutationFn` can return
+an `Observable` (hello, `HttpClient`) or a `Promise`, and the result is exposed
+as plain signals you can compose with everything else Angular gives you. The
+model (query keys, staleness, invalidation) follows
+[TanStack Query](https://tanstack.com/query).
 
 ## The problem: server state is not client state
 
@@ -29,27 +29,31 @@ no shared cache, no deduplication, no cross-component invalidation, no mutation
 lifecycle, no retries, no `staleTime`. You're left hand-rolling a cache or
 reaching for a full query library.
 
-## Motivation: why build another one?
+## Why this library
 
-There's already TanStack Query (which has an excellent Angular adapter). So why
-does this exist? Three honest reasons:
+TanStack Query has an Angular adapter, and Angular ships `httpResource`. This
+library takes TanStack Query's model and builds it on Angular's own primitives:
 
-1. **Observable-first.** Most query libraries treat Promises as first-class and
-   Observables as an afterthought. Angular is RxJS-native, so here your
-   `queryFn` can return an `Observable` directly — `HttpClient` just works, no
-   `firstValueFrom`/`lastValueFrom` dance.
+1. **Observables end to end.** A `queryFn` or `mutationFn` returns an
+   `Observable` as is, so `HttpClient` works without `lastValueFrom`. For a
+   query, unsubscribing is the cancellation: once nothing observes it (its key
+   changed, its component was destroyed) or you call `cancelQueries()`, the
+   HTTP request is aborted, with no `AbortSignal` plumbing.
 
-2. **Radical simplicity & forkability.** Instead of layering a framework-agnostic
-   core under an adapter, this is small and from-scratch, built entirely on
-   Angular Signals. Small surface, easy to read, easy to fork and bend to your
-   needs.
+2. **Angular-native.** Signals for state, `provide*` functions and features for
+   configuration, and an injection context for default mutation hooks, so a
+   global `onError` can `inject()` what it needs.
 
-3. **Understanding by building.** The best way to really understand caching,
-   deduplication and mutation lifecycles is to build them. This started as that
-   exercise — and turned out usable enough to share.
+3. **Small, and kept honest.** About 5 KB min+gzip. Bug fixes ship with a spec
+   that fails without the fix, and releases follow semver, with a `dev` channel
+   for previews.
 
-> If you want the longer story, there's a write-up on dev.to:
-> [TanStack Query-style caching, the Angular-native way](https://dev.to/dhutaryan/tanstack-query-style-caching-the-angular-native-way-4igc).
+It's deliberately focused. If you need infinite queries, devtools or
+persistence today, TanStack Query is the better pick. If you want Observables
+and Angular DI all the way through, with a surface you can read in full, this
+is for you.
+
+> How it started: [TanStack Query-style caching, the Angular-native way](https://dev.to/dhutaryan/tanstack-query-style-caching-the-angular-native-way-4igc).
 
 ## Philosophy: signal-native by default
 
@@ -59,17 +63,19 @@ Because everything is a signal, it composes naturally with `computed`,
 `effect`, and `OnPush` change detection — it feels like a part of Angular
 rather than a bolt-on.
 
-It's deliberately focused: **not** a TanStack killer, just a smaller,
-RxJS-friendly, signal-native take on the same ideas.
-
 ## At a glance
 
-- 🚦 **Signal-native** — state as signals (`data()`, `status()`, …), no subscriptions.
-- 🗄️ **Caching & deduplication** — identical query keys share one request and cache entry.
-- ✏️ **Mutations** — `onMutate` / `onSuccess` / `onError` lifecycle for optimistic updates.
-- 🔁 **Retries & polling** — configurable `retry` and `refetchInterval`.
-- 🌍 **Global indicators** — `injectIsFetching()` / `injectIsMutating()` for app-wide loading state.
-- 🪶 **Lean** — ESM, `sideEffects: false`, no runtime deps beyond `tslib`.
+- 🚦 State as signals: read `data()` or `isPending()` in a template or a `computed`, no subscriptions
+- 🗄️ Caching, request deduplication and structural sharing
+- ♻️ Invalidation, cancellation and manual cache updates
+- 🔗 Dependent, parallel (`injectQueries`) and disabled queries
+- 🖼️ Seed and placeholder data while a query loads (`initialData`, `placeholderData`, `keepPreviousData`)
+- 🔁 Retries and polling
+- ✏️ Mutations with async lifecycle hooks and optimistic updates
+- 🌍 App-wide defaults and global indicators (`injectIsFetching()`, `injectIsMutating()`)
+
+Not here yet: infinite queries, refetch on window focus and reconnect, SSR cache
+hydration, devtools and persistence.
 
 ## A quick taste
 
