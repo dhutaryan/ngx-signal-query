@@ -4,7 +4,7 @@ import { type NgDocCategory } from '@ng-doc/core'
 // sidebar until its first page lands.
 const Mutations: NgDocCategory = {
   title: 'Mutations',
-  order: 4,
+  order: 5,
   expandable: true,
   expanded: false,
 }

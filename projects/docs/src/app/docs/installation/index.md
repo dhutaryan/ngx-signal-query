@@ -117,4 +117,5 @@ export class AddTodoComponent {
 
 {% endraw %}
 
-That's it — you're ready to go.
+That's it — you're ready to go. Next, [Important Defaults](/important-defaults)
+sums up what queries and mutations do out of the box.

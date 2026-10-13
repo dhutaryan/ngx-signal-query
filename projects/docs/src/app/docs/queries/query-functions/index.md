@@ -101,10 +101,12 @@ real consequence:
 - **`Promise`** — a promise can't be cancelled. Unsubscribing just means the
   result is ignored; the request keeps running to completion in the background.
 
-Cancellation happens on `refetch()`, when `cancelQueries()` is called, and when
-a reactive key changes while a fetch is still running. If you care about not
-leaving orphaned requests behind (rapid typing in a search box, say), prefer
-`HttpClient` and its `Observable`.
+A fetch still running is cancelled once no component shows its key: the last
+one showing it is destroyed, or its reactive key moves on. `refetch()` and
+`invalidateQueries()` cancel it to start a fresh one, and `cancelQueries()` and
+`removeQueries()` cancel it outright. If you care about not leaving orphaned
+requests behind (rapid typing in a search box, say), prefer `HttpClient` and
+its `Observable`.
 
 ## Where do the variables come from?
 

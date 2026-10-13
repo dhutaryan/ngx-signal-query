@@ -36,8 +36,9 @@ This surprises people. Seed a query and it *still* fires a request straight
 away.
 
 There's no trick to it: the seed is treated as data fetched **right now**, and
-the default `staleTime` is `0` — meaning "stale immediately". So a background
-refetch kicks off at once, while the seeded data is on screen.
+the [default](/important-defaults) `staleTime` is `0` — meaning "stale
+immediately". So a background refetch kicks off at once, while the seeded data
+is on screen.
 
 That's usually what you want: show something instantly, quietly replace it with
 fresh data.
