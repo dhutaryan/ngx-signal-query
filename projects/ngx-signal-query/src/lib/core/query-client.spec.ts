@@ -9,6 +9,7 @@ import { of, Subject } from 'rxjs'
 
 import { withDefaultOptions } from '../features/with-default-options'
 import { injectMutation } from './inject-mutation'
+import { injectQuery } from './inject-query'
 import { provideQueryClient } from './provider'
 import { QueryClient } from './query-client'
 
@@ -63,6 +64,8 @@ describe('QueryClient', () => {
       expect(defaulted.staleTime).toBe(0)
       expect(defaulted.retry).toBe(3)
       expect(typeof defaulted.retryDelay).toBe('function')
+      expect(defaulted.refetchOnWindowFocus).toBe(true)
+      expect(defaulted.refetchOnReconnect).toBe(true)
     })
 
     it('keeps explicitly provided options', () => {
@@ -71,10 +74,14 @@ describe('QueryClient', () => {
         queryFn: () => of(1),
         staleTime: 5000,
         retry: 1,
+        refetchOnWindowFocus: 'always',
+        refetchOnReconnect: false,
       })
 
       expect(defaulted.staleTime).toBe(5000)
       expect(defaulted.retry).toBe(1)
+      expect(defaulted.refetchOnWindowFocus).toBe('always')
+      expect(defaulted.refetchOnReconnect).toBe(false)
     })
   })
 
@@ -84,7 +91,14 @@ describe('QueryClient', () => {
       TestBed.configureTestingModule({
         providers: [
           provideQueryClient(
-            withDefaultOptions({ queries: { staleTime: 1234, retry: 5 } }),
+            withDefaultOptions({
+              queries: {
+                staleTime: 1234,
+                retry: 5,
+                refetchOnWindowFocus: false,
+                refetchOnReconnect: false,
+              },
+            }),
           ),
         ],
       })
@@ -99,6 +113,8 @@ describe('QueryClient', () => {
 
       expect(defaulted.staleTime).toBe(1234)
       expect(defaulted.retry).toBe(5)
+      expect(defaulted.refetchOnWindowFocus).toBe(false)
+      expect(defaulted.refetchOnReconnect).toBe(false)
     })
 
     it('lets per-query options override the configured defaults', () => {
@@ -106,10 +122,13 @@ describe('QueryClient', () => {
         queryKey: ['a'],
         queryFn: () => of(1),
         staleTime: 0,
+        refetchOnWindowFocus: 'always',
       })
 
       expect(defaulted.staleTime).toBe(0)
       expect(defaulted.retry).toBe(5)
+      expect(defaulted.refetchOnWindowFocus).toBe('always')
+      expect(defaulted.refetchOnReconnect).toBe(false)
     })
 
     it('applies the configured staleTime in fetchQuery', () => {
@@ -486,6 +505,35 @@ describe('QueryClient', () => {
       fixture.detectChanges()
 
       expect(seen).toEqual([0])
+    })
+
+    it("a tab return or a reconnect fired in the effect doesn't make it depend on what the refetch reads", () => {
+      @Component({ template: '' })
+      class Host {
+        readonly todos = injectQuery(() => ({
+          queryKey: ['todos'],
+          queryFn: () => of(['a']),
+        }))
+      }
+
+      TestBed.createComponent(Host).detectChanges()
+      Object.defineProperty(document, 'visibilityState', {
+        configurable: true,
+        get: () => 'visible',
+      })
+
+      try {
+        // Each event refetches the stale list, which of() answers at once:
+        // the query changes while the effect runs.
+        const { runs } = inEffect(() => {
+          document.dispatchEvent(new Event('visibilitychange'))
+          window.dispatchEvent(new Event('online'))
+        })
+
+        expect(runs()).toBe(1)
+      } finally {
+        Reflect.deleteProperty(document, 'visibilityState')
+      }
     })
   })
 })

@@ -67,5 +67,8 @@ export class InvalidationObserver {
     staleTime: this.staleTime(),
     // A failed request would be retried, which would muddy the counters.
     retry: 0,
+    // So would a refetch on coming back to the tab, or on reconnect.
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
   }))
 }

@@ -26,8 +26,8 @@ effect(() => {
 
 /**
  * Refetches a list when the browser comes back online, the way an app does it
- * by hand, since the library has no refetchOnReconnect yet (#28). Each
- * reconnect should cost one request.
+ * by hand, with the library's refetchOnReconnect off. Each reconnect should
+ * cost one request.
  */
 @Component({
   selector: 'app-reconnect-scenario',
@@ -68,6 +68,11 @@ export class ReconnectScenario {
   protected readonly todos = injectQuery(() => ({
     queryKey: ['effects-demo', 'reconnect'],
     queryFn: () => this.trace.request('GET /todos', 'todos'),
+    // The card counts what the effect sends. The library's own refetches
+    // would add to it, and the effect's refetch() would cancel the one on
+    // reconnect.
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
   }))
 
   protected readonly rows = computed((): CounterRow[] => [

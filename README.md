@@ -26,14 +26,14 @@ over.
 - ♻️ Invalidation, cancellation and manual cache updates
 - 🔗 Dependent, parallel (`injectQueries`) and disabled queries
 - 🖼️ Seed and placeholder data while a query loads (`initialData`, `placeholderData`, `keepPreviousData`)
-- 🔁 Retries and polling
+- 🔁 Retries, polling, and refetch on window focus and reconnect
 - ✏️ Mutations with async lifecycle hooks and optimistic updates
 - 🌍 App-wide defaults and global indicators (`injectIsFetching()`, `injectIsMutating()`)
 
 ## Not here (yet)
 
-Infinite queries, refetch on window focus and reconnect, SSR cache hydration,
-devtools and persistence. If you need them today, TanStack Query has them.
+Infinite queries, SSR cache hydration, devtools and persistence. If you need
+them today, TanStack Query has them.
 
 ## Installation
 

@@ -1,5 +1,5 @@
 import { fakeAsync, tick } from '@angular/core/testing'
-import { type Observable, of, throwError } from 'rxjs'
+import { type Observable, of, Subject, throwError } from 'rxjs'
 
 import { Query, type QuerySubscriber } from './query'
 import type { QueryCache } from './query-cache'
@@ -22,9 +22,17 @@ function stubObserver(): QuerySubscriber<number> {
   return { fetchOptions: () => null, structuralSharing: () => true }
 }
 
-// An observer that wants the query fetched with `queryFn`.
+// How an observer that wants the query fetched would fetch it.
+type ObserverOptions = NonNullable<
+  ReturnType<QuerySubscriber<number>['fetchOptions']>
+>
+
+// An observer that wants the query fetched with `queryFn`, and refetched on
+// window focus and reconnect while its data is stale, unless `options` say
+// otherwise.
 function activeObserver(
   queryFn: () => Observable<number>,
+  options: Partial<ObserverOptions> = {},
 ): QuerySubscriber<number> {
   return {
     fetchOptions: () => ({
@@ -32,6 +40,10 @@ function activeObserver(
       retry: 0,
       retryDelay: 0,
       structuralSharing: true,
+      staleTime: 0,
+      refetchOnWindowFocus: true,
+      refetchOnReconnect: true,
+      ...options,
     }),
     structuralSharing: () => true,
   }
@@ -447,6 +459,121 @@ describe('Query', () => {
       query.removeObserver(leaving)
 
       expect(query.activeFetchOptions()?.queryFn).toBe(second)
+    })
+  })
+
+  describe('onFocus / onOnline', () => {
+    it('refetches stale data with the first observer that wants it', () => {
+      const { query } = createQuery<number>()
+      const off = jasmine.createSpy('off').and.returnValue(of(1))
+      const on = jasmine.createSpy('on').and.returnValue(of(2))
+
+      query.setData(0, { updatedAt: 0 })
+      query.addObserver(stubObserver())
+      query.addObserver(activeObserver(off, { refetchOnWindowFocus: false }))
+      query.addObserver(activeObserver(on))
+
+      query.onFocus()
+
+      expect(off).not.toHaveBeenCalled()
+      expect(on).toHaveBeenCalledTimes(1)
+      expect(query.state().data).toBe(2)
+    })
+
+    it('lets the first observer that wants it decide how', () => {
+      const { query } = createQuery<number>()
+      const first = jasmine.createSpy('first').and.returnValue(of(1))
+      const second = jasmine.createSpy('second').and.returnValue(of(2))
+
+      query.setData(0, { updatedAt: 0 })
+      query.addObserver(activeObserver(first))
+      query.addObserver(activeObserver(second))
+
+      query.onFocus()
+
+      expect(first).toHaveBeenCalledTimes(1)
+      expect(second).not.toHaveBeenCalled()
+    })
+
+    it("doesn't refetch data still fresh for the observer's staleTime", () => {
+      const { query } = createQuery<number>()
+      const queryFn = jasmine.createSpy('queryFn').and.returnValue(of(1))
+
+      query.setData(0)
+      query.addObserver(activeObserver(queryFn, { staleTime: Infinity }))
+
+      query.onFocus()
+      query.onOnline()
+
+      expect(queryFn).not.toHaveBeenCalled()
+    })
+
+    it("refetches fresh data too when the observer says 'always'", () => {
+      const { query } = createQuery<number>()
+      const queryFn = jasmine.createSpy('queryFn').and.returnValue(of(1))
+
+      query.setData(0)
+      query.addObserver(
+        activeObserver(queryFn, {
+          staleTime: Infinity,
+          refetchOnWindowFocus: 'always',
+        }),
+      )
+
+      query.onFocus()
+
+      expect(queryFn).toHaveBeenCalledTimes(1)
+    })
+
+    it('refetches data whose last refetch failed, fresh or not', () => {
+      const { query } = createQuery<number>()
+      const queryFn = jasmine.createSpy('queryFn').and.returnValue(of(2))
+
+      query.setData(1)
+      query.fetch({ queryFn: () => throwError(() => new Error('down')) })
+
+      expect(query.state().status).toBe('error')
+      expect(query.state().data).toBe(1)
+
+      query.addObserver(activeObserver(queryFn, { staleTime: Infinity }))
+      query.onFocus()
+
+      expect(queryFn).toHaveBeenCalledTimes(1)
+      expect(query.state().data).toBe(2)
+    })
+
+    it("doesn't ask its observers while a fetch is in flight", () => {
+      const { query } = createQuery<number>()
+      const observer = activeObserver(() => of(2))
+      const fetchOptions = spyOn(observer, 'fetchOptions').and.callThrough()
+
+      query.fetch({ queryFn: () => new Subject<number>() })
+      query.addObserver(observer)
+
+      query.onFocus()
+      query.onOnline()
+
+      expect(fetchOptions).not.toHaveBeenCalled()
+      expect(query.state().isFetching).toBe(true)
+    })
+
+    it('goes by refetchOnWindowFocus on focus and by refetchOnReconnect on reconnect', () => {
+      const { query } = createQuery<number>()
+      const queryFn = jasmine.createSpy('queryFn').and.returnValue(of(1))
+
+      query.setData(0, { updatedAt: 0 })
+      query.addObserver(
+        activeObserver(queryFn, {
+          refetchOnWindowFocus: false,
+          refetchOnReconnect: true,
+        }),
+      )
+
+      query.onFocus()
+      expect(queryFn).not.toHaveBeenCalled()
+
+      query.onOnline()
+      expect(queryFn).toHaveBeenCalledTimes(1)
     })
   })
 })

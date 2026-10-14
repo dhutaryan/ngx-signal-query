@@ -68,6 +68,10 @@ export class PushScenario {
   protected readonly list = injectQuery(() => ({
     queryKey: [...PUSH_KEY, 'todos'],
     queryFn: () => this.trace.request('GET /todos', 'todos'),
+    // The card counts the list requests a push sends: a refetch on coming
+    // back to the tab, or on reconnect, would add its own.
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
   }))
 
   protected readonly rows = computed((): CounterRow[] => [

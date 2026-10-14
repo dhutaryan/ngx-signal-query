@@ -8,6 +8,7 @@ import {
 } from '@angular/core'
 import type { Observable } from 'rxjs'
 
+import { onReconnect, onWindowFocus } from './browser-events'
 import { QueryCache } from './query-cache'
 import { MutationCache } from './mutation-cache'
 import type { MutationOptions } from './mutation'
@@ -63,6 +64,19 @@ export class QueryClient {
   /** @internal */
   constructor() {
     inject(DestroyRef).onDestroy(() => (this.#destroyed = true))
+
+    // When the user comes back to the page, or the network comes back, each
+    // query refetches if one of its observers wants that. Untracked like the
+    // methods: an event fired from an effect mustn't make the effect depend
+    // on what the refetch reads.
+    onWindowFocus(() =>
+      untracked(() => this.#cache.getAll().forEach((query) => query.onFocus())),
+    )
+    onReconnect(() =>
+      untracked(() =>
+        this.#cache.getAll().forEach((query) => query.onOnline()),
+      ),
+    )
   }
 
   /** Returns the underlying query cache. Advanced/internal use. */
@@ -77,8 +91,9 @@ export class QueryClient {
 
   /**
    * Merges per-query options with the configured defaults, filling in
-   * `staleTime`, `gcTime`, `retry`, `retryDelay` and `structuralSharing`.
-   * Used internally by {@link injectQuery}.
+   * `staleTime`, `gcTime`, `retry`, `retryDelay`, `structuralSharing`,
+   * `refetchOnWindowFocus` and `refetchOnReconnect`. Used internally by
+   * {@link injectQuery}.
    */
   defaultQueryOptions<TData, TError = Error>(
     options: QueryOptions<TData, TError>,
@@ -94,6 +109,10 @@ export class QueryClient {
         options.retryDelay ?? defaults?.retryDelay ?? defaultRetryDelay,
       structuralSharing:
         options.structuralSharing ?? this.#defaultStructuralSharing(),
+      refetchOnWindowFocus:
+        options.refetchOnWindowFocus ?? defaults?.refetchOnWindowFocus ?? true,
+      refetchOnReconnect:
+        options.refetchOnReconnect ?? defaults?.refetchOnReconnect ?? true,
     }
   }
 

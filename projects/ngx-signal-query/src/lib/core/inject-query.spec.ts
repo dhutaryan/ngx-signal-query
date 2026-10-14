@@ -1,7 +1,10 @@
 import {
   Component,
+  type EnvironmentProviders,
   Injector,
   type OnInit,
+  PLATFORM_ID,
+  type Provider,
   type Signal,
   type WritableSignal,
   effect,
@@ -173,6 +176,35 @@ function elapse(
     tick(10)
     fixtures.forEach((fixture) => fixture.detectChanges())
   }
+}
+
+// The page turns `state`, as when the user switches to another tab or back:
+// document.visibilityState changes and visibilitychange fires.
+// restoreVisibility() brings the real value back.
+function setVisibility(state: DocumentVisibilityState): void {
+  Object.defineProperty(document, 'visibilityState', {
+    configurable: true,
+    get: () => state,
+  })
+  document.dispatchEvent(new Event('visibilitychange'))
+}
+
+function restoreVisibility(): void {
+  Reflect.deleteProperty(document, 'visibilityState')
+}
+
+// The user leaves the page and comes back to it, as when they switch to
+// another tab and back.
+function leaveAndComeBack(): void {
+  setVisibility('hidden')
+  setVisibility('visible')
+  restoreVisibility()
+}
+
+// The network goes away and comes back, as the browser reports it.
+function goOfflineAndBack(): void {
+  window.dispatchEvent(new Event('offline'))
+  window.dispatchEvent(new Event('online'))
 }
 
 // A row of a cached list, for the specs that seed a detail query from it.
@@ -1979,6 +2011,506 @@ describe('injectQuery', () => {
 
       // Each fetched once, on mount.
       expect(fetched).toEqual(intervals)
+    })
+  })
+
+  describe('focus and reconnect', () => {
+    // Replaces the client every spec starts with by one with these providers.
+    function reprovide(
+      ...providers: Array<Provider | EnvironmentProviders>
+    ): void {
+      TestBed.resetTestingModule()
+      TestBed.configureTestingModule({ providers })
+      client = TestBed.inject(QueryClient)
+    }
+
+    afterEach(restoreVisibility)
+
+    describe('refetchOnWindowFocus', () => {
+      it('refetches stale data when the user comes back to the page', () => {
+        const { queryFn, resolve } = requests<string>()
+        const { fixture, result } = mount(() => ({
+          queryKey: ['todos'],
+          queryFn,
+        }))
+
+        resolve('v1')
+        fixture.detectChanges()
+
+        leaveAndComeBack()
+        fixture.detectChanges()
+
+        expect(queryFn).toHaveBeenCalledTimes(2)
+        // The data on screen stays while the refetch runs.
+        expect(result.data()).toBe('v1')
+        expect(result.isFetching()).toBe(true)
+
+        resolve('v2')
+        fixture.detectChanges()
+
+        expect(result.data()).toBe('v2')
+      })
+
+      it("doesn't refetch when the user leaves the page", () => {
+        const { queryFn, resolve } = requests<string>()
+        const { fixture } = mount(() => ({ queryKey: ['todos'], queryFn }))
+
+        resolve('v1')
+        fixture.detectChanges()
+
+        setVisibility('hidden')
+        fixture.detectChanges()
+
+        expect(queryFn).toHaveBeenCalledTimes(1)
+      })
+
+      it("doesn't refetch on the window's focus event", () => {
+        const { queryFn, resolve } = requests<string>()
+        const { fixture } = mount(() => ({ queryKey: ['todos'], queryFn }))
+
+        resolve('v1')
+        fixture.detectChanges()
+
+        // It also fires when an alert or a file picker closes, or on coming
+        // back from DevTools, with the user on the page all along.
+        window.dispatchEvent(new Event('focus'))
+        fixture.detectChanges()
+
+        expect(queryFn).toHaveBeenCalledTimes(1)
+      })
+
+      it("doesn't refetch fresh data", () => {
+        const { queryFn, resolve } = requests<string>()
+        const { fixture } = mount(() => ({
+          queryKey: ['todos'],
+          queryFn,
+          staleTime: Infinity,
+        }))
+
+        resolve('v1')
+        fixture.detectChanges()
+
+        leaveAndComeBack()
+        fixture.detectChanges()
+
+        expect(queryFn).toHaveBeenCalledTimes(1)
+      })
+
+      it("refetches fresh data too with 'always'", () => {
+        const { queryFn, resolve } = requests<string>()
+        const { fixture } = mount(() => ({
+          queryKey: ['todos'],
+          queryFn,
+          staleTime: Infinity,
+          refetchOnWindowFocus: 'always',
+        }))
+
+        resolve('v1')
+        fixture.detectChanges()
+
+        leaveAndComeBack()
+        fixture.detectChanges()
+
+        expect(queryFn).toHaveBeenCalledTimes(2)
+      })
+
+      it("doesn't refetch with false", () => {
+        const { queryFn, resolve } = requests<string>()
+        const { fixture } = mount(() => ({
+          queryKey: ['todos'],
+          queryFn,
+          refetchOnWindowFocus: false,
+        }))
+
+        resolve('v1')
+        fixture.detectChanges()
+
+        leaveAndComeBack()
+        fixture.detectChanges()
+
+        expect(queryFn).toHaveBeenCalledTimes(1)
+      })
+
+      it('makes one request for all components showing the key', () => {
+        const { queryFn, inFlight, cancelled, resolve } = requests<string>()
+        const { fixture, results } = mountMany(3, () => ({
+          queryKey: ['todos'],
+          queryFn,
+        }))
+
+        resolve('v1')
+        fixture.detectChanges()
+
+        leaveAndComeBack()
+        fixture.detectChanges()
+
+        expect(queryFn).toHaveBeenCalledTimes(2)
+        expect(inFlight()).toBe(1)
+        expect(cancelled()).toBe(0)
+
+        resolve('v2')
+        fixture.detectChanges()
+
+        expect(results.map((result) => result.data())).toEqual([
+          'v2',
+          'v2',
+          'v2',
+        ])
+      })
+
+      it('keeps a request in flight instead of sending another', () => {
+        const { queryFn, inFlight, cancelled } = requests<string>()
+        const { fixture } = mount(() => ({ queryKey: ['todos'], queryFn }))
+
+        // The first load is still in flight.
+        leaveAndComeBack()
+        fixture.detectChanges()
+
+        expect(queryFn).toHaveBeenCalledTimes(1)
+        expect(inFlight()).toBe(1)
+        expect(cancelled()).toBe(0)
+      })
+
+      it('refetches when any of the components showing the key wants it', () => {
+        const { queryFn, resolve } = requests<string>()
+        const first = mount(() => ({
+          queryKey: ['todos'],
+          queryFn,
+          refetchOnWindowFocus: false,
+        }))
+
+        resolve('v1')
+        first.fixture.detectChanges()
+
+        const second = mount(() => ({ queryKey: ['todos'], queryFn }))
+
+        // The refetch the second component started on mount.
+        resolve('v2')
+        second.fixture.detectChanges()
+
+        leaveAndComeBack()
+        second.fixture.detectChanges()
+
+        expect(queryFn).toHaveBeenCalledTimes(3)
+      })
+
+      it("doesn't refetch a disabled query", () => {
+        const { queryFn } = requests<string>()
+
+        client.setQueryData(['todos'], 'cached')
+
+        const { fixture } = mount(() => ({
+          queryKey: ['todos'],
+          queryFn,
+          enabled: false,
+        }))
+
+        leaveAndComeBack()
+        fixture.detectChanges()
+
+        expect(queryFn).not.toHaveBeenCalled()
+      })
+
+      it("doesn't refetch the query a component is leaving with the next key's queryFn", () => {
+        // A signal, not an input: an input reaches the component only on
+        // change detection, and this is the moment before it.
+        const id = signal(1)
+        const fetched: number[] = []
+        const { fixture, result } = mount(() => ({
+          queryKey: ['todo', id()],
+          queryFn: () => {
+            fetched.push(id())
+
+            return of(`todo ${id()}`)
+          },
+        }))
+
+        // The key changes, and the user comes back before change detection
+        // moves the component to the new query.
+        id.set(2)
+        leaveAndComeBack()
+
+        expect(fetched).toEqual([1])
+        expect(client.getQueryData(['todo', 1])).toBe('todo 1')
+
+        fixture.detectChanges()
+
+        expect(fetched).toEqual([1, 2])
+        expect(result.data()).toBe('todo 2')
+      })
+
+      it('refetches a query that failed', () => {
+        let down = true
+        const queryFn = jasmine
+          .createSpy('queryFn')
+          .and.callFake(() =>
+            down ? throwError(() => new Error('down')) : of('v1'),
+          )
+        const { fixture, result } = mount<string>(() => ({
+          queryKey: ['todos'],
+          queryFn,
+          retry: false,
+        }))
+
+        expect(result.isError()).toBe(true)
+
+        down = false
+        leaveAndComeBack()
+        fixture.detectChanges()
+
+        expect(queryFn).toHaveBeenCalledTimes(2)
+        expect(result.data()).toBe('v1')
+      })
+
+      it('takes the default from withDefaultOptions', () => {
+        reprovide(
+          provideQueryClient(
+            withDefaultOptions({ queries: { refetchOnWindowFocus: false } }),
+          ),
+        )
+
+        const { queryFn, resolve } = requests<string>()
+        const { fixture } = mount(() => ({ queryKey: ['todos'], queryFn }))
+
+        resolve('v1')
+        fixture.detectChanges()
+
+        leaveAndComeBack()
+        fixture.detectChanges()
+
+        expect(queryFn).toHaveBeenCalledTimes(1)
+      })
+
+      it("lets a query's own option override the default", () => {
+        reprovide(
+          provideQueryClient(
+            withDefaultOptions({ queries: { refetchOnWindowFocus: false } }),
+          ),
+        )
+
+        const { queryFn, resolve } = requests<string>()
+        const { fixture } = mount(() => ({
+          queryKey: ['todos'],
+          queryFn,
+          refetchOnWindowFocus: true,
+        }))
+
+        resolve('v1')
+        fixture.detectChanges()
+
+        leaveAndComeBack()
+        fixture.detectChanges()
+
+        expect(queryFn).toHaveBeenCalledTimes(2)
+      })
+    })
+
+    describe('refetchOnReconnect', () => {
+      it('refetches stale data when the network comes back', () => {
+        const { queryFn, resolve } = requests<string>()
+        const { fixture, result } = mount(() => ({
+          queryKey: ['todos'],
+          queryFn,
+        }))
+
+        resolve('v1')
+        fixture.detectChanges()
+
+        goOfflineAndBack()
+        fixture.detectChanges()
+
+        expect(queryFn).toHaveBeenCalledTimes(2)
+        expect(result.data()).toBe('v1')
+        expect(result.isFetching()).toBe(true)
+
+        resolve('v2')
+        fixture.detectChanges()
+
+        expect(result.data()).toBe('v2')
+      })
+
+      it("doesn't refetch when the network goes away", () => {
+        const { queryFn, resolve } = requests<string>()
+        const { fixture } = mount(() => ({ queryKey: ['todos'], queryFn }))
+
+        resolve('v1')
+        fixture.detectChanges()
+
+        window.dispatchEvent(new Event('offline'))
+        fixture.detectChanges()
+
+        expect(queryFn).toHaveBeenCalledTimes(1)
+      })
+
+      it("doesn't refetch fresh data", () => {
+        const { queryFn, resolve } = requests<string>()
+        const { fixture } = mount(() => ({
+          queryKey: ['todos'],
+          queryFn,
+          staleTime: Infinity,
+        }))
+
+        resolve('v1')
+        fixture.detectChanges()
+
+        goOfflineAndBack()
+        fixture.detectChanges()
+
+        expect(queryFn).toHaveBeenCalledTimes(1)
+      })
+
+      it("refetches fresh data too with 'always'", () => {
+        const { queryFn, resolve } = requests<string>()
+        const { fixture } = mount(() => ({
+          queryKey: ['todos'],
+          queryFn,
+          staleTime: Infinity,
+          refetchOnReconnect: 'always',
+        }))
+
+        resolve('v1')
+        fixture.detectChanges()
+
+        goOfflineAndBack()
+        fixture.detectChanges()
+
+        expect(queryFn).toHaveBeenCalledTimes(2)
+      })
+
+      it("doesn't refetch with false", () => {
+        const { queryFn, resolve } = requests<string>()
+        const { fixture } = mount(() => ({
+          queryKey: ['todos'],
+          queryFn,
+          refetchOnReconnect: false,
+        }))
+
+        resolve('v1')
+        fixture.detectChanges()
+
+        goOfflineAndBack()
+        fixture.detectChanges()
+
+        expect(queryFn).toHaveBeenCalledTimes(1)
+      })
+
+      it('makes one request for all components showing the key', () => {
+        const { queryFn, inFlight, cancelled, resolve } = requests<string>()
+        const { fixture, results } = mountMany(3, () => ({
+          queryKey: ['todos'],
+          queryFn,
+        }))
+
+        resolve('v1')
+        fixture.detectChanges()
+
+        goOfflineAndBack()
+        fixture.detectChanges()
+
+        expect(queryFn).toHaveBeenCalledTimes(2)
+        expect(inFlight()).toBe(1)
+        expect(cancelled()).toBe(0)
+
+        resolve('v2')
+        fixture.detectChanges()
+
+        expect(results.map((result) => result.data())).toEqual([
+          'v2',
+          'v2',
+          'v2',
+        ])
+      })
+
+      it('keeps a request in flight instead of sending another', () => {
+        const { queryFn, inFlight, cancelled } = requests<string>()
+        const { fixture } = mount(() => ({ queryKey: ['todos'], queryFn }))
+
+        // The first load is still in flight.
+        goOfflineAndBack()
+        fixture.detectChanges()
+
+        expect(queryFn).toHaveBeenCalledTimes(1)
+        expect(inFlight()).toBe(1)
+        expect(cancelled()).toBe(0)
+      })
+
+      it('refetches a query that failed while offline', () => {
+        let offline = true
+        const queryFn = jasmine
+          .createSpy('queryFn')
+          .and.callFake(() =>
+            offline ? throwError(() => new Error('offline')) : of('v1'),
+          )
+        const { fixture, result } = mount<string>(() => ({
+          queryKey: ['todos'],
+          queryFn,
+          retry: false,
+        }))
+
+        expect(result.isError()).toBe(true)
+
+        offline = false
+        goOfflineAndBack()
+        fixture.detectChanges()
+
+        expect(queryFn).toHaveBeenCalledTimes(2)
+        expect(result.data()).toBe('v1')
+      })
+
+      it('takes the default from withDefaultOptions', () => {
+        reprovide(
+          provideQueryClient(
+            withDefaultOptions({ queries: { refetchOnReconnect: false } }),
+          ),
+        )
+
+        const { queryFn, resolve } = requests<string>()
+        const { fixture } = mount(() => ({ queryKey: ['todos'], queryFn }))
+
+        resolve('v1')
+        fixture.detectChanges()
+
+        goOfflineAndBack()
+        fixture.detectChanges()
+
+        expect(queryFn).toHaveBeenCalledTimes(1)
+      })
+
+      it('makes one request when the user comes back and the network does at once', () => {
+        const { queryFn, inFlight, cancelled, resolve } = requests<string>()
+        const { fixture } = mount(() => ({ queryKey: ['todos'], queryFn }))
+
+        resolve('v1')
+        fixture.detectChanges()
+
+        // As when a laptop wakes up.
+        leaveAndComeBack()
+        goOfflineAndBack()
+        fixture.detectChanges()
+
+        expect(queryFn).toHaveBeenCalledTimes(2)
+        expect(inFlight()).toBe(1)
+        expect(cancelled()).toBe(0)
+      })
+    })
+
+    it('refetches nothing on the server, whatever the page or the network does', () => {
+      reprovide(provideQueryClient(), {
+        provide: PLATFORM_ID,
+        useValue: 'server',
+      })
+
+      const { queryFn, resolve } = requests<string>()
+      const { fixture } = mount(() => ({ queryKey: ['todos'], queryFn }))
+
+      resolve('v1')
+      fixture.detectChanges()
+
+      leaveAndComeBack()
+      goOfflineAndBack()
+      fixture.detectChanges()
+
+      expect(queryFn).toHaveBeenCalledTimes(1)
     })
   })
 

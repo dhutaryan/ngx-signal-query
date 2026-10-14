@@ -55,8 +55,9 @@ queryOptions({
 ```
 
 The default is **`0`** — data is stale the instant it arrives. That's why, out
-of the box, a query refetches every time a new component mounts it: it's never
-considered fresh. Turn that off by raising `staleTime`.
+of the box, a query refetches every time a new component mounts it, or the user
+comes back to the tab: it's never considered fresh. Turn that off by raising
+`staleTime`.
 
 At the other end, **`Infinity`** means never stale — the query fetches once and
 then only ever refetches when you invalidate it by hand.

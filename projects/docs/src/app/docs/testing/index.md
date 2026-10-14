@@ -118,6 +118,32 @@ Testing the error path is the same shape — `subject.error(new Error('nope'))`,
 then assert `todos.isError()`. (This is where **retries off** matters — otherwise
 `tick()` wouldn't be enough.)
 
+## Window focus and reconnect
+
+A test doesn't leave the page or lose the network, so
+[these refetches](/queries/focus-and-reconnect) don't happen in it on their own.
+To test one, fire the event the browser would:
+
+```ts
+// The user comes back to the tab.
+Object.defineProperty(document, 'visibilityState', {
+  configurable: true,
+  get: () => 'visible',
+})
+document.dispatchEvent(new Event('visibilitychange'))
+Reflect.deleteProperty(document, 'visibilityState')
+
+// The network comes back.
+window.dispatchEvent(new Event('online'))
+```
+
+The refetch starts at once, so you can assert right after.
+
+If your tests run in a browser window you can see, leaving it and coming back
+while they run is a real return, and can slip a refetch into the test that's
+running. If that gets in the way, turn the refetches off in the test client:
+`withDefaultOptions({ queries: { refetchOnWindowFocus: false } })`.
+
 ## Testing a mutation
 
 Call `mutate()`, then assert the resulting state and any side effects:

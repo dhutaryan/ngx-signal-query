@@ -25,20 +25,27 @@ const DEFAULT_GC_TIME = 5 * 60 * 1000
 
 /**
  * An observer of a query, as the query sees it: the query asks its observers
- * how to fetch it when it refetches on their behalf (after invalidation), and
- * how data written into it by hand merges.
+ * how to fetch it when it refetches on their behalf (after invalidation, on
+ * window focus or reconnect), and how data written into it by hand merges.
  *
  * @internal
  */
 export interface QuerySubscriber<TData, TError = Error> {
   /**
-   * How this observer would fetch the query right now, read from its live
-   * options; `null` while it doesn't want the query fetched: it is disabled,
-   * or its key has already moved on to another query.
+   * How this observer would fetch the query right now, and when it wants it
+   * refetched, read from its live options; `null` while it doesn't want the
+   * query fetched: it is disabled, or its key has already moved on to another
+   * query.
    */
   fetchOptions(): Pick<
     DefaultedQueryOptions<TData, TError>,
-    'queryFn' | 'retry' | 'retryDelay' | 'structuralSharing'
+    | 'queryFn'
+    | 'retry'
+    | 'retryDelay'
+    | 'structuralSharing'
+    | 'staleTime'
+    | 'refetchOnWindowFocus'
+    | 'refetchOnReconnect'
   > | null
 
   /**
@@ -122,6 +129,19 @@ export class Query<TData, TError = Error> {
     return null
   }
 
+  // Refetches the query now that the user is back on the page, if one of its
+  // observers wants that: its refetchOnWindowFocus is 'always', or true while
+  // the data is stale for its staleTime. The first such observer decides
+  // how, as in TanStack.
+  onFocus(): void {
+    this.#refetchOn('refetchOnWindowFocus')
+  }
+
+  // The same once the network is back, by refetchOnReconnect.
+  onOnline(): void {
+    this.#refetchOn('refetchOnReconnect')
+  }
+
   // How data written into the query by hand merges with what it holds: as
   // its first observer says, enabled or not; with none, the way its data was
   // fetched; undefined if neither has a say.
@@ -147,7 +167,7 @@ export class Query<TData, TError = Error> {
     >,
     { cancelRefetch = false }: { cancelRefetch?: boolean } = {},
   ): void {
-    if (this.#subscription && !this.#subscription.closed) {
+    if (this.#inFlight()) {
       // Already in-flight: dedupe unless the caller explicitly wants a fresh
       // fetch (e.g. invalidate/refetch) — then cancel the old one and restart.
       if (!cancelRefetch) return
@@ -282,6 +302,28 @@ export class Query<TData, TError = Error> {
   // refetch, rather than depending on whether a millisecond happened to pass.
   #isStale(staleTime: number): boolean {
     return Date.now() - this.state().updatedAt >= staleTime
+  }
+
+  #inFlight(): boolean {
+    return this.#subscription !== null && !this.#subscription.closed
+  }
+
+  // A fetch in flight is kept, as in TanStack, and the observers aren't even
+  // asked: fetch() would drop the refetch anyway.
+  #refetchOn(option: 'refetchOnWindowFocus' | 'refetchOnReconnect'): void {
+    if (this.#inFlight()) return
+
+    for (const observer of this.#observers) {
+      const options = observer.fetchOptions()
+
+      if (!options || options[option] === false) continue
+
+      if (options[option] === 'always' || this.shouldFetch(options.staleTime)) {
+        this.fetch(options)
+
+        return
+      }
+    }
   }
 
   #scheduleGc(): void {
