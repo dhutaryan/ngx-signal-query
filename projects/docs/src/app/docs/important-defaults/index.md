@@ -11,7 +11,9 @@ query refetches in the background whenever:
 
 - a component starts showing its key, even if another one already does;
 - a reactive key switches to a key that's already in the cache;
-- `enabled` turns `true`.
+- `enabled` turns `true`;
+- the user comes back to the tab, or the network comes back; see
+  [Refetching on Focus and Reconnect](/queries/focus-and-reconnect).
 
 The cached data stays on screen while it refetches: `isFetching()` is `true`,
 `isLoading()` isn't.
@@ -71,15 +73,13 @@ A query polls only when you set `refetchInterval`, and polling ignores
 
 A few things don't happen on their own:
 
-- **Refetch on window focus or reconnect.** Coming back to the tab, or getting
-  the network back, doesn't refetch stale queries. Tracked in
-  [#28](https://github.com/dhutaryan/ngx-signal-query/issues/28).
 - **Pausing polling in a background tab.** Polling goes on while the tab is
   hidden. Tracked in
   [#23](https://github.com/dhutaryan/ngx-signal-query/issues/23).
-- **Pausing while offline.** A query without a connection fails and goes
-  through its retries; see
+- **Pausing while offline or in a background tab.** A query without a
+  connection fails and goes through its retries, and a failing query goes on
+  retrying while the tab is hidden; see
   [Disabling Queries](/queries/disabling-queries#there-is-no-pausing).
 
-TanStack Query does all three by default, so if you're coming from it, these
-are the ones to watch for.
+TanStack Query does both by default, so if you're coming from it, these are the
+ones to watch for.

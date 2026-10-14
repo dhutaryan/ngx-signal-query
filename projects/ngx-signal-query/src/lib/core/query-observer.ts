@@ -166,22 +166,40 @@ export function createQueryObserver<TData, TError = Error>(
     switchTo(untracked(() => resolve(entry.key)))
   })
 
-  // How this observer would fetch q right now, from the live options; null
-  // while it is disabled, or once the key has moved on. Before the key effect
-  // above catches up, queryFn already fetches the next query's data, so q
-  // must not be fetched with it. Both refetches made on our behalf go by it:
-  // the invalidation one (through q's subscriber handle) and polling.
+  // How this observer would fetch q right now, and when it wants q
+  // refetched, from the live options; null while it is disabled, or once the
+  // key has moved on. Before the key effect above catches up, queryFn already
+  // fetches the next query's data, so q must not be fetched with it. Every
+  // refetch made on our behalf goes by it: through q's subscriber handle the
+  // invalidation one and the window focus and reconnect ones, and polling.
   const fetchOptionsFor = (
     q: Query<TData, TError>,
   ): ReturnType<QuerySubscriber<TData, TError>['fetchOptions']> => {
-    const { queryKey, queryFn, retry, retryDelay, structuralSharing, enabled } =
-      untracked(defaultedOptions)
+    const {
+      queryKey,
+      queryFn,
+      retry,
+      retryDelay,
+      structuralSharing,
+      staleTime,
+      refetchOnWindowFocus,
+      refetchOnReconnect,
+      enabled,
+    } = untracked(defaultedOptions)
 
     if (enabled === false || hashKey(queryKey) !== q.queryHash) {
       return null
     }
 
-    return { queryFn, retry, retryDelay, structuralSharing }
+    return {
+      queryFn,
+      retry,
+      retryDelay,
+      structuralSharing,
+      staleTime,
+      refetchOnWindowFocus,
+      refetchOnReconnect,
+    }
   }
 
   track((cleanup) => {

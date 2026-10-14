@@ -7,6 +7,7 @@ import {
 
 import { Log } from './core/log/log'
 import { EffectsDemo } from './effects/effects-demo/effects-demo'
+import { FocusDemo } from './focus/focus-demo/focus-demo'
 import { InvalidationDemo } from './invalidation/invalidation-demo/invalidation-demo'
 import { LazyOptionsDemo } from './lazy-options/lazy-options-demo/lazy-options-demo'
 import { MutationDemo } from './mutations/mutation-demo/mutation-demo'
@@ -26,6 +27,7 @@ import { TodosApi } from './mutations/todos-api'
     PollingDemo,
     EffectsDemo,
     RemovalDemo,
+    FocusDemo,
   ],
   templateUrl: './app.html',
   styleUrl: './app.scss',

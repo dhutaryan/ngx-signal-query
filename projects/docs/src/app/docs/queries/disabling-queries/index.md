@@ -97,8 +97,8 @@ TanStack Query has a separate notion of a *paused* query: one that wants to run
 but can't, because the network is offline (`networkMode`). It shows up as a
 distinct `fetchStatus` of `'paused'`.
 
-None of that exists here. There's no `networkMode`, no `'paused'` state, and no
-automatic offline handling — a query with no connection simply fails and goes
-through the normal retry path.
+None of that exists here. There's no `networkMode`, no `'paused'` state, and
+nothing waits for the network — a query with no connection simply fails and
+goes through the normal retry path.
 
 So `enabled` is the only lever: a query either may fetch, or it may not.

@@ -1,0 +1,89 @@
+<section class="panel">
+  <h2>
+    Refetch on window focus and reconnect
+    <small>(issue #28)</small>
+  </h2>
+
+  <p class="hint">
+    Coming back to the tab, or getting the network back, should refetch the
+    queries on screen whose data is stale: once per query, however many
+    components show it, and a request already in flight is kept rather than sent
+    again. Each row is a component with the options in its first column, and the
+    table counts its requests since the last event next to what the event should
+    have sent. The counts are judged from the first event on. The fake server
+    answers in {{ latency }} ms (no network).
+  </p>
+
+  <div class="controls">
+    <button (click)="leaveAndComeBack()">leave the tab and come back</button>
+    <button (click)="goOfflineAndBack()">go offline and back online</button>
+    <button (click)="wakeUp()">both at once</button>
+    <span class="state">
+      or switch to another tab and back, or DevTools → Network → Offline and
+      back
+    </span>
+  </div>
+
+  <table class="counters">
+    <thead>
+      <tr>
+        <th>since: {{ since() }}</th>
+        <th>shows</th>
+        <th>requests</th>
+        <th>expected</th>
+      </tr>
+    </thead>
+    <tbody>
+      @for (row of rows(); track row.label) {
+        <tr>
+          <td>
+            <code>{{ row.label }}</code>
+          </td>
+          <td class="shows">{{ row.shows }}</td>
+          <td [class.bad]="row.bad">{{ row.actual }}</td>
+          <td class="expected">{{ row.expected ?? '' }}</td>
+        </tr>
+      }
+    </tbody>
+  </table>
+
+  <details>
+    <summary>What to try</summary>
+    <p class="hint">
+      After each event the requests should match the expected ones. What each
+      event does before the feature:
+    </p>
+    <ul class="hint">
+      <li>
+        <strong>Leave the tab and come back</strong>
+        — the defaults, the
+        <code>'always'</code>
+        row and the three components should send one request each, and the other
+        rows none. Nothing is sent.
+      </li>
+      <li>
+        <strong>The same a minute later</strong>
+        — the data of the
+        <code>staleTime: 60_000</code>
+        row is stale by then, so it should send a request too. It doesn't.
+      </li>
+      <li>
+        <strong>Go offline and back online</strong>
+        — should do what coming back to the tab does. Nothing is sent.
+      </li>
+      <li>
+        <strong>Both at once</strong>
+        , as when a laptop wakes up — still one request per row: the second
+        event finds the first one's request in flight. Nothing is sent.
+      </li>
+    </ul>
+    <p class="hint">
+      To see a change in the library here, rebuild it with
+      <code>pnpm build:lib</code>
+      or keep
+      <code>pnpm watch</code>
+      running: the playground uses the build in
+      <code>dist</code>
+    </p>
+  </details>
+</section>

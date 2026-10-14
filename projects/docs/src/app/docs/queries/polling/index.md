@@ -30,9 +30,9 @@ last response, or a write with `setQueryData`. With a 5 s interval and requests
 that take 300 ms, a request goes out every 5.3 s.
 
 So anything else that updates the query pushes the next poll back. If a
-`refetch()` or an invalidation brings new data 4 s into the interval, or
-`setQueryData` writes some, the next poll comes 5 s after that, not a second
-later.
+`refetch()`, an invalidation or the user coming back to the tab brings new data
+4 s into the interval, or `setQueryData` writes some, the next poll comes 5 s
+after that, not a second later.
 
 The same goes for several components polling one key. A poll from one of them
 is an update for all of them, so together they fetch the key once per

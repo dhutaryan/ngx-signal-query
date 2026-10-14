@@ -100,6 +100,10 @@ export class PollingQueryObserver {
     queryKey: POLLING_DEMO_KEY,
     queryFn: () => this.#trace.request(this.n()),
     refetchInterval: refetchIntervalFor(this.interval()),
+    // A refetch on coming back to the tab, or on reconnect, would show up in
+    // the timeline as an off-beat poll.
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
     // Polling doesn't depend on retry, but the options read the noise here:
     // a changing input is all it takes.
     retry: this.noise() % 2,
@@ -131,6 +135,9 @@ export class PollingQueriesObserver {
         queryKey: POLLING_DEMO_KEY,
         queryFn: () => this.#trace.request(this.n()),
         refetchInterval: refetchIntervalFor(this.interval()),
+        // Not refetched on coming back to the tab or on reconnect either.
+        refetchOnWindowFocus: false,
+        refetchOnReconnect: false,
       },
       {
         queryKey: NEIGHBOUR_KEY,

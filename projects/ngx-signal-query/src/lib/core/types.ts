@@ -116,6 +116,20 @@ export type QueryOptions<TData, TError = Error> = {
    */
   refetchInterval?: RefetchIntervalValue<TData, TError>
   /**
+   * Whether the query refetches when the user comes back to the page, as the
+   * tab or window turns visible again: `true` refetches stale data (see
+   * `staleTime`), `'always'` fresh data too, `false` never. Default `true`.
+   * However many components show the query, it refetches once.
+   */
+  refetchOnWindowFocus?: boolean | 'always'
+  /**
+   * Whether the query refetches when the network comes back (the browser's
+   * `online` event): `true` refetches stale data (see `staleTime`), so a
+   * query that failed while offline loads again; `'always'` refetches fresh
+   * data too, `false` never. Default `true`.
+   */
+  refetchOnReconnect?: boolean | 'always'
+  /**
    * Seed data to render immediately (treated as already-resolved). A
    * function runs only while the query has no data yet; returning `undefined`
    * seeds nothing, so the query stays `'pending'` and fetches.
@@ -154,6 +168,8 @@ export type DefaultedQueryOptions<TData, TError = Error> = QueryOptions<
   retry: RetryValue<TError>
   retryDelay: RetryDelayValue<TError>
   structuralSharing: StructuralSharingValue<TData>
+  refetchOnWindowFocus: boolean | 'always'
+  refetchOnReconnect: boolean | 'always'
 }
 
 /** Reactive result returned by {@link injectQuery}; every field is a signal. */
@@ -199,6 +215,10 @@ export interface DefaultQueryOptions {
   retryDelay?: RetryDelayValue<unknown>
   /** Whether new data keeps the parts of the cached data that didn't change. Defaults to `true`. */
   structuralSharing?: StructuralSharingValue<unknown>
+  /** Whether queries refetch when the user comes back to the page. Defaults to `true`. */
+  refetchOnWindowFocus?: boolean | 'always'
+  /** Whether queries refetch when the network comes back. Defaults to `true`. */
+  refetchOnReconnect?: boolean | 'always'
 }
 
 /**

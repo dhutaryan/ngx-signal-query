@@ -70,12 +70,11 @@ rather than a bolt-on.
 - ♻️ Invalidation, cancellation and manual cache updates
 - 🔗 Dependent, parallel (`injectQueries`) and disabled queries
 - 🖼️ Seed and placeholder data while a query loads (`initialData`, `placeholderData`, `keepPreviousData`)
-- 🔁 Retries and polling
+- 🔁 Retries, polling, and refetch on window focus and reconnect
 - ✏️ Mutations with async lifecycle hooks and optimistic updates
 - 🌍 App-wide defaults and global indicators (`injectIsFetching()`, `injectIsMutating()`)
 
-Not here yet: infinite queries, refetch on window focus and reconnect, SSR cache
-hydration, devtools and persistence.
+Not here yet: infinite queries, SSR cache hydration, devtools and persistence.
 
 ## A quick taste
 

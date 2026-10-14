@@ -6,7 +6,7 @@ const StructuralSharingPage: NgDocPage = {
   title: 'Structural Sharing',
   mdFile: './index.md',
   category: Queries,
-  order: 12,
+  order: 13,
 }
 
 export default StructuralSharingPage

@@ -62,6 +62,22 @@ function mount<TData, TError = Error, TValue = number[]>(
   }
 }
 
+// The user leaves the page and comes back to it, as when they switch to
+// another tab and back: document.visibilityState turns 'hidden', then
+// 'visible', and visibilitychange fires each time. The real value comes back
+// afterwards.
+function leaveAndComeBack(): void {
+  for (const state of ['hidden', 'visible'] as const) {
+    Object.defineProperty(document, 'visibilityState', {
+      configurable: true,
+      get: () => state,
+    })
+    document.dispatchEvent(new Event('visibilitychange'))
+  }
+
+  Reflect.deleteProperty(document, 'visibilityState')
+}
+
 describe('injectQueries', () => {
   let client: QueryClient
 
@@ -176,6 +192,45 @@ describe('injectQueries', () => {
     // One new request, still running: a cancelled one is unsubscribed.
     expect(queryFn).toHaveBeenCalledTimes(2)
     expect(subjects[1].observed).toBe(true)
+  })
+
+  it('refetches its queries when the user comes back to the page, once per key shared with injectQuery', () => {
+    const subjects: Array<Subject<string>> = []
+    const queryFn = jasmine.createSpy('queryFn').and.callFake(() => {
+      const subject = new Subject<string>()
+
+      subjects.push(subject)
+
+      return subject
+    })
+
+    @Component({ template: '' })
+    class Host {
+      readonly one = injectQuery(() => ({ queryKey: ['shared'], queryFn }))
+
+      readonly many = injectQueries(() => ({
+        queries: [
+          { queryKey: ['shared'], queryFn },
+          { queryKey: ['own'], queryFn },
+        ],
+      }))
+    }
+
+    const fixture = TestBed.createComponent(Host)
+
+    fixture.detectChanges()
+    subjects.forEach((subject) => {
+      subject.next('v1')
+      subject.complete()
+    })
+    fixture.detectChanges()
+
+    leaveAndComeBack()
+    fixture.detectChanges()
+
+    // One request per key on mount, then one more per key, still running.
+    expect(queryFn).toHaveBeenCalledTimes(4)
+    expect(subjects.slice(2).every((subject) => subject.observed)).toBe(true)
   })
 
   it('isolates errors per query', () => {
