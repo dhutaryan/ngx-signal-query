@@ -163,21 +163,18 @@ export class QueryClient {
     } = {},
   ): void {
     untracked(() => {
-      const defaults = this.#config.defaultOptions?.queries
-      const staleTime = options.staleTime ?? defaults?.staleTime ?? 0
-      const retry = options.retry ?? defaults?.retry ?? 3
-      const retryDelay =
-        options.retryDelay ?? defaults?.retryDelay ?? defaultRetryDelay
-      const structuralSharing =
-        options.structuralSharing ?? this.#defaultStructuralSharing<TData>()
-
+      // Resolved as a query's options are, so one set of defaults serves both.
+      // cancelRefetch is about this call, not an option of the query.
+      const { cancelRefetch, ...queryOptions } = options
+      const defaulted = this.defaultQueryOptions<TData>({
+        ...queryOptions,
+        queryKey: key,
+        queryFn,
+      })
       const query = this.#cache.getOrCreate<TData>(key)
 
-      if (query.shouldFetch(staleTime)) {
-        query.fetch(
-          { queryFn, retry, retryDelay, structuralSharing },
-          { cancelRefetch: options.cancelRefetch },
-        )
+      if (query.shouldFetch(defaulted.staleTime)) {
+        query.fetch(defaulted, { cancelRefetch })
       }
     })
   }

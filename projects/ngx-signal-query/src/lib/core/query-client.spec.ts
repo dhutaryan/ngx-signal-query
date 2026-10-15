@@ -5,7 +5,7 @@ import {
   TestBed,
   tick,
 } from '@angular/core/testing'
-import { of, Subject } from 'rxjs'
+import { of, Subject, throwError } from 'rxjs'
 
 import { withDefaultOptions } from '../features/with-default-options'
 import { injectMutation } from './inject-mutation'
@@ -95,6 +95,7 @@ describe('QueryClient', () => {
               queries: {
                 staleTime: 1234,
                 retry: 5,
+                retryDelay: 100,
                 refetchOnWindowFocus: false,
                 refetchOnReconnect: false,
               },
@@ -140,6 +141,21 @@ describe('QueryClient', () => {
       // staleTime 1234 keeps the data fresh, so no second fetch.
       expect(queryFn).toHaveBeenCalledTimes(1)
     })
+
+    it('applies the configured retry and retryDelay in fetchQuery', fakeAsync(() => {
+      const start = Date.now()
+      const sent: number[] = []
+
+      client.fetchQuery(['n'], () => {
+        sent.push(Date.now() - start)
+
+        return throwError(() => new Error('down'))
+      })
+      tick(1_000)
+
+      // The first try, then 5 retries 100 ms apart.
+      expect(sent).toEqual([0, 100, 200, 300, 400, 500])
+    }))
   })
 
   describe('setQueryData / getQueryData', () => {
@@ -233,6 +249,30 @@ describe('QueryClient', () => {
       expect(second).toHaveBeenCalledTimes(1)
       expect(client.getQueryData(['n'])).toBe(2)
     }))
+
+    it('retries a failing fetch 3 times, 1 s, 2 s and 4 s apart', fakeAsync(() => {
+      const start = Date.now()
+      const sent: number[] = []
+
+      client.fetchQuery(['n'], () => {
+        sent.push(Date.now() - start)
+
+        return throwError(() => new Error('down'))
+      })
+      tick(60_000)
+
+      expect(sent).toEqual([0, 1_000, 3_000, 7_000])
+    }))
+
+    it('keeps the cached data when the fetch brings the same data', () => {
+      client.setQueryData(['n'], { id: 1, tags: ['a'] })
+
+      const cached = client.getQueryData(['n'])
+
+      client.fetchQuery(['n'], () => of({ id: 1, tags: ['a'] }))
+
+      expect(client.getQueryData(['n'])).toBe(cached)
+    })
   })
 
   describe('invalidateQueries', () => {
