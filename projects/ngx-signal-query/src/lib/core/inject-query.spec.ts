@@ -317,6 +317,22 @@ describe('injectQuery', () => {
       expect(result.isSuccess()).toBe(true)
       expect(result.data()).toBe(1)
     })
+
+    // enabled governs automatic fetching only: refetch() is an explicit
+    // instruction, which fetch-on-demand relies on.
+    it('fetches on refetch() while disabled', () => {
+      const queryFn = jasmine.createSpy('queryFn').and.returnValue(of(1))
+      const { result } = mount(() => ({
+        queryKey: ['e'],
+        queryFn,
+        enabled: false,
+      }))
+
+      result.refetch()
+
+      expect(queryFn).toHaveBeenCalledTimes(1)
+      expect(result.data()).toBe(1)
+    })
   })
 
   describe('refetch / invalidate', () => {
@@ -403,6 +419,50 @@ describe('injectQuery', () => {
 
       // One on mount, one for the reconnect.
       expect(queryFn).toHaveBeenCalledTimes(2)
+    }))
+
+    it("does not make an effect that calls refetch() track the query's options", fakeAsync(() => {
+      const { queryFn } = timed(100)
+      const online = signal(false)
+      const page = signal(1)
+      let runs = 0
+
+      @Component({ template: '' })
+      class Host {
+        readonly result = injectQuery(() => ({
+          queryKey: ['todos', page()],
+          queryFn,
+        }))
+
+        constructor() {
+          // Refetches once the connection is back. Stopped after 20 runs, so
+          // a loop fails the expectation rather than change detection.
+          effect(() => {
+            runs++
+
+            if (runs > 20) return
+
+            if (online()) this.result.refetch()
+          })
+        }
+      }
+
+      const fixture = TestBed.createComponent(Host)
+
+      fixture.detectChanges()
+      elapse(100, fixture)
+      online.set(true)
+      fixture.detectChanges()
+      elapse(100, fixture)
+      page.set(2)
+      fixture.detectChanges()
+      elapse(100, fixture)
+
+      // On mount and for the reconnect: the next page is the query's to load,
+      // not a reason for the effect to refetch.
+      expect(runs).toBe(2)
+      // Page 1 on mount and for the reconnect, then page 2.
+      expect(queryFn).toHaveBeenCalledTimes(3)
     }))
   })
 
@@ -697,25 +757,31 @@ describe('injectQuery', () => {
       expect(queryFn).toHaveBeenCalledTimes(1)
     })
 
-    it('uses the latest options when the key does change', () => {
+    it('uses the latest options when the key does change', fakeAsync(() => {
       const id = signal(1)
       const retry = signal(0)
-      const spy = spyOn(QueryClient.prototype, 'fetchQuery').and.callThrough()
+      // Item 2 is down, so retry decides how often it's asked for.
+      const fetchItem = jasmine
+        .createSpy('fetchItem')
+        .and.callFake((item: number) =>
+          item === 1 ? of(1) : throwError(() => new Error('down')),
+        )
       const { fixture } = mount(() => ({
         queryKey: ['item', id()],
-        queryFn: () => of(id()),
+        queryFn: () => fetchItem(id()),
         retry: retry(),
+        retryDelay: 10,
       }))
 
       retry.set(5)
       id.set(2)
       fixture.detectChanges()
+      tick(50)
 
-      const lastCall = spy.calls.mostRecent().args
-
-      expect(lastCall[0]).toEqual(['item', 2])
-      expect(lastCall[2]?.retry).toBe(5)
-    })
+      // Item 1 on mount; item 2 once, then the 5 retries the new options ask
+      // for.
+      expect(fetchItem.calls.allArgs().flat()).toEqual([1, 2, 2, 2, 2, 2, 2])
+    }))
   })
 
   describe('reactive query key', () => {
@@ -2545,6 +2611,21 @@ describe('injectQuery', () => {
 
       expect(result.data()).toBe('fresh')
     }))
+
+    it('refetch() cancels an in-flight fetch and starts a fresh one', () => {
+      const { queryFn, inFlight, cancelled, resolve } = requests<string>()
+      const { result } = mount(() => ({ queryKey: ['c'], queryFn }))
+
+      result.refetch()
+
+      expect(queryFn).toHaveBeenCalledTimes(2)
+      expect(cancelled()).toBe(1)
+      expect(inFlight()).toBe(1)
+
+      resolve('fresh')
+
+      expect(result.data()).toBe('fresh')
+    })
   })
 
   describe('dependent queries', () => {

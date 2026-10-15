@@ -24,6 +24,41 @@ import type {
 const DEFAULT_GC_TIME = 5 * 60 * 1000
 
 /**
+ * What the promise of a query's fetch rejects with when the fetch stops with
+ * no data to give: cancelled before the query had any, or thrown away with
+ * the query.
+ *
+ * @internal
+ */
+export class CancelledError extends Error {
+  constructor() {
+    super('The query fetch was cancelled')
+    this.name = 'CancelledError'
+  }
+}
+
+// A promise with the functions that settle it. TODO: use
+// Promise.withResolvers() instead once every browser the supported Angular
+// versions target has it: Safari 17.4, Chrome 119, Firefox 121 (Angular 20
+// still targets Safari 16).
+interface Deferred<T> {
+  promise: Promise<T>
+  resolve: (value: T | PromiseLike<T>) => void
+  reject: (reason: unknown) => void
+}
+
+function deferred<T>(): Deferred<T> {
+  let resolve!: Deferred<T>['resolve']
+  let reject!: Deferred<T>['reject']
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res
+    reject = rej
+  })
+
+  return { promise, resolve, reject }
+}
+
+/**
  * An observer of a query, as the query sees it: the query asks its observers
  * how to fetch it when it refetches on their behalf (after invalidation, on
  * window focus or reconnect), and how data written into it by hand merges.
@@ -74,6 +109,9 @@ export class Query<TData, TError = Error> {
   readonly state = this.#state.asReadonly()
 
   #subscription: Subscription | null = null
+  // The promise of the fetch in flight, which every caller that joins the
+  // fetch shares, and how to settle it; null while nothing is in flight.
+  #outcome: Deferred<TData> | null = null
   // The structuralSharing of the fetch whose response the query holds.
   #fetchedStructuralSharing: StructuralSharingValue<TData> | undefined
   readonly #observers = new Set<QuerySubscriber<TData, TError>>()
@@ -155,6 +193,11 @@ export class Query<TData, TError = Error> {
 
   // Without a structuralSharing setting the response is stored as is: the
   // default is the client's to resolve.
+  //
+  // Returns a promise of the data as the query stores it, which every caller
+  // that joins the fetch shares. A fetch that replaces this one settles it
+  // with its own outcome; one stopped with nothing in its place settles it as
+  // cancel() or destroy() says. Nobody has to wait for it.
   fetch(
     {
       queryFn,
@@ -166,13 +209,26 @@ export class Query<TData, TError = Error> {
       'queryFn' | 'retry' | 'retryDelay' | 'structuralSharing'
     >,
     { cancelRefetch = false }: { cancelRefetch?: boolean } = {},
-  ): void {
-    if (this.#inFlight()) {
+  ): Promise<TData> {
+    const running = this.#outcome
+
+    if (running) {
       // Already in-flight: dedupe unless the caller explicitly wants a fresh
-      // fetch (e.g. invalidate/refetch) — then cancel the old one and restart.
-      if (!cancelRefetch) return
-      this.cancel()
+      // fetch (e.g. invalidate/refetch) — then replace the old one.
+      if (!cancelRefetch) return running.promise
+
+      this.#subscription?.unsubscribe()
     }
+
+    const outcome = deferred<TData>()
+
+    // Its result or error lands in the state either way, so a caller may
+    // ignore the promise: handled here, a failure doesn't surface as an
+    // unhandled rejection, and whoever awaits the promise still gets it.
+    outcome.promise.catch(() => undefined)
+    // Whoever waits for the fetch this one replaces gets this one's outcome.
+    running?.resolve(outcome.promise)
+    this.#outcome = outcome
 
     this.#state.update((state) => ({
       ...state,
@@ -216,6 +272,7 @@ export class Query<TData, TError = Error> {
       )
       .subscribe({
         next: (data) => {
+          this.#outcome = null
           this.#fetchedStructuralSharing = structuralSharing
           this.#state.set({
             data,
@@ -227,15 +284,21 @@ export class Query<TData, TError = Error> {
             failureReason: null,
             updatedAt: Date.now(),
           })
+          outcome.resolve(data)
         },
-        error: (err) =>
+        error: (err) => {
+          this.#outcome = null
           this.#state.update((state) => ({
             ...state,
             status: 'error',
             error: err,
             isFetching: false,
-          })),
+          }))
+          outcome.reject(err)
+        },
       })
+
+    return outcome.promise
   }
 
   // Without a structuralSharing setting the data is stored as is: which one
@@ -280,19 +343,22 @@ export class Query<TData, TError = Error> {
     )
   }
 
+  // Stops the fetch in flight. Whoever waits for it gets the data the query
+  // holds, as in TanStack, or a CancelledError if it holds none.
   cancel(): void {
-    this.#subscription?.unsubscribe()
-    this.#subscription = null
+    const { data } = this.state()
 
-    // The fetch is no longer running; clear the in-flight flag so isFetching
-    // doesn't stay stuck true after a cancellation.
-    if (this.state().isFetching) {
-      this.#state.update((state) => ({ ...state, isFetching: false }))
-    }
+    this.#stop((outcome) =>
+      data === undefined
+        ? outcome.reject(new CancelledError())
+        : outcome.resolve(data),
+    )
   }
 
+  // The query is thrown away with its data, so whoever waits for its fetch
+  // gets a CancelledError, as in TanStack.
   destroy(): void {
-    this.cancel()
+    this.#stop((outcome) => outcome.reject(new CancelledError()))
     this.#clearGcTimer()
   }
 
@@ -305,7 +371,24 @@ export class Query<TData, TError = Error> {
   }
 
   #inFlight(): boolean {
-    return this.#subscription !== null && !this.#subscription.closed
+    return this.#outcome !== null
+  }
+
+  // Stops the fetch in flight, if any, and settles its promise with settle.
+  #stop(settle: (outcome: Deferred<TData>) => void): void {
+    const outcome = this.#outcome
+
+    this.#subscription?.unsubscribe()
+    this.#subscription = null
+    this.#outcome = null
+
+    if (outcome) settle(outcome)
+
+    // The fetch is no longer running; clear the in-flight flag so isFetching
+    // doesn't stay stuck true after a cancellation.
+    if (this.state().isFetching) {
+      this.#state.update((state) => ({ ...state, isFetching: false }))
+    }
   }
 
   // A fetch in flight is kept, as in TanStack, and the observers aren't even

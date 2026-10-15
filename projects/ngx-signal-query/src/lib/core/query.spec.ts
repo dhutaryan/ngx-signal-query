@@ -1,7 +1,7 @@
-import { fakeAsync, tick } from '@angular/core/testing'
+import { fakeAsync, flushMicrotasks, tick } from '@angular/core/testing'
 import { type Observable, of, Subject, throwError } from 'rxjs'
 
-import { Query, type QuerySubscriber } from './query'
+import { CancelledError, Query, type QuerySubscriber } from './query'
 import type { QueryCache } from './query-cache'
 
 function createQuery<TData, TError = Error>() {
@@ -47,6 +47,23 @@ function activeObserver(
     }),
     structuralSharing: () => true,
   }
+}
+
+// What a promise has settled with so far, empty while it's pending. Read it
+// after the microtasks have run.
+function settled<T>(promise: Promise<T>): { value?: T; error?: unknown } {
+  const result: { value?: T; error?: unknown } = {}
+
+  promise.then(
+    (value) => {
+      result.value = value
+    },
+    (error: unknown) => {
+      result.error = error
+    },
+  )
+
+  return result
 }
 
 describe('Query', () => {
@@ -236,6 +253,148 @@ describe('Query', () => {
       resolveFirst(1)
       tick()
       expect(query.state().data).toBe(2)
+    }))
+  })
+
+  // fetch() returns a promise of the data as the query stores it, shared by
+  // every caller of one fetch.
+  describe('fetch promise', () => {
+    it('resolves with the data as the query stores it', fakeAsync(() => {
+      const { query } = createQuery<{ id: number }>()
+
+      query.setData({ id: 1 })
+
+      const stored = query.state().data
+      const result = settled(
+        query.fetch({ queryFn: () => of({ id: 1 }), structuralSharing: true }),
+      )
+
+      flushMicrotasks()
+
+      // Structural sharing kept the stored object, so that's what it resolves
+      // with, not the equal one queryFn emitted.
+      expect(result.value).toBe(stored)
+    }))
+
+    it('gives a caller that joins the fetch in flight the same promise', () => {
+      const { query } = createQuery<number>()
+      const first = query.fetch({ queryFn: () => new Subject<number>() })
+
+      expect(query.fetch({ queryFn: () => of(2) })).toBe(first)
+    })
+
+    it('gives the next fetch a new promise once one has settled', () => {
+      const { query } = createQuery<number>()
+      const first = query.fetch({ queryFn: () => of(1) })
+
+      expect(query.fetch({ queryFn: () => of(2) })).not.toBe(first)
+    })
+
+    it('rejects with the error once the retries are spent', fakeAsync(() => {
+      const { query } = createQuery<number>()
+      const error = new Error('down')
+      const result = settled(
+        query.fetch({
+          queryFn: () => throwError(() => error),
+          retry: 1,
+          retryDelay: 10,
+        }),
+      )
+
+      tick(9)
+      expect(result).toEqual({})
+
+      tick(1)
+      expect(result.error).toBe(error)
+    }))
+
+    it('settles with the fetch that replaces it, however often it is replaced', fakeAsync(() => {
+      const { query } = createQuery<number>()
+      const responses = [0, 1, 2].map(() => new Subject<number>())
+      let sent = 0
+      const queryFn = () => responses[sent++]
+      const first = settled(query.fetch({ queryFn }))
+      const second = settled(query.fetch({ queryFn }, { cancelRefetch: true }))
+      const third = settled(query.fetch({ queryFn }, { cancelRefetch: true }))
+
+      // A replaced request that answers anyway changes nothing.
+      responses[0].next(1)
+      flushMicrotasks()
+      expect(first).toEqual({})
+
+      responses[2].next(3)
+      flushMicrotasks()
+      expect([first.value, second.value, third.value]).toEqual([3, 3, 3])
+    }))
+
+    it('rejects with the error of the fetch that replaces it', fakeAsync(() => {
+      const { query } = createQuery<number>()
+      const error = new Error('down')
+      const replaced = settled(
+        query.fetch({ queryFn: () => new Subject<number>() }),
+      )
+
+      query.fetch(
+        { queryFn: () => throwError(() => error) },
+        { cancelRefetch: true },
+      )
+      flushMicrotasks()
+
+      expect(replaced.error).toBe(error)
+    }))
+
+    it('resolves with the data the query holds when the fetch is cancelled', fakeAsync(() => {
+      const { query } = createQuery<number>()
+
+      query.setData(1)
+
+      const result = settled(
+        query.fetch({ queryFn: () => new Subject<number>() }),
+      )
+
+      query.cancel()
+      flushMicrotasks()
+
+      expect(result.value).toBe(1)
+    }))
+
+    it('rejects with a CancelledError when the fetch is cancelled before there is data', fakeAsync(() => {
+      const { query } = createQuery<number>()
+      const result = settled(
+        query.fetch({ queryFn: () => new Subject<number>() }),
+      )
+
+      query.cancel()
+      flushMicrotasks()
+
+      expect(result.error).toBeInstanceOf(CancelledError)
+    }))
+
+    it('rejects with a CancelledError when the query is destroyed, even with data', fakeAsync(() => {
+      const { query } = createQuery<number>()
+
+      query.setData(1)
+
+      const result = settled(
+        query.fetch({ queryFn: () => new Subject<number>() }),
+      )
+
+      query.destroy()
+      flushMicrotasks()
+
+      expect(result.error).toBeInstanceOf(CancelledError)
+    }))
+
+    it("doesn't surface a failure nobody waits for as an unhandled rejection", fakeAsync(() => {
+      const { query } = createQuery<number>()
+
+      query.fetch({ queryFn: () => throwError(() => new Error('down')) })
+      query.fetch({ queryFn: () => new Subject<number>() })
+      query.cancel()
+
+      // fakeAsync rethrows an unhandled rejection when microtasks run.
+      expect(() => flushMicrotasks()).not.toThrow()
+      expect(query.state().status).toBe('error')
     }))
   })
 

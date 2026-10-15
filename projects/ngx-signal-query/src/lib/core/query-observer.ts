@@ -233,29 +233,20 @@ export function createQueryObserver<TData, TError = Error>(
   // Invalidation isn't a trigger: invalidateQueries() refetches each active
   // query once itself. A query it skipped (unobserved, or its observers
   // disabled) stays invalidated, so it fetches here once observed or enabled:
-  // shouldFetch sees the flag.
+  // shouldFetch sees the flag. The key and queryFn come from one read of the
+  // options, so the fetch can't go to another key's query, whatever order the
+  // effects run in.
   track(() => {
     query()
 
     if (!enabled()) return
 
-    const {
-      queryKey,
-      queryFn,
-      staleTime,
-      retry,
-      retryDelay,
-      structuralSharing,
-    } = untracked(defaultedOptions)
+    untracked(() => {
+      const options = defaultedOptions()
+      const q = resolve(options.queryKey)
 
-    untracked(() =>
-      client.fetchQuery(queryKey, queryFn, {
-        staleTime,
-        retry,
-        retryDelay,
-        structuralSharing,
-      }),
-    )
+      if (q.shouldFetch(options.staleTime)) q.fetch(options)
+    })
   })
 
   // The polling interval this observer asks for, or false for none. Memoized,
@@ -362,20 +353,16 @@ export function createQueryObserver<TData, TError = Error>(
       failureReason: computed(
         () => query().state().failureReason as TError | null,
       ),
-      // Force a fresh fetch regardless of staleTime, cancelling any in-flight
-      // request (explicit user intent — get current data).
-      refetch: () => {
-        const { queryKey, queryFn, retry, retryDelay, structuralSharing } =
-          untracked(defaultedOptions)
+      // Force a fresh fetch regardless of staleTime and enabled, cancelling
+      // any in-flight request (explicit user intent — get current data).
+      // Untracked, as the client's methods are: called from an effect, it
+      // mustn't make the effect depend on the options or on the query.
+      refetch: () =>
+        untracked(() => {
+          const options = defaultedOptions()
 
-        client.fetchQuery(queryKey, queryFn, {
-          staleTime: 0,
-          retry,
-          retryDelay,
-          structuralSharing,
-          cancelRefetch: true,
-        })
-      },
+          resolve(options.queryKey).fetch(options, { cancelRefetch: true })
+        }),
     },
     destroy: () => refs.forEach((ref) => ref.destroy()),
   }
