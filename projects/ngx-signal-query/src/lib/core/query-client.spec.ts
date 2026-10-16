@@ -8,6 +8,7 @@ import {
 } from '@angular/core/testing'
 import { of, Subject, throwError } from 'rxjs'
 
+import { settled } from '../../spec-helpers/promises'
 import { withDefaultOptions } from '../features/with-default-options'
 import { CancelledError } from './cancelled-error'
 import { injectMutation } from './inject-mutation'
@@ -44,23 +45,6 @@ function inEffect(body: () => void): {
   fixture.detectChanges()
 
   return { fixture, runs: () => runs }
-}
-
-// What a promise has settled with so far, empty while it's pending. Read it
-// after the microtasks have run.
-function settled<T>(promise: Promise<T>): { value?: T; error?: unknown } {
-  const result: { value?: T; error?: unknown } = {}
-
-  promise.then(
-    (value) => {
-      result.value = value
-    },
-    (error: unknown) => {
-      result.error = error
-    },
-  )
-
-  return result
 }
 
 describe('QueryClient', () => {

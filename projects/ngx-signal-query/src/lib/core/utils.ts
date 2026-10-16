@@ -224,7 +224,7 @@ export interface Deferred<T> {
 }
 
 /** @internal */
-export function deferred<T>(): Deferred<T> {
+export function deferred<T = void>(): Deferred<T> {
   let resolve!: Deferred<T>['resolve']
   let reject!: Deferred<T>['reject']
   const promise = new Promise<T>((res, rej) => {

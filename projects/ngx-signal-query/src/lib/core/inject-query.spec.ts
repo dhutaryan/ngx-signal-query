@@ -23,6 +23,14 @@ import {
 } from '@angular/core/testing'
 import { type Observable, map, of, Subject, throwError, timer } from 'rxjs'
 
+import { mountHost } from '../../spec-helpers/host'
+import {
+  goOfflineAndBack,
+  leaveAndComeBack,
+  restoreVisibility,
+  setVisibility,
+} from '../../spec-helpers/page-events'
+import { settled } from '../../spec-helpers/promises'
 import { withDefaultOptions } from '../features/with-default-options'
 import { injectQuery } from './inject-query'
 import { keepPreviousData } from './keep-previous-data'
@@ -30,13 +38,9 @@ import { provideQueryClient } from './provider'
 import { QueryClient } from './query-client'
 import type { DefaultQueryOptions, QueryOptions, QueryResult } from './types'
 
-// Mounts injectQuery inside a host component so its effects are tied to a real
-// view and flush on detectChanges(). The host is rendered from a parent
-// template, as in an app, and gets `value` through an `input.required`
-// binding: options may read it, although it has no value yet while the host
-// is being constructed. Returns the result, the parent's `value` signal (set
-// it and detectChanges() to push a new input) and the fixture (destroy it to
-// unmount).
+// Mounts injectQuery in a host component, as mountHost() mounts anything:
+// its options may read the host's input.required `value`. Returns the result,
+// the parent's `value` signal and the fixture.
 function mount<TData, TError = Error, TValue = number>(
   optionsFn: (value: Signal<TValue>) => QueryOptions<TData, TError>,
   value?: TValue,
@@ -45,26 +49,16 @@ function mount<TData, TError = Error, TValue = number>(
   result: QueryResult<TData, TError>
   value: WritableSignal<TValue>
 } {
-  @Component({ selector: 'app-host', template: '' })
-  class Host {
-    readonly value = input.required<TValue>()
-    readonly result = injectQuery<TData, TError>(() => optionsFn(this.value))
-  }
-
-  @Component({ imports: [Host], template: '<app-host [value]="value()" />' })
-  class Parent {
-    readonly value = signal(value as TValue)
-    readonly host = viewChild.required(Host)
-  }
-
-  const fixture = TestBed.createComponent(Parent)
-
-  fixture.detectChanges()
+  const mounted = mountHost(
+    (hostValue: Signal<TValue>) =>
+      injectQuery<TData, TError>(() => optionsFn(hostValue)),
+    value,
+  )
 
   return {
-    fixture,
-    result: fixture.componentInstance.host().result,
-    value: fixture.componentInstance.value,
+    fixture: mounted.fixture,
+    result: mounted.created,
+    value: mounted.value,
   }
 }
 
@@ -177,52 +171,6 @@ function elapse(
     tick(10)
     fixtures.forEach((fixture) => fixture.detectChanges())
   }
-}
-
-// The page turns `state`, as when the user switches to another tab or back:
-// document.visibilityState changes and visibilitychange fires.
-// restoreVisibility() brings the real value back.
-function setVisibility(state: DocumentVisibilityState): void {
-  Object.defineProperty(document, 'visibilityState', {
-    configurable: true,
-    get: () => state,
-  })
-  document.dispatchEvent(new Event('visibilitychange'))
-}
-
-function restoreVisibility(): void {
-  Reflect.deleteProperty(document, 'visibilityState')
-}
-
-// The user leaves the page and comes back to it, as when they switch to
-// another tab and back.
-function leaveAndComeBack(): void {
-  setVisibility('hidden')
-  setVisibility('visible')
-  restoreVisibility()
-}
-
-// The network goes away and comes back, as the browser reports it.
-function goOfflineAndBack(): void {
-  window.dispatchEvent(new Event('offline'))
-  window.dispatchEvent(new Event('online'))
-}
-
-// What a promise has settled with so far, empty while it's pending. Read it
-// after the microtasks have run.
-function settled<T>(promise: Promise<T>): { value?: T; error?: unknown } {
-  const result: { value?: T; error?: unknown } = {}
-
-  promise.then(
-    (value) => {
-      result.value = value
-    },
-    (error: unknown) => {
-      result.error = error
-    },
-  )
-
-  return result
 }
 
 // A row of a cached list, for the specs that seed a detail query from it.

@@ -17,6 +17,7 @@ import {
 } from '@angular/core/testing'
 import { EMPTY, of, Subject, throwError } from 'rxjs'
 
+import { settled } from '../../spec-helpers/promises'
 import { withDefaultOptions } from '../features/with-default-options'
 import { injectMutation } from './inject-mutation'
 import { injectQuery } from './inject-query'
@@ -25,40 +26,7 @@ import { mutationOptions } from './mutation-options'
 import { provideQueryClient } from './provider'
 import { QueryClient } from './query-client'
 import type { DefaultOptions } from './types'
-
-// A promise the spec settles by hand. A hook that returns it keeps running
-// until the spec resolves or rejects it.
-function deferred<T = void>(): {
-  promise: Promise<T>
-  resolve: (value: T) => void
-  reject: (error: unknown) => void
-} {
-  let resolve!: (value: T) => void
-  let reject!: (error: unknown) => void
-  const promise = new Promise<T>((res, rej) => {
-    resolve = res
-    reject = rej
-  })
-
-  return { promise, resolve, reject }
-}
-
-// What a promise has settled with so far, empty while it's pending. Read it
-// after the microtasks have run.
-function settled<T>(promise: Promise<T>): { value?: T; error?: unknown } {
-  const result: { value?: T; error?: unknown } = {}
-
-  promise.then(
-    (value) => {
-      result.value = value
-    },
-    (error: unknown) => {
-      result.error = error
-    },
-  )
-
-  return result
-}
+import { deferred } from './utils'
 
 describe('injectMutation', () => {
   let client: QueryClient

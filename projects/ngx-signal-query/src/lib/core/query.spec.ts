@@ -1,6 +1,7 @@
 import { fakeAsync, flushMicrotasks, tick } from '@angular/core/testing'
 import { type Observable, of, Subject, throwError } from 'rxjs'
 
+import { settled } from '../../spec-helpers/promises'
 import { CancelledError } from './cancelled-error'
 import { Query, type QuerySubscriber } from './query'
 import type { QueryCache } from './query-cache'
@@ -48,23 +49,6 @@ function activeObserver(
     }),
     structuralSharing: () => true,
   }
-}
-
-// What a promise has settled with so far, empty while it's pending. Read it
-// after the microtasks have run.
-function settled<T>(promise: Promise<T>): { value?: T; error?: unknown } {
-  const result: { value?: T; error?: unknown } = {}
-
-  promise.then(
-    (value) => {
-      result.value = value
-    },
-    (error: unknown) => {
-      result.error = error
-    },
-  )
-
-  return result
 }
 
 describe('Query', () => {

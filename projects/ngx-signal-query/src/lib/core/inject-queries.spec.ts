@@ -7,7 +7,6 @@ import {
   type WritableSignal,
   input,
   signal,
-  viewChild,
 } from '@angular/core'
 import {
   type ComponentFixture,
@@ -18,19 +17,17 @@ import {
 } from '@angular/core/testing'
 import { of, Subject, throwError } from 'rxjs'
 
+import { mountHost } from '../../spec-helpers/host'
+import { leaveAndComeBack } from '../../spec-helpers/page-events'
 import { injectQueries, type InjectQueriesOptions } from './inject-queries'
 import { injectQuery } from './inject-query'
 import { provideQueryClient } from './provider'
 import { QueryClient } from './query-client'
 import type { QueryResult } from './types'
 
-// Mounts injectQueries inside a host component so its effects are tied to a
-// real view and flush on detectChanges(). The host is rendered from a parent
-// template, as in an app, and gets `value` through an `input.required`
-// binding: options may read it, although it has no value yet while the host
-// is being constructed. Returns the results signal, the parent's `value`
-// signal (set it and detectChanges() to push a new input) and the fixture
-// (destroy it to unmount).
+// Mounts injectQueries in a host component, as mountHost() mounts anything:
+// its options may read the host's input.required `value`. Returns the results
+// signal, the parent's `value` signal and the fixture.
 function mount<TData, TError = Error, TValue = number[]>(
   optionsFn: (value: Signal<TValue>) => InjectQueriesOptions<TData, TError>,
   value?: TValue,
@@ -39,43 +36,17 @@ function mount<TData, TError = Error, TValue = number[]>(
   results: Signal<Array<QueryResult<TData, TError>>>
   value: WritableSignal<TValue>
 } {
-  @Component({ selector: 'app-host', template: '' })
-  class Host {
-    readonly value = input.required<TValue>()
-    readonly results = injectQueries<TData, TError>(() => optionsFn(this.value))
-  }
-
-  @Component({ imports: [Host], template: '<app-host [value]="value()" />' })
-  class Parent {
-    readonly value = signal(value as TValue)
-    readonly host = viewChild.required(Host)
-  }
-
-  const fixture = TestBed.createComponent(Parent)
-
-  fixture.detectChanges()
+  const mounted = mountHost(
+    (hostValue: Signal<TValue>) =>
+      injectQueries<TData, TError>(() => optionsFn(hostValue)),
+    value,
+  )
 
   return {
-    fixture,
-    results: fixture.componentInstance.host().results,
-    value: fixture.componentInstance.value,
+    fixture: mounted.fixture,
+    results: mounted.created,
+    value: mounted.value,
   }
-}
-
-// The user leaves the page and comes back to it, as when they switch to
-// another tab and back: document.visibilityState turns 'hidden', then
-// 'visible', and visibilitychange fires each time. The real value comes back
-// afterwards.
-function leaveAndComeBack(): void {
-  for (const state of ['hidden', 'visible'] as const) {
-    Object.defineProperty(document, 'visibilityState', {
-      configurable: true,
-      get: () => state,
-    })
-    document.dispatchEvent(new Event('visibilitychange'))
-  }
-
-  Reflect.deleteProperty(document, 'visibilityState')
 }
 
 describe('injectQueries', () => {

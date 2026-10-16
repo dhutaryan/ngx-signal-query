@@ -7,6 +7,10 @@ import {
 } from '@angular/core'
 import { TestBed } from '@angular/core/testing'
 
+import {
+  restoreVisibility,
+  setVisibility,
+} from '../../spec-helpers/page-events'
 import { onReconnect, onWindowFocus } from './browser-events'
 
 // The injectors startIn() created and nothing has destroyed yet. Destroying
@@ -35,21 +39,6 @@ function startIn(start: () => void, providers: Provider[] = []): () => void {
 function stopAll(): void {
   running.forEach((injector) => injector.destroy())
   running.clear()
-}
-
-// The page turns `state`, as when the user switches to another tab or back:
-// document.visibilityState changes and visibilitychange fires.
-// restoreVisibility() brings the real value back.
-function setVisibility(state: DocumentVisibilityState): void {
-  Object.defineProperty(document, 'visibilityState', {
-    configurable: true,
-    get: () => state,
-  })
-  document.dispatchEvent(new Event('visibilitychange'))
-}
-
-function restoreVisibility(): void {
-  Reflect.deleteProperty(document, 'visibilityState')
 }
 
 const onTheServer = { provide: PLATFORM_ID, useValue: 'server' }
