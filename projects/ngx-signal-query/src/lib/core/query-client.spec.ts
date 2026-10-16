@@ -476,6 +476,60 @@ describe('QueryClient', () => {
 
       expect(client.isFetching()).toBe(0)
     })
+
+    it('puts back the failure count and reason the fetch it stops had changed', fakeAsync(() => {
+      const error = new Error('down')
+
+      client.setQueryData(['todos'], 'a')
+      client.fetchQuery(['todos'], () => throwError(() => error), {
+        retry: 1,
+        retryDelay: 100,
+      })
+
+      const query = client.getQueryCache().get(['todos'])!
+
+      // The first attempt failed, and the retry is waiting.
+      expect(query.state().failureCount).toBe(1)
+
+      client.cancelQueries({ queryKey: ['todos'] })
+
+      expect(query.state()).toEqual(
+        jasmine.objectContaining({
+          status: 'success',
+          data: 'a',
+          failureCount: 0,
+          failureReason: null,
+          isFetching: false,
+        }),
+      )
+    }))
+
+    it('keeps the stale mark an invalidation set during the fetch it stops', fakeAsync(() => {
+      const queryFn = jasmine.createSpy('queryFn').and.returnValue(of('fresh'))
+
+      // A prefetch of a key nobody shows is in flight when a change marks the
+      // key stale.
+      client.setQueryData(['todos'], 'old')
+      client.fetchQuery(['todos'], () => new Subject<string>())
+      client.invalidateQueries({ queryKey: ['todos'] })
+      client.cancelQueries({ queryKey: ['todos'] })
+      flushMicrotasks()
+
+      @Component({ template: '' })
+      class TodoList {
+        readonly todos = injectQuery(() => ({
+          queryKey: ['todos'],
+          queryFn,
+          staleTime: Infinity,
+        }))
+      }
+
+      TestBed.createComponent(TodoList).detectChanges()
+
+      // Still stale, so even a component that keeps data fresh for long
+      // fetches it.
+      expect(queryFn).toHaveBeenCalledTimes(1)
+    }))
   })
 
   describe('removeQueries', () => {

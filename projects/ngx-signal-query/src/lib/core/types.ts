@@ -7,7 +7,10 @@ import type { Observable } from 'rxjs'
  */
 export type QueryKey = readonly unknown[]
 
-/** Lifecycle status of a query: no data yet, resolved, or failed. */
+/**
+ * Lifecycle status of a query: no data yet (the first load, or a new attempt
+ * after a failure), resolved, or failed.
+ */
 export type QueryStatus = 'pending' | 'success' | 'error'
 
 /** Full state snapshot of a query (the reactive source behind {@link QueryResult}). */
@@ -16,7 +19,11 @@ export interface QueryState<TData, TError = Error> {
   data: TData | undefined
   /** Current {@link QueryStatus}. */
   status: QueryStatus
-  /** Last error, or `null` if the latest attempt did not fail. */
+  /**
+   * The error the last fetch failed with, or `null`. A query with no data
+   * clears it when it fetches again; one with data keeps it until the next
+   * response.
+   */
   error: TError | null
   /** Whether a fetch is currently in flight. */
   isFetching: boolean
@@ -192,11 +199,18 @@ export type QueryResult<TData, TError = Error> = {
   data: Signal<TData | undefined>
   /** Current {@link QueryStatus}. */
   status: Signal<QueryStatus>
-  /** Last error, or `null`. */
+  /**
+   * The error the last fetch failed with, or `null`. It's cleared while a
+   * query with no data is tried again, and kept while one with data
+   * refetches.
+   */
   error: Signal<TError | null>
   /** Whether a fetch is in flight (including background refetches). */
   isFetching: Signal<boolean>
-  /** Whether the first fetch is in flight with no data yet (`isFetching && pending`). */
+  /**
+   * Whether a fetch is in flight with no data to show: the first one, or a
+   * new attempt after a failure (`isFetching && pending`).
+   */
   isLoading: Signal<boolean>
   /** Whether status is `'pending'` (no data resolved yet). */
   isPending: Signal<boolean>

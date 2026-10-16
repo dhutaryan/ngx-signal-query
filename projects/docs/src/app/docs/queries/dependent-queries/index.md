@@ -69,8 +69,8 @@ If you render a spinner on `isPending()`, it will spin **forever** while the
 query is disabled — nothing is happening, and nothing will, until the
 dependency arrives.
 
-Use **`isLoading()`** for "a request is genuinely in flight for the first
-time":
+Use **`isLoading()`** for "a request is genuinely in flight, and there's no
+data yet":
 
 {% raw %}
 

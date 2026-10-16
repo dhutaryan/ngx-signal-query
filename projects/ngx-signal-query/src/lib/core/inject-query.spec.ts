@@ -106,12 +106,14 @@ function mountMany<TData, TError = Error, TValue = number>(
 
 // A queryFn whose requests stay in flight until answered by hand. Every call
 // is a new request; one the query cancels is unsubscribed, so it no longer
-// counts as in flight. resolve() answers the latest request.
+// counts as in flight. resolve() answers the latest request, and fail()
+// fails it.
 function requests<T>(): {
   queryFn: jasmine.Spy<() => Observable<T>>
   inFlight: () => number
   cancelled: () => number
   resolve: (value: T) => void
+  fail: (error: Error) => void
 } {
   const subjects: Array<Subject<T>> = []
   const answered = new Set<Subject<T>>()
@@ -137,6 +139,12 @@ function requests<T>(): {
       answered.add(subject)
       subject.next(value)
       subject.complete()
+    },
+    fail: (error) => {
+      const subject = subjects.at(-1)!
+
+      answered.add(subject)
+      subject.error(error)
     },
   }
 }
@@ -1068,6 +1076,240 @@ describe('injectQuery', () => {
       expect(refetched).toEqual({ value: undefined })
       expect(result.error()).toBe(error)
     }))
+  })
+
+  // A query that failed before it had any data reads like a first load while
+  // it's tried again: 'pending', loading, no error. One that has data keeps
+  // it, and its error, while it refetches.
+  describe('after a failed fetch', () => {
+    it("goes back to 'pending' with no error while refetch() tries again", () => {
+      const { queryFn, fail } = requests<string>()
+      const { result } = mount(() => ({
+        queryKey: ['todos'],
+        queryFn,
+        retry: false,
+      }))
+
+      fail(new Error('first'))
+      result.refetch()
+
+      expect(result.status()).toBe('pending')
+      expect(result.isLoading()).toBe(true)
+      expect(result.isError()).toBe(false)
+      expect(result.error()).toBeNull()
+      expect(result.isFetching()).toBe(true)
+
+      const second = new Error('second')
+
+      fail(second)
+
+      expect(result.status()).toBe('error')
+      expect(result.error()).toBe(second)
+    })
+
+    it('reads as loading in every component while invalidateQueries() refetches it', () => {
+      const { queryFn, fail, resolve } = requests<string>()
+      const { results } = mountMany(
+        2,
+        (id) => ({ queryKey: ['todo', id()], queryFn, retry: false }),
+        1,
+      )
+
+      fail(new Error('down'))
+      client.invalidateQueries({ queryKey: ['todo'] })
+
+      // One request for both components.
+      expect(queryFn).toHaveBeenCalledTimes(2)
+
+      for (const result of results) {
+        expect(result.isLoading()).toBe(true)
+        expect(result.error()).toBeNull()
+      }
+
+      resolve('a')
+
+      for (const result of results) {
+        expect(result.data()).toBe('a')
+      }
+    })
+
+    it('renders as loading, not with the old error, in a component that starts showing it', () => {
+      const { queryFn, fail } = requests<string>()
+
+      @Component({
+        selector: 'app-todo',
+        template: `
+          @if (todo.isLoading()) {
+            Loading…
+          } @else if (todo.isError()) {
+            Failed: {{ todo.error()?.message }}
+          } @else {
+            {{ todo.data() }}
+          }
+        `,
+      })
+      class TodoView {
+        readonly id = input.required<number>()
+        readonly todo = injectQuery(() => ({
+          queryKey: ['todo', this.id()],
+          queryFn,
+          retry: false,
+        }))
+      }
+
+      @Component({
+        imports: [TodoView],
+        template: '@if (shown()) { <app-todo [id]="1" /> }',
+      })
+      class Page {
+        readonly shown = signal(true)
+      }
+
+      const fixture = TestBed.createComponent(Page)
+      const text = (): string => fixture.nativeElement.textContent.trim()
+
+      fixture.detectChanges()
+      fail(new Error('down'))
+      fixture.detectChanges()
+
+      expect(text()).toBe('Failed: down')
+
+      // The user leaves the page and comes back to it.
+      fixture.componentInstance.shown.set(false)
+      fixture.detectChanges()
+      fixture.componentInstance.shown.set(true)
+      fixture.detectChanges()
+
+      // The first render already shows the new attempt.
+      expect(queryFn).toHaveBeenCalledTimes(2)
+      expect(text()).toBe('Loading…')
+    })
+
+    it('reads as loading while coming back to the tab refetches it', () => {
+      const { queryFn, fail } = requests<string>()
+      const { fixture, result } = mount(() => ({
+        queryKey: ['todos'],
+        queryFn,
+        retry: false,
+      }))
+
+      fail(new Error('down'))
+      leaveAndComeBack()
+      fixture.detectChanges()
+
+      expect(queryFn).toHaveBeenCalledTimes(2)
+      expect(result.isLoading()).toBe(true)
+      expect(result.error()).toBeNull()
+    })
+
+    it('shows placeholderData while it is tried again', () => {
+      const { queryFn, fail } = requests<string>()
+      const { result } = mount(() => ({
+        queryKey: ['todos'],
+        queryFn,
+        retry: false,
+        placeholderData: 'placeholder',
+      }))
+
+      fail(new Error('down'))
+      result.refetch()
+
+      expect(result.data()).toBe('placeholder')
+      expect(result.isPlaceholderData()).toBe(true)
+      expect(result.status()).toBe('success')
+    })
+
+    it("keeps its data, 'error' and the error while it refetches, if it has data", () => {
+      const { queryFn, resolve, fail } = requests<string>()
+      const { result } = mount(() => ({
+        queryKey: ['todos'],
+        queryFn,
+        retry: false,
+      }))
+      const error = new Error('down')
+
+      resolve('a')
+      result.refetch()
+      fail(error)
+      result.refetch()
+
+      expect(result.status()).toBe('error')
+      expect(result.data()).toBe('a')
+      expect(result.error()).toBe(error)
+      expect(result.isLoading()).toBe(false)
+      expect(result.isFetching()).toBe(true)
+
+      resolve('b')
+
+      expect(result.status()).toBe('success')
+      expect(result.data()).toBe('b')
+      expect(result.error()).toBeNull()
+    })
+
+    // A new attempt stopped with nothing in its place leaves the query as it
+    // was before the attempt, apart from what was written into it meanwhile.
+    describe('when the new attempt is stopped', () => {
+      it('shows the error again, with its failure count, after cancelQueries()', fakeAsync(() => {
+        const { queryFn, fail } = requests<string>()
+        const { result } = mount(() => ({
+          queryKey: ['todos'],
+          queryFn,
+          retry: false,
+        }))
+        const error = new Error('down')
+
+        fail(error)
+
+        const refetched = settled(result.refetch())
+
+        client.cancelQueries({ queryKey: ['todos'] })
+        flushMicrotasks()
+
+        expect(result.status()).toBe('error')
+        expect(result.error()).toBe(error)
+        expect(result.failureCount()).toBe(1)
+        expect(result.failureReason()).toBe(error)
+        expect(result.isFetching()).toBe(false)
+        expect(refetched.value).toEqual({ data: undefined, error })
+      }))
+
+      it('keeps what setQueryData() wrote meanwhile after cancelQueries()', () => {
+        const { queryFn, fail } = requests<string>()
+        const { result } = mount(() => ({
+          queryKey: ['todos'],
+          queryFn,
+          retry: false,
+        }))
+
+        fail(new Error('down'))
+        result.refetch()
+        client.setQueryData(['todos'], 'written')
+        client.cancelQueries({ queryKey: ['todos'] })
+
+        expect(result.status()).toBe('success')
+        expect(result.data()).toBe('written')
+        expect(result.error()).toBeNull()
+      })
+
+      it('keeps showing the error it had once removeQueries() drops it', () => {
+        const { queryFn, fail } = requests<string>()
+        const { result } = mount(() => ({
+          queryKey: ['todos'],
+          queryFn,
+          retry: false,
+        }))
+        const error = new Error('down')
+
+        fail(error)
+        result.refetch()
+        client.removeQueries({ queryKey: ['todos'] })
+
+        expect(result.status()).toBe('error')
+        expect(result.error()).toBe(error)
+        expect(result.failureCount()).toBe(1)
+        expect(result.isFetching()).toBe(false)
+      })
+    })
   })
 
   describe('options re-evaluation', () => {

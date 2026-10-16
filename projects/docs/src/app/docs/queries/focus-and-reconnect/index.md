@@ -29,7 +29,8 @@ injectQuery(() => ({
 ```
 
 A query whose last fetch failed counts as stale, whatever its `staleTime`, so
-coming back tries it again.
+coming back tries it again. If it has no data yet, it shows its loading state
+while it does, not the old error.
 
 ## The network coming back
 

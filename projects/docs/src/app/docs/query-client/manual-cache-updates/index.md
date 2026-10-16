@@ -104,7 +104,8 @@ It respects `staleTime`: if the key already holds fresh-enough data, it does
 nothing, so prefetching on every hover won't spam the network. It returns a
 promise of the data, which nothing has to wait for: left alone, the call fills
 the cache in the background, and a prefetch that fails only leaves the query in
-`'error'`, for the component to fetch again when it mounts.
+`'error'`, for the component to fetch again when it mounts, showing its loading
+state rather than the prefetch's error.
 
 It's safe to call from an effect as well, to prefetch the next page whenever the
 page changes, say: see

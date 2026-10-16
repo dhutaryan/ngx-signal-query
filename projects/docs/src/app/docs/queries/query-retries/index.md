@@ -114,6 +114,12 @@ signals let you show what's going on:
 Once retries are exhausted the query flips to `'error'`, and `error()` holds the
 final failure.
 
+Tried again after that, with a Retry button calling `refetch()` say, a query
+that has no data yet is back in `'pending'`, with `error()` at `null` and
+`failureCount()` at `0`: this template shows the new attempt from the start. A
+query with data keeps showing it while it refetches; see
+[Trying again after an error](/queries/overview#trying-again-after-an-error).
+
 ## Setting it once
 
 Rather than repeating a retry policy on every query, set it globally when you

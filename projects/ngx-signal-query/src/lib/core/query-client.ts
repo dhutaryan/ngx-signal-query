@@ -323,7 +323,10 @@ export class QueryClient {
   }
 
   /**
-   * Cancels any in-flight fetches for matching queries.
+   * Cancels any in-flight fetches for matching queries. Each query goes back
+   * to how it was before its fetch: one that failed and was being tried
+   * again shows its error again. Data written meanwhile stays, and so does a
+   * stale mark from `invalidateQueries()`.
    *
    * @param filters - Which queries to cancel; omit to cancel all.
    */
