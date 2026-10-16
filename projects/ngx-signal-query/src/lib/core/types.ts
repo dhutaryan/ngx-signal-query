@@ -38,6 +38,17 @@ export type QueryFilters = {
   exact?: boolean
 }
 
+/** Selects which queries `invalidateQueries` marks stale, and what it refetches. */
+export type InvalidateQueryFilters = QueryFilters & {
+  /**
+   * Which of the marked queries to refetch now: `'active'`, the default,
+   * refetches those a component shows; `'none'` refetches none, so each one
+   * refetches when stale data next would, e.g. as a component starts showing
+   * it. Queries nobody shows are only marked either way.
+   */
+  refetchType?: 'active' | 'none'
+}
+
 /** A new value, or a function deriving it from the previous one. */
 export type Updater<TInput, TOutput> = TOutput | ((input: TInput) => TOutput)
 
@@ -199,8 +210,13 @@ export type QueryResult<TData, TError = Error> = {
   failureCount: Signal<number>
   /** Error of the most recent failed attempt, or `null`. */
   failureReason: Signal<TError | null>
-  /** Forces a fresh fetch, cancelling any in-flight request. */
-  refetch: () => void
+  /**
+   * Forces a fresh fetch, cancelling any in-flight request. Resolves once the
+   * fetch has settled, or the fetch that replaced it has, with `data` and
+   * `error` as the signals above hold them then. It never rejects: a failure
+   * shows in `error`.
+   */
+  refetch: () => Promise<{ data: TData | undefined; error: TError | null }>
 }
 
 /** Default query options applied to every query unless overridden per-query. */

@@ -10,9 +10,10 @@ import {
   type Subscription,
 } from 'rxjs'
 
+import { CancelledError } from './cancelled-error'
 import type { QueryCache } from './query-cache'
 import { defaultRetryDelay, resolveRetryDelay, shouldRetry } from './retryer'
-import { replaceData } from './utils'
+import { type Deferred, deferred, replaceData } from './utils'
 import type {
   DefaultedQueryOptions,
   QueryKey,
@@ -22,41 +23,6 @@ import type {
 } from './types'
 
 const DEFAULT_GC_TIME = 5 * 60 * 1000
-
-/**
- * What the promise of a query's fetch rejects with when the fetch stops with
- * no data to give: cancelled before the query had any, or thrown away with
- * the query.
- *
- * @internal
- */
-export class CancelledError extends Error {
-  constructor() {
-    super('The query fetch was cancelled')
-    this.name = 'CancelledError'
-  }
-}
-
-// A promise with the functions that settle it. TODO: use
-// Promise.withResolvers() instead once every browser the supported Angular
-// versions target has it: Safari 17.4, Chrome 119, Firefox 121 (Angular 20
-// still targets Safari 16).
-interface Deferred<T> {
-  promise: Promise<T>
-  resolve: (value: T | PromiseLike<T>) => void
-  reject: (reason: unknown) => void
-}
-
-function deferred<T>(): Deferred<T> {
-  let resolve!: Deferred<T>['resolve']
-  let reject!: Deferred<T>['reject']
-  const promise = new Promise<T>((res, rej) => {
-    resolve = res
-    reject = rej
-  })
-
-  return { promise, resolve, reject }
-}
 
 /**
  * An observer of a query, as the query sees it: the query asks its observers
@@ -153,18 +119,18 @@ export class Query<TData, TError = Error> {
     }
   }
 
-  // How to refetch this query on its observers' behalf: the first observer
-  // that wants it fetched decides, as in TanStack; null if none does.
-  activeFetchOptions(): ReturnType<
-    QuerySubscriber<TData, TError>['fetchOptions']
-  > {
+  // Refetches the query if a component shows it: the first observer that
+  // wants it fetched decides how, as in TanStack. A fetch in flight is
+  // replaced, as it may predate the change the caller is after. Returns the
+  // fetch's promise, or undefined if no observer wants the query fetched.
+  refetchIfActive(): Promise<TData> | undefined {
     for (const observer of this.#observers) {
       const options = observer.fetchOptions()
 
-      if (options) return options
+      if (options) return this.fetch(options, { cancelRefetch: true })
     }
 
-    return null
+    return
   }
 
   // Refetches the query now that the user is back on the page, if one of its

@@ -101,8 +101,10 @@ protected prefetchTodo(id: number): void {
 ```
 
 It respects `staleTime`: if the key already holds fresh-enough data, it does
-nothing, so prefetching on every hover won't spam the network. It returns
-`void` — fire-and-forget, populating the cache in the background.
+nothing, so prefetching on every hover won't spam the network. It returns a
+promise of the data, which nothing has to wait for: left alone, the call fills
+the cache in the background, and a prefetch that fails only leaves the query in
+`'error'`, for the component to fetch again when it mounts.
 
 It's safe to call from an effect as well, to prefetch the next page whenever the
 page changes, say: see
@@ -110,3 +112,26 @@ page changes, say: see
 
 When the real `injectQuery` mounts, it finds the data already cached and renders
 without a loading state.
+
+### Waiting for the data
+
+Await the promise when the data is needed before going on, e.g. in a route
+resolver, so the screen opens with it:
+
+```ts
+export const todoResolver: ResolveFn<Todo> = (route) => {
+  const { queryKey, queryFn } = inject(TodoQueries).detail(
+    Number(route.paramMap.get('id')),
+  )
+
+  return injectQueryClient().fetchQuery(queryKey, queryFn)
+}
+```
+
+It resolves with the data, at once if the cached data is fresh, and rejects with
+the error if the fetch fails. Unlike a component's query, `fetchQuery` doesn't
+retry a failure unless you ask, with `retry` in the call or in
+[Default Options](/query-client/default-options): whoever waits for the data
+hears of the failure at once. If the query is removed while you wait, say on
+sign-out, it rejects with a `CancelledError`; see
+[Cancellation & Removal](/query-client/cancellation-and-removal).

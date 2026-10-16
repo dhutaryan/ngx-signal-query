@@ -1,0 +1,170 @@
+<section class="panel">
+  <h2>
+    Waiting for fresh data
+    <small>(issue #27)</small>
+  </h2>
+
+  <p class="hint">
+    <code>refetch()</code>
+    ,
+    <code>invalidateQueries()</code>
+    and
+    <code>mutateAsync()</code>
+    return promises, so code can wait for fresh data. Each button adds a todo or
+    refreshes the list below, and the timeline shows what happened after the
+    last click. The fake server sends the list in {{ listLatency }} ms and saves
+    a todo in {{ writeLatency }} ms (no network).
+  </p>
+
+  <div class="list">
+    <span class="title">List</span>
+    <span class="state">
+      @if (todos.isFetching()) {
+        refreshing…
+      } @else if (todos.error(); as error) {
+        failed: {{ error.message }}
+      }
+    </span>
+    <ul>
+      @for (todo of todos.data() ?? []; track $index) {
+        <li>{{ todo }}</li>
+      } @empty {
+        <li class="state">loading…</li>
+      }
+    </ul>
+  </div>
+
+  <div class="controls">
+    <label>
+      <input
+        type="checkbox"
+        [checked]="trace.failNextWrite()"
+        (change)="trace.failNextWrite.set(!trace.failNextWrite())"
+      />
+      next write fails
+    </label>
+    <label>
+      <input
+        type="checkbox"
+        [checked]="trace.failNextList()"
+        (change)="trace.failNextList.set(!trace.failNextList())"
+      />
+      next list load fails
+    </label>
+  </div>
+
+  <table class="actions">
+    <tbody>
+      <tr>
+        <td>
+          <button (click)="addWaiting()" [disabled]="waits.isPending()">
+            {{ labels.waits }}
+          </button>
+        </td>
+        <td>
+          <code>onSuccess: () => client.invalidateQueries(…)</code>
+        </td>
+        <td class="state">{{ waits.status() }}</td>
+      </tr>
+      <tr>
+        <td>
+          <button (click)="addNotWaiting()" [disabled]="doesntWait.isPending()">
+            {{ labels['doesnt-wait'] }}
+          </button>
+        </td>
+        <td>
+          <code>
+            onSuccess: () => &#123; client.invalidateQueries(…) &#125;
+          </code>
+        </td>
+        <td class="state">{{ doesntWait.status() }}</td>
+      </tr>
+      <tr>
+        <td>
+          <button (click)="addAwaited()" [disabled]="awaited.isPending()">
+            {{ labels['mutate-async'] }}
+          </button>
+        </td>
+        <td>
+          <code>try &#123; await save.mutateAsync(title) &#125; catch …</code>
+        </td>
+        <td class="state">{{ awaited.status() }}</td>
+      </tr>
+      <tr>
+        <td>
+          <button (click)="refresh()" [disabled]="todos.isFetching()">
+            {{ labels.refresh }}
+          </button>
+        </td>
+        <td>
+          <code>const &#123; data, error &#125; = await todos.refetch()</code>
+        </td>
+        <td></td>
+      </tr>
+    </tbody>
+  </table>
+
+  @if (trace.action(); as action) {
+    <div class="timeline">
+      <span class="title">Last: {{ labels[action] }}</span>
+      <ol>
+        @for (entry of trace.entries(); track $index) {
+          <li
+            [class.outcome]="
+              entry.kind === 'settled' || entry.kind === 'promise'
+            "
+          >
+            <span class="at">+{{ entry.at }}</span>
+            {{ entry.text }}
+          </li>
+        }
+      </ol>
+      <p
+        class="verdict"
+        [class.ok]="verdict().ok === true"
+        [class.bad]="verdict().ok === false"
+      >
+        {{ verdict().text }}
+      </p>
+    </div>
+  }
+
+  <details>
+    <summary>What to look at</summary>
+    <ul class="hint">
+      <li>
+        <strong>Add · waits for the list</strong>
+        — the button stays disabled until the new todo is in the list: the
+        mutation finishes once the refetch its
+        <code>onSuccess</code>
+        returns has landed.
+      </li>
+      <li>
+        <strong>Add · doesn't wait</strong>
+        — the same call in braces returns nothing: the button comes back as the
+        write lands, and the list catches up
+        {{ listLatency }} ms later.
+      </li>
+      <li>
+        <strong>Add · mutateAsync</strong>
+        — the code after
+        <code>await</code>
+        runs once the list is fresh. With
+        <em>next write fails</em>
+        , the failure lands in
+        <code>catch</code>
+        .
+      </li>
+      <li>
+        <strong>Refresh</strong>
+        — resumes with the list's
+        <code>data</code>
+        and
+        <code>error</code>
+        . With
+        <em>next list load fails</em>
+        , it still resolves: the old todos, and the error.
+      </li>
+    </ul>
+  </details>
+</section>

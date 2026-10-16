@@ -135,6 +135,11 @@ export class AddTodoComponent {
 }
 ```
 
+This hook starts the refetch and returns nothing, so the mutation finishes as
+the write lands. Return the promise `invalidateQueries` gives instead, and the
+mutation stays `'pending'` until the list is fresh; see
+[Invalidation from Mutations](/mutations/invalidation-from-mutations#waiting-for-the-fresh-data).
+
 The `context` returned by `onMutate` is what makes rollbacks possible — snapshot
 the old data, restore it if the request fails. That's covered in Optimistic
 Updates.
@@ -142,6 +147,29 @@ Updates.
 A hook every mutation needs, such as reporting failed writes, doesn't have to
 be repeated on each one: set it once in
 [Default Options](/query-client/default-options).
+
+## Awaiting a mutation: `mutateAsync`
+
+`mutate()` returns nothing: the outcome shows in the signals and the hooks.
+When the code right after the call needs it, closing a dialog once the save has
+gone through, say, call `mutateAsync()` instead. It runs the mutation the same
+way, and returns a promise that resolves with the data once the last hook is
+done, or rejects with the error:
+
+```ts
+protected async save(title: string): Promise<void> {
+  try {
+    await this.addTodo.mutateAsync(title)
+    this.#dialog.close()
+  } catch {
+    // addTodo.error() holds it too: the dialog stays open and shows it.
+  }
+}
+```
+
+Catch what it rejects with. As with any `async` call, a rejection nobody
+handles surfaces as an unhandled rejection. `mutate()` never throws, which is
+why it's the one to call when nothing waits for the outcome.
 
 ## Mutations don't retry
 
@@ -166,11 +194,6 @@ your app is safe to repeat.
 
 A few sharp edges, especially if you're arriving from TanStack Query.
 
-**`mutate()` returns nothing.** There's no `mutateAsync`, so you can't `await` a
-mutation or wrap it in `try`/`catch`. Reach for the hooks and the state signals
-instead — the result of the mutation is `data()` / `error()`, not a return
-value.
-
 **No per-call callbacks.** `mutate(variables)` takes only the variables;
 you can't pass `{ onSuccess }` alongside them. All side effects live in the
 options, next to `mutationFn`.
@@ -183,12 +206,13 @@ promise, not an Observable: an Observable a hook returns isn't subscribed, so
 `firstValueFrom()`.
 
 **A failing hook doesn't undo the write.** If `onSuccess` throws, the mutation
-still ends in `'success'`, because the write went through, and `onSettled`
-still runs; the same goes for `onError` and `onSettled`. The error isn't
-swallowed: it's rethrown as an unhandled rejection, like any other error your
-app doesn't catch. Only `onMutate` is different: if it fails, the request isn't
-sent and the mutation ends in `'error'`. (In TanStack Query, a failing
-`onSuccess` turns the mutation into an error.)
+still ends in `'success'`, because the write went through, `onSettled` still
+runs, and `mutateAsync()` resolves with the data; the same goes for `onError`
+and `onSettled`. The error isn't swallowed: it's rethrown as an unhandled
+rejection, like any other error your app doesn't catch. Only `onMutate` is
+different: if it fails, the request isn't sent and the mutation ends in
+`'error'`. (In TanStack Query, a failing `onSuccess` turns the mutation into an
+error.)
 
 **Calls aren't serialized.** Each `mutate()` is its own independent run, so two
 of them can be in flight at once and there's no `scope` option to queue them.

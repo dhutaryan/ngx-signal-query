@@ -19,6 +19,7 @@ import { EMPTY, of, Subject, throwError } from 'rxjs'
 
 import { withDefaultOptions } from '../features/with-default-options'
 import { injectMutation } from './inject-mutation'
+import { injectQuery } from './inject-query'
 import type { MutationOptions, MutationResult } from './mutation'
 import { mutationOptions } from './mutation-options'
 import { provideQueryClient } from './provider'
@@ -40,6 +41,23 @@ function deferred<T = void>(): {
   })
 
   return { promise, resolve, reject }
+}
+
+// What a promise has settled with so far, empty while it's pending. Read it
+// after the microtasks have run.
+function settled<T>(promise: Promise<T>): { value?: T; error?: unknown } {
+  const result: { value?: T; error?: unknown } = {}
+
+  promise.then(
+    (value) => {
+      result.value = value
+    },
+    (error: unknown) => {
+      result.error = error
+    },
+  )
+
+  return result
 }
 
 describe('injectMutation', () => {
@@ -554,6 +572,71 @@ describe('injectMutation', () => {
       expect(m.isIdle()).toBe(true)
       expect(client.getMutationCache().getAll().length).toBe(0)
     }))
+
+    // A list on screen whose requests stay in flight until the spec answers
+    // the latest one.
+    function showTodos(): { answer: (todos: string[]) => void } {
+      let response = new Subject<string[]>()
+
+      @Component({ template: '' })
+      class TodoList {
+        readonly todos = injectQuery(() => ({
+          queryKey: ['todos'],
+          queryFn: () => (response = new Subject<string[]>()),
+        }))
+      }
+
+      TestBed.createComponent(TodoList).detectChanges()
+
+      return {
+        answer: (todos) => {
+          response.next(todos)
+          response.complete()
+        },
+      }
+    }
+
+    it('stays pending until the refetch an onSuccess returns has landed', fakeAsync(() => {
+      const list = showTodos()
+
+      list.answer(['milk'])
+
+      const m = setup(() => ({
+        mutationFn: (title: string) => of(title),
+        // Returned, so the mutation waits for the list to be fresh.
+        onSuccess: () => client.invalidateQueries({ queryKey: ['todos'] }),
+      }))
+
+      m.mutate('bread')
+      flushMicrotasks()
+
+      expect(m.isPending()).toBe(true)
+
+      list.answer(['milk', 'bread'])
+      flushMicrotasks()
+
+      expect(m.isSuccess()).toBe(true)
+    }))
+
+    it("doesn't wait for a refetch an onSuccess only starts", fakeAsync(() => {
+      const list = showTodos()
+
+      list.answer(['milk'])
+
+      const m = setup(() => ({
+        mutationFn: (title: string) => of(title),
+        // Not returned: the refetch runs on its own.
+        onSuccess: () => {
+          client.invalidateQueries({ queryKey: ['todos'] })
+        },
+      }))
+
+      m.mutate('bread')
+      flushMicrotasks()
+
+      expect(m.isSuccess()).toBe(true)
+      expect(client.isFetching({ queryKey: ['todos'] })).toBe(1)
+    }))
   })
 
   // A hook that fails doesn't change what happened to the write, and the
@@ -871,6 +954,149 @@ describe('injectMutation', () => {
     }))
   })
 
+  // mutateAsync() runs the mutation as mutate() does and returns a promise of
+  // the run, settled as its state is.
+  describe('mutateAsync', () => {
+    it('resolves with the data once the hooks are done', fakeAsync(() => {
+      const audit = deferred()
+      const m = setup(() => ({
+        mutationFn: (title: string) => of(title),
+        onSuccess: () => audit.promise,
+      }))
+      const result = settled(m.mutateAsync('milk'))
+
+      flushMicrotasks()
+      expect(result).toEqual({})
+
+      audit.resolve()
+      flushMicrotasks()
+
+      expect(result.value).toBe('milk')
+      expect(m.isSuccess()).toBe(true)
+    }))
+
+    it('rejects with the error once onError and onSettled are done', fakeAsync(() => {
+      const error = new Error('down')
+      const cleanup = deferred()
+      const onError = jasmine.createSpy('onError')
+      const m = setup<string, Error, void>(() => ({
+        mutationFn: () => throwError(() => error),
+        onError,
+        onSettled: () => cleanup.promise,
+      }))
+      const result = settled(m.mutateAsync())
+
+      flushMicrotasks()
+      expect(onError).toHaveBeenCalled()
+      expect(result).toEqual({})
+
+      cleanup.resolve()
+      flushMicrotasks()
+
+      expect(result.error).toBe(error)
+      expect(m.isError()).toBe(true)
+    }))
+
+    it('rejects without sending the write when onMutate fails', fakeAsync(() => {
+      const error = new Error('no snapshot')
+      const mutationFn = jasmine
+        .createSpy('mutationFn')
+        .and.returnValue(of('saved'))
+      const m = setup<string, Error, void>(() => ({
+        mutationFn,
+        onMutate: () => {
+          throw error
+        },
+      }))
+      const result = settled(m.mutateAsync())
+
+      flushMicrotasks()
+
+      expect(result.error).toBe(error)
+      expect(mutationFn).not.toHaveBeenCalled()
+    }))
+
+    it('resolves when onSuccess fails, as the write went through', fakeAsync(() => {
+      const m = setup(() => ({
+        mutationFn: (title: string) => of(title),
+        onSuccess: () => {
+          throw new Error('audit down')
+        },
+      }))
+      const result = settled(m.mutateAsync('milk'))
+
+      // The hook's error is reported on its own, as with mutate().
+      expect(() => flush()).toThrowError(/audit down/)
+      expect(result.value).toBe('milk')
+    }))
+
+    it('settles each call with its own run', fakeAsync(() => {
+      const responses: Array<Subject<string>> = []
+      const m = setup(() => ({
+        mutationFn: () => {
+          const response = new Subject<string>()
+
+          responses.push(response)
+
+          return response
+        },
+      }))
+      const first = settled(m.mutateAsync())
+      const second = settled(m.mutateAsync())
+
+      // The later call lands first.
+      responses[1].next('b')
+      responses[1].complete()
+      flushMicrotasks()
+
+      expect(second.value).toBe('b')
+      expect(first).toEqual({})
+
+      responses[0].next('a')
+      responses[0].complete()
+      flushMicrotasks()
+
+      expect(first.value).toBe('a')
+      // The signals follow the latest call.
+      expect(m.data()).toBe('b')
+    }))
+
+    it('settles after the component that started it is gone', fakeAsync(() => {
+      const response = new Subject<string>()
+
+      @Component({ template: '' })
+      class Host {
+        readonly save = injectMutation(() => ({ mutationFn: () => response }))
+      }
+
+      const fixture = TestBed.createComponent(Host)
+
+      fixture.detectChanges()
+
+      const result = settled(fixture.componentInstance.save.mutateAsync())
+
+      fixture.destroy()
+      response.next('saved')
+      response.complete()
+      flushMicrotasks()
+
+      expect(result.value).toBe('saved')
+    }))
+
+    it('surfaces a failure nobody catches as an unhandled rejection, unlike mutate()', fakeAsync(() => {
+      const m = setup(() => ({
+        mutationFn: () => throwError(() => new Error('down')),
+      }))
+
+      m.mutate()
+      expect(() => flushMicrotasks()).not.toThrow()
+
+      m.mutateAsync()
+      // fakeAsync rethrows an unhandled rejection when microtasks run.
+      expect(() => flushMicrotasks()).toThrowError(/down/)
+    }))
+  })
+
   describe('options', () => {
     it('re-reads the options on every mutate()', () => {
       const first = jasmine.createSpy('first').and.returnValue(of(1))
@@ -1169,11 +1395,12 @@ describe('injectMutation', () => {
   // itself, not on what mutate() or reset() read to do their job.
   describe('called in an effect', () => {
     // Mounts a component whose effect saves `draft()` as it changes, as an
-    // auto-save does. Stopped after 20 runs, so a loop fails the expectations
-    // rather than change detection.
+    // auto-save does, with `call`. Stopped after 20 runs, so a loop fails the
+    // expectations rather than change detection.
     function autoSave<TContext>(
       draft: Signal<string>,
       optionsFn: () => MutationOptions<string, Error, string, TContext>,
+      call: 'mutate' | 'mutateAsync' = 'mutate',
     ): ComponentFixture<unknown> {
       let runs = 0
 
@@ -1187,7 +1414,7 @@ describe('injectMutation', () => {
 
             if (runs > 20) return
 
-            this.save.mutate(draft())
+            void this.save[call](draft())
           })
         }
       }
@@ -1244,6 +1471,28 @@ describe('injectMutation', () => {
 
       retries.set(1)
       locale.set('nl')
+      noteId.set(2)
+      fixture.detectChanges()
+
+      // Only a new draft is a reason to save.
+      expect(mutationFn).toHaveBeenCalledTimes(1)
+    })
+
+    it("mutateAsync() doesn't track what the options or mutationFn read", () => {
+      const draft = signal('a')
+      const retries = signal(0)
+      const noteId = signal(1)
+      const mutationFn = jasmine
+        .createSpy('mutationFn')
+        .and.callFake((title: string) => of(`${noteId()}: ${title}`))
+
+      const fixture = autoSave(
+        draft,
+        () => ({ mutationFn, retry: retries() }),
+        'mutateAsync',
+      )
+
+      retries.set(1)
       noteId.set(2)
       fixture.detectChanges()
 

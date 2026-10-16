@@ -75,10 +75,37 @@ For the everyday "this data changed, go get it again", you want
 [invalidation](/query-client/query-invalidation), not removal — removal throws
 the data away, invalidation refreshes it in place.
 
+## What waiting code gets
+
+A call that waits for a fetch you cancel or remove still settles:
+
+- After **`cancelQueries`**, a `fetchQuery()` waiting for the fetch resolves
+  with the data the cache holds or, if it holds none yet, rejects with a
+  `CancelledError`.
+- After **`removeQueries`**, it rejects with a `CancelledError`, even if the
+  query had data: the data is gone.
+- `refetch()` and `invalidateQueries()` never reject: they resolve either way.
+
+A `CancelledError` doesn't mean the request failed. Tell the two apart with
+`instanceof`:
+
+```ts
+import { CancelledError } from 'ngx-signal-query'
+
+try {
+  await this.#client.fetchQuery(queryKey, queryFn)
+} catch (error) {
+  if (error instanceof CancelledError) return // e.g. signed out meanwhile
+
+  throw error
+}
+```
+
 ## Which to reach for
 
 | | keeps data? | refetches? | use when |
 | --- | --- | --- | --- |
 | `invalidateQueries` | yes | yes (if observed) | data changed, refresh it |
+| `refetchQueries` | yes | yes (if observed) | refresh what's on screen now |
 | `cancelQueries` | yes | no | stop a fetch you don't want |
 | `removeQueries` | no | no | data should be gone (logout, cleanup) |

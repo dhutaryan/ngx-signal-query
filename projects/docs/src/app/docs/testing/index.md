@@ -169,7 +169,29 @@ it('adds a todo and invalidates the list', () => {
 ```
 
 If a hook returns a promise, the mutation settles only after it — run the test
-in `fakeAsync` and call `flushMicrotasks()` before asserting.
+in `fakeAsync` and call `flushMicrotasks()` before asserting. That includes a
+hook that returns `invalidateQueries()` itself rather than a spy: the mutation
+then waits for the refetch.
+
+To check the outcome without ticking, await `mutateAsync()`:
+
+```ts
+it('adds a todo', async () => {
+  const addTodo = TestBed.runInInjectionContext(() =>
+    injectMutation(() => ({
+      mutationFn: (title: string) => of({ id: 1, title }),
+    })),
+  )
+
+  await expectAsync(addTodo.mutateAsync('Buy milk')).toBeResolvedTo({
+    id: 1,
+    title: 'Buy milk',
+  })
+})
+```
+
+A query's `refetch()` and the client's `fetchQuery()` and `invalidateQueries()`
+return promises too, for a test to await the same way.
 
 ## Test the definitions directly
 

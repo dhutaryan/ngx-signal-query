@@ -170,6 +170,18 @@ on background refreshes:
 
 {% endraw %}
 
+It returns a promise that resolves once the fetch is back, with the `data` and
+`error` the query shows then. It never rejects: a failed fetch resolves with
+its error.
+
+```ts
+protected async refresh(): Promise<void> {
+  const { error } = await this.todos.refetch()
+
+  if (!error) this.#toast.show('Up to date')
+}
+```
+
 ## Errors and retries
 
 When `queryFn` throws (or the `Observable` errors), the query moves to
