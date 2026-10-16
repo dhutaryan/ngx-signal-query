@@ -18,6 +18,9 @@ While the request is in flight, `data()` returns the placeholder and `status()`
 reads `'success'` — so your template renders content, not a loading state. When
 the fetch resolves, the placeholder is replaced by the real data.
 
+It shows again while a query that failed before it had any data is tried again:
+the query is back in `'pending'` for the new attempt.
+
 The cache never sees any of it. Another component reading `['todos']` gets
 `undefined` until the real fetch lands — the placeholder is local to this one
 query result.

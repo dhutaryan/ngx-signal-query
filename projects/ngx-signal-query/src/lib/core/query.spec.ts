@@ -187,6 +187,199 @@ describe('Query', () => {
     expect(state.failureReason).toBe(err)
   }))
 
+  describe('fetching after a failure', () => {
+    it("goes back to 'pending' with no error while it has no data", () => {
+      const { query } = createQuery<number>()
+
+      query.fetch({ queryFn: () => throwError(() => new Error('down')) })
+      query.fetch({ queryFn: () => new Subject<number>() })
+
+      expect(query.state()).toEqual(
+        jasmine.objectContaining({
+          status: 'pending',
+          error: null,
+          isFetching: true,
+          failureCount: 0,
+          failureReason: null,
+        }),
+      )
+    })
+
+    it("keeps 'error' and the error while it has data", () => {
+      const { query } = createQuery<number>()
+      const error = new Error('down')
+
+      query.fetch({ queryFn: () => of(1) })
+      query.fetch({ queryFn: () => throwError(() => error) })
+      query.fetch({ queryFn: () => new Subject<number>() })
+
+      expect(query.state()).toEqual(
+        jasmine.objectContaining({
+          data: 1,
+          status: 'error',
+          error,
+          isFetching: true,
+        }),
+      )
+    })
+  })
+
+  // A fetch stopped with nothing in its place leaves the query as it was
+  // before the fetch, apart from what was written into it meanwhile.
+  describe('stopping a fetch', () => {
+    // The query failed with `error`, and a fetch tries it again.
+    function failedAndTriedAgain(error: Error) {
+      const { query } = createQuery<number>()
+
+      query.fetch({ queryFn: () => throwError(() => error) })
+      query.fetch({ queryFn: () => new Subject<number>() })
+
+      return query
+    }
+
+    it('puts back the status, error and failure fields the fetch started from', () => {
+      const error = new Error('down')
+      const query = failedAndTriedAgain(error)
+
+      query.cancel()
+
+      expect(query.state()).toEqual(
+        jasmine.objectContaining({
+          status: 'error',
+          error,
+          failureCount: 1,
+          failureReason: error,
+          isFetching: false,
+        }),
+      )
+    })
+
+    it('puts back failure fields that changed while the fetch retried', fakeAsync(() => {
+      const { query } = createQuery<number>()
+      const first = new Error('first')
+
+      // Two attempts, both failed.
+      query.fetch({
+        queryFn: () => throwError(() => first),
+        retry: 1,
+        retryDelay: 10,
+      })
+      tick(10)
+      query.fetch({
+        queryFn: () => throwError(() => new Error('second')),
+        retry: 1,
+        retryDelay: 100,
+      })
+
+      // Its first attempt failed, and the retry is waiting.
+      expect(query.state().failureCount).toBe(1)
+
+      query.cancel()
+
+      expect(query.state()).toEqual(
+        jasmine.objectContaining({
+          status: 'error',
+          error: first,
+          failureCount: 2,
+          failureReason: first,
+        }),
+      )
+    }))
+
+    it('goes back to where the first fetch started when another replaced it', () => {
+      const error = new Error('down')
+      const query = failedAndTriedAgain(error)
+
+      query.fetch(
+        { queryFn: () => new Subject<number>() },
+        { cancelRefetch: true },
+      )
+      query.cancel()
+
+      expect(query.state().status).toBe('error')
+      expect(query.state().error).toBe(error)
+    })
+
+    it('goes back to what was written during the fetch', () => {
+      const query = failedAndTriedAgain(new Error('down'))
+
+      query.setData(5)
+      query.cancel()
+
+      expect(query.state()).toEqual(
+        jasmine.objectContaining({
+          status: 'success',
+          data: 5,
+          error: null,
+          isFetching: false,
+        }),
+      )
+    })
+
+    it('keeps a stale mark set during the fetch', () => {
+      const { query } = createQuery<number>()
+
+      query.setData(1)
+      query.fetch({ queryFn: () => new Subject<number>() })
+      query.invalidate()
+      query.cancel()
+
+      expect(query.state().isInvalidated).toBe(true)
+    })
+
+    it('puts nothing back once the fetch has landed, either way', () => {
+      const { query } = createQuery<number>()
+      const later = new Error('later')
+
+      query.fetch({ queryFn: () => throwError(() => new Error('down')) })
+      query.fetch({ queryFn: () => of(2) })
+      query.cancel()
+
+      expect(query.state().status).toBe('success')
+
+      query.fetch({ queryFn: () => throwError(() => later) })
+      query.cancel()
+
+      expect(query.state().status).toBe('error')
+      expect(query.state().error).toBe(later)
+    })
+
+    it('puts nothing back once it has been stopped', () => {
+      const query = failedAndTriedAgain(new Error('down'))
+
+      query.cancel()
+      query.setData(5)
+      query.cancel()
+
+      expect(query.state().status).toBe('success')
+      expect(query.state().data).toBe(5)
+    })
+
+    it('goes back when the last observer leaves', fakeAsync(() => {
+      const error = new Error('down')
+      const query = failedAndTriedAgain(error)
+      const observer = stubObserver()
+
+      query.addObserver(observer)
+      query.removeObserver(observer)
+
+      expect(query.state().status).toBe('error')
+      expect(query.state().error).toBe(error)
+      expect(query.state().isFetching).toBe(false)
+    }))
+
+    it('goes back when the query is destroyed', () => {
+      const error = new Error('down')
+      const query = failedAndTriedAgain(error)
+
+      query.destroy()
+
+      expect(query.state().status).toBe('error')
+      expect(query.state().error).toBe(error)
+      expect(query.state().isFetching).toBe(false)
+    })
+  })
+
   describe('cancelRefetch', () => {
     it('dedupes a concurrent fetch by default (cancelRefetch = false)', fakeAsync(() => {
       const { query } = createQuery<number>()

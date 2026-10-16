@@ -339,8 +339,9 @@ export function createQueryObserver<TData, TError = Error>(
     status: computed(() => resolved().status),
     error: computed(() => query().state().error as TError | null),
     isFetching: computed(() => query().state().isFetching),
-    // First fetch in-flight: fetching with no resolved data yet. An active
-    // placeholder counts as data — the UI shows it, not a loading state.
+    // A fetch in flight with no data to show: the first one, or a new attempt
+    // after a failure. An active placeholder counts as data — the UI shows it,
+    // not a loading state.
     isLoading: computed(
       () => query().state().isFetching && resolved().status === 'pending',
     ),

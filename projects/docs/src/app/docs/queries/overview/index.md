@@ -47,9 +47,13 @@ Every query is always in exactly one of three states, exposed as `status()`:
 
 | `status()` | meaning |
 | --- | --- |
-| `'pending'` | no data resolved yet |
+| `'pending'` | no data yet: the first load, or a new attempt after a failure |
 | `'success'` | data is available in `data()` |
 | `'error'` | the fetch failed and `error()` is set |
+
+A query that failed before it had any data is back in `'pending'` while it's
+tried again; see
+[Trying again after an error](/queries/overview#trying-again-after-an-error).
 
 For convenience the same information is available as boolean signals, so you
 rarely compare strings by hand:
@@ -125,8 +129,8 @@ data, quietly refresh it, swap it in when it lands.
 That's exactly why both exist. If you only had `status`, you couldn't tell
 "loading for the first time" apart from "refreshing data we already show".
 
-`isLoading()` is the shorthand for the common case — the **first** fetch, with
-no data on screen yet:
+`isLoading()` is the shorthand for the common case — a fetch with **no data on
+screen yet**: the first one, or a new attempt after a failure:
 
 ```ts
 // isLoading() is exactly this:
@@ -195,3 +199,42 @@ Failed queries are **retried automatically** before landing in the `'error'`
 state, so `failureCount()` can climb while `status()` is still `'pending'` —
 useful for showing "retrying…" feedback. Retry behaviour is configurable via
 `retry` and `retryDelay`.
+
+### Trying again after an error
+
+A query in `'error'` fetches again on the same occasions as any other query: a
+`refetch()`, an invalidation, a component that starts showing it, the user
+coming back to the tab. What it reads meanwhile depends on whether it has data:
+
+- **No data yet** — it's back in `'pending'` with `error()` at `null`, so the
+  new attempt reads like a first load: `isLoading()` is `true` and
+  `placeholderData` shows. If the attempt fails too, the query is back in
+  `'error'` with the new error.
+- **Data from before** — it keeps its data, its `'error'` status and the error
+  while it refetches; `isFetching()` tells you a refetch is running.
+
+So a Retry button only has to call `refetch()`: the template shows "Loading…"
+while the new attempt runs, then the data or the error.
+
+{% raw %}
+
+```html
+@if (todos.isPending()) {
+  <p>Loading…</p>
+} @else if (todos.isError()) {
+  <p>Something went wrong: {{ todos.error()?.message }}</p>
+  <button (click)="todos.refetch()">Retry</button>
+} @else {
+  <ul>
+    @for (todo of todos.data() ?? []; track todo.id) {
+      <li>{{ todo.title }}</li>
+    }
+  </ul>
+}
+```
+
+{% endraw %}
+
+Cancel the new attempt with `cancelQueries` and the query goes back to how it
+was before it, error included; see
+[Cancellation and Removal](/query-client/cancellation-and-removal).

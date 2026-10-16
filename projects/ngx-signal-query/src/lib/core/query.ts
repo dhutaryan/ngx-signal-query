@@ -78,6 +78,10 @@ export class Query<TData, TError = Error> {
   // The promise of the fetch in flight, which every caller that joins the
   // fetch shares, and how to settle it; null while nothing is in flight.
   #outcome: Deferred<TData> | null = null
+  // The state the fetch in flight started from, or the last write made
+  // during it: stopping the fetch with nothing in its place goes back to it
+  // (see #stop). null while nothing is in flight.
+  #beforeFetch: QueryState<TData, TError> | null = null
   // The structuralSharing of the fetch whose response the query holds.
   #fetchedStructuralSharing: StructuralSharingValue<TData> | undefined
   readonly #observers = new Set<QuerySubscriber<TData, TError>>()
@@ -196,8 +200,17 @@ export class Query<TData, TError = Error> {
     running?.resolve(outcome.promise)
     this.#outcome = outcome
 
+    // A fetch that replaces one in flight keeps the state the first one
+    // started from.
+    if (!running) this.#beforeFetch = this.state()
+
+    // A query with no data reads like a first load while it fetches, even
+    // after a failure: 'pending' with no error, so a loading state and
+    // placeholderData show rather than the old error. One with data keeps
+    // its status and error until the response, as in TanStack.
     this.#state.update((state) => ({
       ...state,
+      ...(state.data === undefined && { status: 'pending', error: null }),
       isFetching: true,
       failureCount: 0,
       failureReason: null,
@@ -239,6 +252,7 @@ export class Query<TData, TError = Error> {
       .subscribe({
         next: (data) => {
           this.#outcome = null
+          this.#beforeFetch = null
           this.#fetchedStructuralSharing = structuralSharing
           this.#state.set({
             data,
@@ -254,6 +268,7 @@ export class Query<TData, TError = Error> {
         },
         error: (err) => {
           this.#outcome = null
+          this.#beforeFetch = null
           this.#state.update((state) => ({
             ...state,
             status: 'error',
@@ -289,6 +304,9 @@ export class Query<TData, TError = Error> {
       failureReason: null,
       updatedAt,
     }))
+
+    // A write made during a fetch is what stopping the fetch goes back to.
+    if (this.#inFlight()) this.#beforeFetch = this.state()
 
     // Keep an orphaned query (no observers) alive for another gcTime so a
     // setQueryData write isn't collected before anyone subscribes.
@@ -343,17 +361,29 @@ export class Query<TData, TError = Error> {
   // Stops the fetch in flight, if any, and settles its promise with settle.
   #stop(settle: (outcome: Deferred<TData>) => void): void {
     const outcome = this.#outcome
+    const before = this.#beforeFetch
 
     this.#subscription?.unsubscribe()
     this.#subscription = null
     this.#outcome = null
+    this.#beforeFetch = null
 
     if (outcome) settle(outcome)
 
-    // The fetch is no longer running; clear the in-flight flag so isFetching
-    // doesn't stay stuck true after a cancellation.
-    if (this.state().isFetching) {
-      this.#state.update((state) => ({ ...state, isFetching: false }))
+    // The fetch is no longer running, so isFetching mustn't stay stuck true,
+    // and what the fetch wrote over goes back to how it was: a query that
+    // failed shows its error again, as in TanStack. Data and the stale mark
+    // aren't the fetch's to put back: they stay as written meanwhile, so an
+    // invalidation made during the fetch still holds.
+    if (before) {
+      this.#state.update((state) => ({
+        ...state,
+        status: before.status,
+        error: before.error,
+        failureCount: before.failureCount,
+        failureReason: before.failureReason,
+        isFetching: false,
+      }))
     }
   }
 

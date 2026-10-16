@@ -17,6 +17,14 @@ unsubscribes and the underlying HTTP request is genuinely aborted (see
 [Query Functions](/queries/query-functions)). Afterwards `isFetching()` for
 those queries drops back to `false` — nothing is running.
 
+Each query goes back to how it was before the fetch started. That shows when a
+query that failed was being tried again: it's back in `'error'` with the same
+`error()`, `failureCount()` and `failureReason()`, rather than stuck in a
+loading state with nothing in flight. What changed in the cache meanwhile
+stays: data written with `setQueryData`, and a stale mark from
+`invalidateQueries`, so the query still refetches the next time a component
+shows it.
+
 The main use is guarding an optimistic update: cancel before you write to the
 cache, so a refetch already on its way can't land on top of your optimistic data
 and clobber it. That's covered in
