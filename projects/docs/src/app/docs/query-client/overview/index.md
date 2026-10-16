@@ -35,16 +35,21 @@ everywhere else.
 | Method | Purpose |
 | --- | --- |
 | `invalidateQueries(filters?)` | Mark queries stale so they refetch. See [Query Invalidation](/query-client/query-invalidation). |
+| `refetchQueries(filters?)` | Refetch the queries on screen now, fresh or not. See [Query Invalidation](/query-client/query-invalidation#refetching-without-marking-refetchqueries). |
 | `getQueryData(key)` | Read a cached value synchronously. See [Manual Cache Updates](/query-client/manual-cache-updates). |
 | `setQueryData(key, updater)` | Write to the cache by hand. See [Manual Cache Updates](/query-client/manual-cache-updates). |
 | `cancelQueries(filters?)` | Cancel in-flight fetches. See [Cancellation & Removal](/query-client/cancellation-and-removal). |
 | `removeQueries(filters?)` | Drop queries from the cache entirely. See [Cancellation & Removal](/query-client/cancellation-and-removal). |
-| `fetchQuery(key, queryFn, options?)` | Fetch and cache imperatively, e.g. to prefetch. See [Manual Cache Updates](/query-client/manual-cache-updates). |
+| `fetchQuery(key, queryFn, options?)` | Fetch and cache imperatively, e.g. to prefetch, and get the data. See [Manual Cache Updates](/query-client/manual-cache-updates). |
 | `getQueryCache()` / `getMutationCache()` | The underlying caches — an escape hatch for advanced use. |
 
 Each of these gets its own page in this section. Most of them take
 [filters](/query-client/filters) to pick which queries they act on — the same
 `queryKey` / `exact` matching that drives invalidation.
+
+`invalidateQueries`, `refetchQueries` and `fetchQuery` return promises. Await
+one when what comes next needs the fresh data, or call it and move on: nothing
+has to wait for them, and a failure nobody waits for only shows in the query.
 
 ## Calling it from an effect
 
@@ -80,8 +85,8 @@ export class TodosComponent {
 ```
 
 Clicking to the next page then shows its rows at once, while they refetch in
-the background. A mutation's `mutate()` and `reset()`, and a query's
-`refetch()`, are just as safe in an effect.
+the background. A mutation's `mutate()`, `mutateAsync()` and `reset()`, and a
+query's `refetch()`, are just as safe in an effect.
 
 The flip side: a read is a **snapshot**. `getQueryData()`, `isFetching()` and
 `isMutating()` return the value as it is when you call them, and a template, a

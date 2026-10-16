@@ -28,9 +28,11 @@ import {
  * until it settles. Mutations do not retry by default (a retried write is not
  * idempotent); opt in via `options.retry`. Whatever of `retry`, `retryDelay`
  * and the `onSuccess` / `onError` / `onSettled` hooks a mutation leaves unset
- * comes from {@link withDefaultOptions}. `mutate()` and `reset()` are safe
- * to call from an effect: neither makes the effect depend on what it reads,
- * such as the options or the previous run. Bound to the current injection
+ * comes from {@link withDefaultOptions}. `mutateAsync(variables)` runs it
+ * the same way and returns a promise of the run's data. `mutate()`,
+ * `mutateAsync()` and `reset()` are safe to call from an effect: none makes
+ * the effect depend on what it reads, such as the options or the previous
+ * run. Bound to the current injection
  * context. Destroying it doesn't cancel a run in flight: the write has most
  * likely reached the server, so the run finishes and fires its hooks.
  *
@@ -42,8 +44,8 @@ import {
  * @typeParam TContext - Type returned by `onMutate`, passed to later hooks.
  * @param optionsFn - Factory returning the {@link MutationOptions}.
  * @param options - Optional `injector` to use outside an injection context.
- * @returns A {@link MutationResult}: `mutate()`, `reset()`, and state signals
- *   (`status`, `data`, `error`, `isPending`, …).
+ * @returns A {@link MutationResult}: `mutate()`, `mutateAsync()`, `reset()`,
+ *   and state signals (`status`, `data`, `error`, `isPending`, …).
  *
  * @example
  * ```ts
@@ -96,26 +98,37 @@ export function injectMutation<
         getInitialState<TData, TError, TVariables, TContext>(),
     )
 
+    // mutate(), mutateAsync() and reset() run untracked, as the QueryClient's
+    // methods do. A call made from an effect mustn't make the effect depend on
+    // what they read to do their job: the previous run's state, the options,
+    // or what onMutate and mutationFn read. Otherwise a change to any of them
+    // re-runs the effect, and the effect repeats the call.
+    //
+    // Starts a run for mutate() and mutateAsync(), makes it the run the
+    // signals below follow, and returns its promise.
+    const start = (variables: TVariables): Promise<TData> =>
+      untracked(() => {
+        // Stop observing the previous run. It isn't cancelled — if it's
+        // still in flight it finishes and fires its hooks; it just no longer
+        // feeds the signals below.
+        current()?.removeObserver()
+
+        // Options are read per call, so a signal used in them stays live.
+        const run = cache.build(client.defaultMutationOptions(optionsFn()))
+
+        run.addObserver()
+        current.set(run)
+
+        return run.execute(variables)
+      })
+
     return {
-      // mutate() and reset() run untracked, as the QueryClient's methods do. A
-      // call made from an effect mustn't make the effect depend on what they
-      // read to do their job: the previous run's state, the options, or what
-      // onMutate and mutationFn read. Otherwise a change to any of them
-      // re-runs the effect, and the effect repeats the call.
-      mutate: (variables) =>
-        untracked(() => {
-          // Stop observing the previous run. It isn't cancelled — if it's
-          // still in flight it finishes and fires its hooks; it just no longer
-          // feeds the signals below.
-          current()?.removeObserver()
-
-          // Options are read per call, so a signal used in them stays live.
-          const run = cache.build(client.defaultMutationOptions(optionsFn()))
-
-          run.addObserver()
-          current.set(run)
-          run.execute(variables)
-        }),
+      // The outcome shows in the signals; a failure mustn't surface as an
+      // unhandled rejection too.
+      mutate: (variables) => {
+        start(variables).catch(() => undefined)
+      },
+      mutateAsync: start,
       reset: () =>
         untracked(() => {
           // "Forget the result", not "stop the request". A run still in

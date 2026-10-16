@@ -202,3 +202,35 @@ export function isValidTimeout(value: unknown): value is number {
 export function isPromiseLike(value: unknown): value is PromiseLike<unknown> {
   return typeof (value as PromiseLike<unknown> | null)?.then === 'function'
 }
+
+// Resolves once every promise has settled, and never rejects. It resolves
+// with nothing: what the promises brought isn't the caller's to see.
+/** @internal */
+export function whenAllSettled(
+  promises: Array<Promise<unknown> | undefined>,
+): Promise<void> {
+  return Promise.allSettled(promises).then(() => undefined)
+}
+
+// A promise with the functions that settle it. TODO: use
+// Promise.withResolvers() instead once every browser the supported Angular
+// versions target has it: Safari 17.4, Chrome 119, Firefox 121 (Angular 20
+// still targets Safari 16).
+/** @internal */
+export interface Deferred<T> {
+  promise: Promise<T>
+  resolve: (value: T | PromiseLike<T>) => void
+  reject: (reason: unknown) => void
+}
+
+/** @internal */
+export function deferred<T>(): Deferred<T> {
+  let resolve!: Deferred<T>['resolve']
+  let reject!: Deferred<T>['reject']
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res
+    reject = rej
+  })
+
+  return { promise, resolve, reject }
+}

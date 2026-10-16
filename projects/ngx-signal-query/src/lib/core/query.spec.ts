@@ -1,7 +1,8 @@
 import { fakeAsync, flushMicrotasks, tick } from '@angular/core/testing'
 import { type Observable, of, Subject, throwError } from 'rxjs'
 
-import { CancelledError, Query, type QuerySubscriber } from './query'
+import { CancelledError } from './cancelled-error'
+import { Query, type QuerySubscriber } from './query'
 import type { QueryCache } from './query-cache'
 
 function createQuery<TData, TError = Error>() {
@@ -585,39 +586,57 @@ describe('Query', () => {
     }))
   })
 
-  describe('activeFetchOptions', () => {
-    it('is null while no observer wants the query fetched', () => {
+  describe('refetchIfActive', () => {
+    it('fetches nothing while no observer wants the query fetched', () => {
       const { query } = createQuery<number>()
 
-      expect(query.activeFetchOptions()).toBeNull()
+      expect(query.refetchIfActive()).toBeUndefined()
 
       query.addObserver(stubObserver())
-      expect(query.activeFetchOptions()).toBeNull()
+      expect(query.refetchIfActive()).toBeUndefined()
+      expect(query.state().isFetching).toBe(false)
     })
 
-    it('takes the first observer that wants the query fetched', () => {
+    it('fetches as the first observer that wants the query fetched says', () => {
       const { query } = createQuery<number>()
-      const first = () => of(1)
-      const second = () => of(2)
+      const first = jasmine.createSpy('first').and.returnValue(of(1))
+      const second = jasmine.createSpy('second').and.returnValue(of(2))
 
       query.addObserver(stubObserver())
       query.addObserver(activeObserver(first))
       query.addObserver(activeObserver(second))
+      query.refetchIfActive()
 
-      expect(query.activeFetchOptions()?.queryFn).toBe(first)
+      expect(first).toHaveBeenCalledTimes(1)
+      expect(second).not.toHaveBeenCalled()
     })
 
     it('stops asking an observer once it is removed', () => {
       const { query } = createQuery<number>()
-      const first = () => of(1)
-      const second = () => of(2)
+      const first = jasmine.createSpy('first').and.returnValue(of(1))
+      const second = jasmine.createSpy('second').and.returnValue(of(2))
       const leaving = activeObserver(first)
 
       query.addObserver(leaving)
       query.addObserver(activeObserver(second))
       query.removeObserver(leaving)
+      query.refetchIfActive()
 
-      expect(query.activeFetchOptions()?.queryFn).toBe(second)
+      expect(first).not.toHaveBeenCalled()
+      expect(second).toHaveBeenCalledTimes(1)
+    })
+
+    it('replaces a fetch in flight', () => {
+      const { query } = createQuery<number>()
+      const inFlight = new Subject<number>()
+
+      query.addObserver(activeObserver(() => of(2)))
+      query.fetch({ queryFn: () => inFlight })
+      query.refetchIfActive()
+
+      // The fetch in flight may predate the change: a new one takes over.
+      expect(inFlight.observed).toBe(false)
+      expect(query.state().data).toBe(2)
     })
   })
 

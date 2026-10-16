@@ -19,10 +19,11 @@ import {
   type Subscription,
 } from 'rxjs'
 
+import { CancelledError } from './cancelled-error'
 import type { MutationCache } from './mutation-cache'
 import { defaultRetryDelay, resolveRetryDelay, shouldRetry } from './retryer'
 import type { RetryDelayValue, RetryValue } from './types'
-import { isPromiseLike } from './utils'
+import { type Deferred, deferred, isPromiseLike } from './utils'
 
 /** Lifecycle status of a mutation: not yet run, running (hooks included), succeeded, or failed. */
 export type MutationStatus = 'idle' | 'pending' | 'success' | 'error'
@@ -124,6 +125,14 @@ export type MutationResult<TData, TError, TVariables> = {
   /** Triggers the mutation with the given variables. */
   mutate: (variables: TVariables) => void
   /**
+   * Triggers the mutation as `mutate()` does, and returns a promise of that
+   * run: it resolves with the data once the last hook is done, or rejects
+   * with the error once `onError` and `onSettled` are. Unlike `mutate()`, a
+   * failure nobody catches surfaces as an unhandled rejection, as with any
+   * async call.
+   */
+  mutateAsync: (variables: TVariables) => Promise<TData>
+  /**
    * Resets the state to `idle`. It forgets the result and doesn't stop the
    * request: a run in flight finishes and fires its hooks.
    */
@@ -187,6 +196,9 @@ export class Mutation<
   readonly state = this.#state.asReadonly()
 
   #subscription: Subscription | null = null
+  // The promise of the run in flight and how to settle it; null once it has
+  // settled, or before the run.
+  #run: Deferred<TData> | null = null
   #observers = 0
   readonly #options: MutationOptions<TData, TError, TVariables, TContext>
   readonly #cache: MutationCache
@@ -222,8 +234,15 @@ export class Mutation<
     this.#disposeIfDone()
   }
 
-  /** Runs the mutation once. `variables` are passed straight to `mutationFn`. */
-  execute(variables: TVariables): void {
+  /**
+   * Runs the mutation once. `variables` are passed straight to `mutationFn`.
+   * Returns a promise of the run, settled as the state is, once its last hook
+   * is done: with the data, or with the error.
+   */
+  execute(variables: TVariables): Promise<TData> {
+    const run = deferred<TData>()
+
+    this.#run = run
     this.#state.set({
       status: 'pending',
       data: undefined,
@@ -267,13 +286,26 @@ export class Mutation<
       )
       .subscribe((outcome) => {
         this.#state.update((state) => ({ ...state, ...outcome }))
+        this.#run = null
         this.#disposeIfDone()
+
+        if (outcome.status === 'success') {
+          run.resolve(outcome.data)
+        } else {
+          run.reject(outcome.error)
+        }
       })
+
+    return run.promise
   }
 
+  // Whoever waits for the run hears that it was cancelled, so its promise
+  // doesn't hang.
   cancel(): void {
     this.#subscription?.unsubscribe()
     this.#subscription = null
+    this.#run?.reject(new CancelledError('The mutation was cancelled'))
+    this.#run = null
   }
 
   /** Sends the write, retrying as `retry` allows, and emits its data once. */

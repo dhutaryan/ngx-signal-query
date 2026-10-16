@@ -43,6 +43,10 @@ time, up to 30 s. The error shows only after the last attempt, at least 7 s
 after the first failure. Until then, `failureCount()` and `failureReason()`
 show how it's going. See [Query Retries](/queries/query-retries).
 
+`fetchQuery` is the exception: it doesn't retry unless you ask, since whoever
+waits for its promise should hear of a failure at once. See
+[Manual Cache Updates](/query-client/manual-cache-updates#waiting-for-the-data).
+
 In tests, turn retries off, or a test of an error state waits through all of
 them; see [Testing](/testing).
 

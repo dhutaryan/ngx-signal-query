@@ -71,23 +71,41 @@ onSettled: () => {
 }
 ```
 
-## A note if you're coming from TanStack Query
+## Waiting for the fresh data
 
-There, `invalidateQueries` returns a promise, and the common pattern is to
-`await` it inside `onSuccess` so the mutation stays `pending` until the refetch
-finishes.
+`invalidateQueries` returns a promise that resolves once the queries on screen
+have their refetch back. A hook that **returns** it keeps the mutation
+`'pending'` until then, so a button disabled on `isPending()` comes back only
+when the list already shows the new todo:
 
-Here it's **synchronous** and returns `void`. It marks queries stale, starts
-refetching the ones on screen, and returns immediately, without waiting for the
-refetch. That means:
+```ts
+protected readonly addTodo = injectMutation(() => ({
+  mutationFn: (title: string) => this.#http.post<Todo>('/api/todos', { title }),
+  // Returned: the mutation finishes once the list is fresh.
+  onSuccess: () => this.#client.invalidateQueries({ queryKey: ['todos'] }),
+}))
+```
 
-- there's nothing to `await`, and no `Promise.all` for multiple invalidations —
-  just call it;
-- the mutation reaches `'success'` as soon as the write lands — `onSuccess`
-  returns at once, since there's nothing to wait for — **not** after the
-  refetch completes.
+In braces, as in the first example, the hook returns nothing: the mutation
+finishes as soon as the write lands, and the list catches up in the
+background. Pick by what comes next:
 
-If a component needs to know the fresh data has arrived, it reads that from the
-**query** — `todos.isFetching()` is `true` while the refetch is in flight, and
-`todos.data()` updates when it lands. The signal tells you, so the mutation
-doesn't have to wait to.
+- **Return it** when the next thing the user sees needs the fresh data —
+  closing a dialog over the list, or going to the new item.
+- **Don't** when the write is the whole point and the list can catch up on its
+  own.
+
+For several families, return them all:
+
+```ts
+onSuccess: () =>
+  Promise.all([
+    this.#client.invalidateQueries({ queryKey: ['todos'] }),
+    this.#client.invalidateQueries({ queryKey: ['stats'] }),
+  ]),
+```
+
+The promise never rejects: a refetch that fails shows in its query's
+`error()`, and the mutation still succeeds, since the write went through. A
+refetch that fails is retried first, though, so a mutation that waits for it
+stays pending through the retries.

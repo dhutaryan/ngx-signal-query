@@ -2,12 +2,14 @@ import { Component, effect, signal } from '@angular/core'
 import {
   type ComponentFixture,
   fakeAsync,
+  flushMicrotasks,
   TestBed,
   tick,
 } from '@angular/core/testing'
 import { of, Subject, throwError } from 'rxjs'
 
 import { withDefaultOptions } from '../features/with-default-options'
+import { CancelledError } from './cancelled-error'
 import { injectMutation } from './inject-mutation'
 import { injectQuery } from './inject-query'
 import { provideQueryClient } from './provider'
@@ -42,6 +44,23 @@ function inEffect(body: () => void): {
   fixture.detectChanges()
 
   return { fixture, runs: () => runs }
+}
+
+// What a promise has settled with so far, empty while it's pending. Read it
+// after the microtasks have run.
+function settled<T>(promise: Promise<T>): { value?: T; error?: unknown } {
+  const result: { value?: T; error?: unknown } = {}
+
+  promise.then(
+    (value) => {
+      result.value = value
+    },
+    (error: unknown) => {
+      result.error = error
+    },
+  )
+
+  return result
 }
 
 describe('QueryClient', () => {
@@ -250,7 +269,7 @@ describe('QueryClient', () => {
       expect(client.getQueryData(['n'])).toBe(2)
     }))
 
-    it('retries a failing fetch 3 times, 1 s, 2 s and 4 s apart', fakeAsync(() => {
+    it("doesn't retry a failing fetch unless asked", fakeAsync(() => {
       const start = Date.now()
       const sent: number[] = []
 
@@ -261,7 +280,26 @@ describe('QueryClient', () => {
       })
       tick(60_000)
 
-      expect(sent).toEqual([0, 1_000, 3_000, 7_000])
+      // Whoever waits for the data hears of the failure at once.
+      expect(sent).toEqual([0])
+    }))
+
+    it('retries a failing fetch as the call asks', fakeAsync(() => {
+      const start = Date.now()
+      const sent: number[] = []
+
+      client.fetchQuery(
+        ['n'],
+        () => {
+          sent.push(Date.now() - start)
+
+          return throwError(() => new Error('down'))
+        },
+        { retry: 2, retryDelay: 10 },
+      )
+      tick(1_000)
+
+      expect(sent).toEqual([0, 10, 20])
     }))
 
     it('keeps the cached data when the fetch brings the same data', () => {
@@ -272,6 +310,125 @@ describe('QueryClient', () => {
       client.fetchQuery(['n'], () => of({ id: 1, tags: ['a'] }))
 
       expect(client.getQueryData(['n'])).toBe(cached)
+    })
+
+    // The promise it returns: the data as the cache holds it.
+    describe('promise', () => {
+      it('resolves with the fetched data', fakeAsync(() => {
+        const result = settled(client.fetchQuery(['n'], () => of(10)))
+
+        flushMicrotasks()
+
+        expect(result.value).toBe(10)
+      }))
+
+      it('resolves with the cached data, without a request, while it is fresh', fakeAsync(() => {
+        const queryFn = jasmine.createSpy('queryFn').and.returnValue(of(2))
+
+        client.setQueryData(['n'], 1)
+
+        const result = settled(
+          client.fetchQuery(['n'], queryFn, { staleTime: Infinity }),
+        )
+
+        flushMicrotasks()
+
+        expect(result.value).toBe(1)
+        expect(queryFn).not.toHaveBeenCalled()
+      }))
+
+      it('waits for the fetch in flight and resolves with its data', fakeAsync(() => {
+        const response = new Subject<number>()
+        const second = jasmine.createSpy('second')
+
+        client.fetchQuery(['n'], () => response)
+
+        const result = settled(client.fetchQuery(['n'], second))
+
+        flushMicrotasks()
+        expect(result).toEqual({})
+
+        response.next(1)
+        flushMicrotasks()
+
+        expect(result.value).toBe(1)
+        expect(second).not.toHaveBeenCalled()
+      }))
+
+      it('resolves with the data as the cache keeps it', fakeAsync(() => {
+        client.setQueryData(['n'], { id: 1, tags: ['a'] })
+
+        const cached = client.getQueryData<{ id: number; tags: string[] }>([
+          'n',
+        ])
+        const result = settled(
+          client.fetchQuery(['n'], () => of({ id: 1, tags: ['a'] })),
+        )
+
+        flushMicrotasks()
+
+        // The response brought the same data, so the cache kept its object,
+        // and the promise resolves with that object.
+        expect(result.value).toBe(cached)
+      }))
+
+      it('rejects with the error of the fetch', fakeAsync(() => {
+        const error = new Error('down')
+        const result = settled(
+          client.fetchQuery(['n'], () => throwError(() => error)),
+        )
+
+        flushMicrotasks()
+
+        expect(result.error).toBe(error)
+      }))
+
+      it('resolves with the cached data when the fetch is cancelled', fakeAsync(() => {
+        client.setQueryData(['n'], 1)
+
+        const result = settled(
+          client.fetchQuery(['n'], () => new Subject<number>()),
+        )
+
+        client.cancelQueries()
+        flushMicrotasks()
+
+        expect(result.value).toBe(1)
+      }))
+
+      it('rejects with a CancelledError when the fetch is cancelled before there is data', fakeAsync(() => {
+        const result = settled(
+          client.fetchQuery(['n'], () => new Subject<number>()),
+        )
+
+        client.cancelQueries()
+        flushMicrotasks()
+
+        expect(result.error).toBeInstanceOf(CancelledError)
+      }))
+
+      it('rejects with a CancelledError once the query is removed, even with data', fakeAsync(() => {
+        client.setQueryData(['n'], 1)
+
+        const result = settled(
+          client.fetchQuery(['n'], () => new Subject<number>()),
+        )
+
+        // E.g. signing out while a refresh is in flight.
+        client.removeQueries()
+        flushMicrotasks()
+
+        expect(result.error).toBeInstanceOf(CancelledError)
+      }))
+
+      it("doesn't surface a failure nobody waits for as an unhandled rejection", fakeAsync(() => {
+        // A prefetch that fails: only the query's state tells.
+        client.fetchQuery(['n'], () => throwError(() => new Error('down')))
+
+        // fakeAsync rethrows an unhandled rejection when microtasks run.
+        expect(() => flushMicrotasks()).not.toThrow()
+        expect(client.getQueryCache().get(['n'])?.state().status).toBe('error')
+      }))
     })
   })
 
@@ -492,6 +649,28 @@ describe('QueryClient', () => {
       expect(client.getQueryCache().get(['todos'])?.state().isInvalidated).toBe(
         false,
       )
+    })
+
+    it("refetchQueries doesn't re-run the effect as queries enter the cache or refetch", () => {
+      const queryFn = jasmine.createSpy('queryFn').and.returnValue(of(['a']))
+
+      @Component({ template: '' })
+      class TodoList {
+        readonly todos = injectQuery(() => ({ queryKey: ['todos'], queryFn }))
+      }
+
+      TestBed.createComponent(TodoList).detectChanges()
+
+      const { fixture, runs } = inEffect(() =>
+        client.refetchQueries({ queryKey: ['todos'] }),
+      )
+
+      client.setQueryData(['user'], 'Ann')
+      fixture.detectChanges()
+
+      expect(runs()).toBe(1)
+      // On mount, and once for the effect.
+      expect(queryFn).toHaveBeenCalledTimes(2)
     })
 
     it("cancelQueries doesn't cancel a fetch that starts after it", () => {

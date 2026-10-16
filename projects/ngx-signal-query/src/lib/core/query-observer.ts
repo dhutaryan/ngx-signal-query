@@ -334,36 +334,44 @@ export function createQueryObserver<TData, TError = Error>(
     return { data: state.data, status: state.status, isPlaceholderData: false }
   })
 
-  return {
-    result: {
-      data: computed(() => resolved().data),
-      status: computed(() => resolved().status),
-      error: computed(() => query().state().error as TError | null),
-      isFetching: computed(() => query().state().isFetching),
-      // First fetch in-flight: fetching with no resolved data yet. An active
-      // placeholder counts as data — the UI shows it, not a loading state.
-      isLoading: computed(
-        () => query().state().isFetching && resolved().status === 'pending',
-      ),
-      isPending: computed(() => resolved().status === 'pending'),
-      isSuccess: computed(() => resolved().status === 'success'),
-      isError: computed(() => resolved().status === 'error'),
-      isPlaceholderData: computed(() => resolved().isPlaceholderData),
-      failureCount: computed(() => query().state().failureCount),
-      failureReason: computed(
-        () => query().state().failureReason as TError | null,
-      ),
-      // Force a fresh fetch regardless of staleTime and enabled, cancelling
-      // any in-flight request (explicit user intent — get current data).
-      // Untracked, as the client's methods are: called from an effect, it
-      // mustn't make the effect depend on the options or on the query.
-      refetch: () =>
-        untracked(() => {
-          const options = defaultedOptions()
+  const result: QueryResult<TData, TError> = {
+    data: computed(() => resolved().data),
+    status: computed(() => resolved().status),
+    error: computed(() => query().state().error as TError | null),
+    isFetching: computed(() => query().state().isFetching),
+    // First fetch in-flight: fetching with no resolved data yet. An active
+    // placeholder counts as data — the UI shows it, not a loading state.
+    isLoading: computed(
+      () => query().state().isFetching && resolved().status === 'pending',
+    ),
+    isPending: computed(() => resolved().status === 'pending'),
+    isSuccess: computed(() => resolved().status === 'success'),
+    isError: computed(() => resolved().status === 'error'),
+    isPlaceholderData: computed(() => resolved().isPlaceholderData),
+    failureCount: computed(() => query().state().failureCount),
+    failureReason: computed(
+      () => query().state().failureReason as TError | null,
+    ),
+    // Force a fresh fetch regardless of staleTime and enabled, cancelling
+    // any in-flight request (explicit user intent — get current data).
+    // Untracked, as the client's methods are: called from an effect, it
+    // mustn't make the effect depend on the options or on the query. However
+    // the fetch ends, the signals show it, so the promise resolves with their
+    // data and error and never rejects.
+    refetch: () =>
+      untracked(() => {
+        const options = defaultedOptions()
 
-          resolve(options.queryKey).fetch(options, { cancelRefetch: true })
-        }),
-    },
+        return resolve(options.queryKey).fetch(options, {
+          cancelRefetch: true,
+        })
+      })
+        .catch(() => undefined)
+        .then(() => ({ data: result.data(), error: result.error() })),
+  }
+
+  return {
+    result,
     destroy: () => refs.forEach((ref) => ref.destroy()),
   }
 }

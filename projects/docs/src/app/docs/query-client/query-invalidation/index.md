@@ -79,6 +79,57 @@ this.router.events.pipe(/* … */).subscribe(() => {
 
 Since observed queries refetch on their own, the caller just marks and moves on.
 
+## Waiting for the refetch
+
+`invalidateQueries` returns a promise that resolves once the queries on screen
+have their refetch back, every one of them. Await it when what comes next needs
+the fresh data:
+
+```ts
+protected async refresh(): Promise<void> {
+  await this.#client.invalidateQueries({ queryKey: ['todos'] })
+  this.#toast.show('Up to date')
+}
+```
+
+It never rejects: a refetch that fails shows in its query's `error()`. Queries
+nobody shows are only marked, so there's nothing to wait for there. Not
+awaiting it is fine too; it just doesn't wait.
+
+A mutation hook that returns it keeps the mutation pending until the refetch is
+back; see [Invalidation from Mutations](/mutations/invalidation-from-mutations).
+
+## Marking without refetching
+
+`refetchType: 'none'` marks the matching queries stale and refetches none of
+them, not even the ones on screen. The promise resolves at once:
+
+```ts
+this.#client.invalidateQueries({
+  queryKey: ['todos'],
+  refetchType: 'none',
+})
+```
+
+Each one then refetches the next time stale data would: a component starts
+showing it, the user comes back to the tab, the network comes back. Use it when
+a refetch now would be wasted, e.g. while more writes to the same data are on
+their way.
+
+## Refetching without marking: `refetchQueries`
+
+`refetchQueries` refetches the matching queries on screen right away, fresh or
+not, once per query, and resolves once they're back. It marks nothing, so
+queries nobody shows are left as they are: with a long `staleTime` they still
+count as fresh when they're shown again. To have those refetch then, invalidate
+them instead.
+
+```ts
+await this.#client.refetchQueries({ queryKey: ['todos'] })
+```
+
+Like invalidation, it replaces a fetch already in flight and never rejects.
+
 ## A note if you're coming from TanStack Query
 
 Two differences worth knowing:
@@ -86,7 +137,9 @@ Two differences worth knowing:
 - **Filters are minimal.** TanStack lets you match by `predicate`, by
   active/inactive status, by staleness, by fetch status. Here it's `queryKey`
   and `exact` — nothing else.
-- **It's synchronous.** `invalidateQueries` returns `void`, not a promise. It
-  marks queries stale, starts refetching the observed ones and returns without
-  waiting for them. There's nothing to `await` and no `refetchType` option — a
-  query refetches if it's observed, and doesn't if it isn't.
+- **Only queries on screen are refetched.** `refetchType` takes `'active'`, the
+  default, or `'none'`, and `refetchQueries` leaves queries nobody shows alone,
+  where TanStack refetches those too by default. A query nobody shows can't
+  tell which data its last `queryFn` would fetch now: one that reads a signal,
+  as `queryFn: () => this.#api.todo(this.id())` does, would fetch another
+  key's data into it. Invalidate them, and each refetches once it's shown.

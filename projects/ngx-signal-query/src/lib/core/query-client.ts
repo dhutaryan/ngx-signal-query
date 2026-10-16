@@ -13,9 +13,10 @@ import { QueryCache } from './query-cache'
 import { MutationCache } from './mutation-cache'
 import type { MutationOptions } from './mutation'
 import { defaultRetryDelay } from './retryer'
-import { functionalUpdate } from './utils'
+import { functionalUpdate, whenAllSettled } from './utils'
 import type {
   DefaultedQueryOptions,
+  InvalidateQueryFilters,
   QueryFilters,
   QueryKey,
   QueryOptions,
@@ -142,12 +143,38 @@ export class QueryClient {
   /**
    * Imperatively fetches and caches a query, unless fresh data already exists
    * (governed by `staleTime`). Prefer {@link injectQuery} in components; use
-   * this to prefetch, from an event handler or an effect.
+   * this to prefetch, from an event handler or an effect, or to wait for the
+   * data, e.g. in a route resolver.
+   *
+   * Resolves with the data as the cache holds it: at once if it's fresh,
+   * otherwise once the fetch lands. A key already fetching is waited for,
+   * not fetched again, unless `cancelRefetch` is set. Rejects with the error
+   * if the fetch fails. A cancelled fetch resolves with the data the cache
+   * holds, or rejects with a {@link CancelledError} if it holds none; a
+   * removed query always rejects with one. Nothing has to wait for the
+   * promise: a prefetch that fails only leaves the query in `'error'`.
+   *
+   * Unlike a component's query, it doesn't retry a failure unless `retry` is
+   * set here or in {@link withDefaultOptions}, so whoever waits for the data
+   * hears of the failure at once.
    *
    * @param key - The query key to fetch and cache under.
    * @param queryFn - Function returning the data as an `Observable` or `Promise`.
    * @param options - Fetch tuning (`staleTime`, `retry`, `retryDelay`,
    *   `structuralSharing`, `cancelRefetch`).
+   * @returns A promise of the data.
+   *
+   * @example
+   * ```ts
+   * export const todoResolver: ResolveFn<Todo> = (route) => {
+   *   const http = inject(HttpClient)
+   *   const id = Number(route.paramMap.get('id'))
+   *
+   *   return injectQueryClient().fetchQuery(['todos', id], () =>
+   *     http.get<Todo>(`/api/todos/${id}`),
+   *   )
+   * }
+   * ```
    */
   fetchQuery<TData>(
     key: QueryKey,
@@ -161,21 +188,27 @@ export class QueryClient {
       structuralSharing?: StructuralSharingValue<TData>
       cancelRefetch?: boolean
     } = {},
-  ): void {
-    untracked(() => {
-      // Resolved as a query's options are, so one set of defaults serves both.
-      // cancelRefetch is about this call, not an option of the query.
+  ): Promise<TData> {
+    return untracked(() => {
+      // Resolved as a query's options are, so one set of defaults serves
+      // both, except that a failure isn't retried unless asked: whoever waits
+      // for the data hears of it at once. cancelRefetch is about this call,
+      // not an option of the query.
       const { cancelRefetch, ...queryOptions } = options
       const defaulted = this.defaultQueryOptions<TData>({
         ...queryOptions,
         queryKey: key,
         queryFn,
+        retry:
+          queryOptions.retry ??
+          this.#config.defaultOptions?.queries?.retry ??
+          false,
       })
       const query = this.#cache.getOrCreate<TData>(key)
 
-      if (query.shouldFetch(defaulted.staleTime)) {
-        query.fetch(defaulted, { cancelRefetch })
-      }
+      return query.shouldFetch(defaulted.staleTime)
+        ? query.fetch(defaulted, { cancelRefetch })
+        : Promise.resolve(query.state().data as TData)
     })
   }
 
@@ -234,35 +267,59 @@ export class QueryClient {
    * Marks matching queries as stale and refetches the actively observed ones,
    * once per query however many components observe it. The refetch starts
    * right away and replaces a fetch already in flight, which may predate the
-   * change; this method doesn't wait for it. A query with no enabled observer
-   * keeps the stale mark and refetches as soon as one appears. Commonly called
-   * after a mutation succeeds.
+   * change. A query with no enabled observer keeps the stale mark and
+   * refetches as soon as one appears. Commonly called after a mutation
+   * succeeds.
+   *
+   * Resolves once those refetches have settled, so a mutation hook that
+   * returns it keeps the mutation pending until the data is fresh. It never
+   * rejects: a refetch that fails shows in its query's `error`.
    *
    * @param filters - Which queries to invalidate; omit to invalidate all.
+   *   `refetchType: 'none'` only marks them, and resolves at once.
    *
    * @example
    * ```ts
    * client.invalidateQueries({ queryKey: ['todos'] })
    * ```
    */
-  invalidateQueries(filters?: QueryFilters): void {
-    untracked(() => {
+  invalidateQueries(filters?: InvalidateQueryFilters): Promise<void> {
+    return untracked(() => {
       const queries = this.#cache.findAll(filters)
 
       queries.forEach((query) => query.invalidate())
 
-      // Refetch each active query once, however many observers watch it; an
-      // inactive one refetches when next observed, as shouldFetch sees the
-      // flag. cancelRefetch: a fetch already in flight started before the
-      // invalidation, so it may have missed the change.
-      queries.forEach((query) => {
-        const options = query.activeFetchOptions()
-
-        if (options) {
-          query.fetch(options, { cancelRefetch: true })
-        }
-      })
+      // An inactive query refetches when next observed, as shouldFetch sees
+      // the flag.
+      return filters?.refetchType === 'none'
+        ? Promise.resolve()
+        : whenAllSettled(queries.map((query) => query.refetchIfActive()))
     })
+  }
+
+  /**
+   * Refetches the matching queries that a component shows, whether their
+   * data is stale or not, once per query however many components show it. A
+   * fetch already in flight is replaced. Queries nobody shows are left as
+   * they are, not even marked stale: to have them refetch once they're shown,
+   * invalidate them with `invalidateQueries()`.
+   *
+   * Resolves once the refetches have settled. It never rejects: a refetch
+   * that fails shows in its query's `error`.
+   *
+   * @param filters - Which queries to refetch; omit to refetch all.
+   *
+   * @example
+   * ```ts
+   * await client.refetchQueries({ queryKey: ['todos'] })
+   * ```
+   */
+  refetchQueries(filters?: QueryFilters): Promise<void> {
+    return untracked(() =>
+      whenAllSettled(
+        this.#cache.findAll(filters).map((query) => query.refetchIfActive()),
+      ),
+    )
   }
 
   /**

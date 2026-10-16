@@ -12,6 +12,7 @@ import { InvalidationDemo } from './invalidation/invalidation-demo/invalidation-
 import { LazyOptionsDemo } from './lazy-options/lazy-options-demo/lazy-options-demo'
 import { MutationDemo } from './mutations/mutation-demo/mutation-demo'
 import { PollingDemo } from './polling/polling-demo/polling-demo'
+import { PromisesDemo } from './promises/promises-demo/promises-demo'
 import { QueriesDemo } from './queries/queries-demo/queries-demo'
 import { RemovalDemo } from './removal/removal-demo/removal-demo'
 import { TodosApi } from './mutations/todos-api'
@@ -28,6 +29,7 @@ import { TodosApi } from './mutations/todos-api'
     EffectsDemo,
     RemovalDemo,
     FocusDemo,
+    PromisesDemo,
   ],
   templateUrl: './app.html',
   styleUrl: './app.scss',

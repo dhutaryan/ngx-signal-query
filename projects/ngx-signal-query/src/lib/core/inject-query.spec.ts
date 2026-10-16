@@ -18,6 +18,7 @@ import {
   TestBed,
   fakeAsync,
   flush,
+  flushMicrotasks,
   tick,
 } from '@angular/core/testing'
 import { type Observable, map, of, Subject, throwError, timer } from 'rxjs'
@@ -205,6 +206,23 @@ function leaveAndComeBack(): void {
 function goOfflineAndBack(): void {
   window.dispatchEvent(new Event('offline'))
   window.dispatchEvent(new Event('online'))
+}
+
+// What a promise has settled with so far, empty while it's pending. Read it
+// after the microtasks have run.
+function settled<T>(promise: Promise<T>): { value?: T; error?: unknown } {
+  const result: { value?: T; error?: unknown } = {}
+
+  promise.then(
+    (value) => {
+      result.value = value
+    },
+    (error: unknown) => {
+      result.error = error
+    },
+  )
+
+  return result
 }
 
 // A row of a cached list, for the specs that seed a detail query from it.
@@ -464,6 +482,105 @@ describe('injectQuery', () => {
       // Page 1 on mount and for the reconnect, then page 2.
       expect(queryFn).toHaveBeenCalledTimes(3)
     }))
+
+    // refetch() resolves with the data and the error the signals hold once
+    // its fetch settles.
+    describe('refetch() promise', () => {
+      it('resolves once the response lands, with its data and no error', fakeAsync(() => {
+        const { queryFn, resolve } = requests<string>()
+        const { result } = mount(() => ({ queryKey: ['r'], queryFn }))
+
+        resolve('a')
+
+        const refetched = settled(result.refetch())
+
+        flushMicrotasks()
+        expect(refetched).toEqual({})
+
+        resolve('b')
+        flushMicrotasks()
+
+        expect(refetched.value).toEqual({ data: 'b', error: null })
+      }))
+
+      it('resolves with the error instead of rejecting', fakeAsync(() => {
+        const error = new Error('down')
+        let fail = false
+        const { result } = mount(() => ({
+          queryKey: ['r'],
+          queryFn: () => (fail ? throwError(() => error) : of('a')),
+          retry: false,
+        }))
+
+        fail = true
+
+        const refetched = settled(result.refetch())
+
+        flushMicrotasks()
+
+        // The data it had stays, next to the error.
+        expect(refetched.error).toBeUndefined()
+        expect(refetched.value).toEqual({ data: 'a', error })
+      }))
+
+      it('resolves with the data of a fetch that replaces it', fakeAsync(() => {
+        const { queryFn, resolve, cancelled } = requests<string>()
+        const { result } = mount(() => ({ queryKey: ['r'], queryFn }))
+
+        resolve('a')
+
+        const refetched = settled(result.refetch())
+
+        // An invalidation replaces the request in flight with a new one.
+        client.invalidateQueries({ queryKey: ['r'] })
+        resolve('b')
+        flushMicrotasks()
+
+        expect(cancelled()).toBe(1)
+        expect(refetched.value?.data).toBe('b')
+      }))
+
+      it('resolves when the component goes away before the response', fakeAsync(() => {
+        const { queryFn } = requests<string>()
+        const { fixture, result } = mount(() => ({ queryKey: ['r'], queryFn }))
+        const refetched = settled(result.refetch())
+
+        // The last component showing the query is gone, so its fetch is
+        // cancelled before there's any data.
+        fixture.destroy()
+        flushMicrotasks()
+
+        expect(refetched.error).toBeUndefined()
+        expect(refetched.value).toEqual({ data: undefined, error: null })
+      }))
+
+      it('refetches a disabled query and resolves with its data', fakeAsync(() => {
+        const { result } = mount(() => ({
+          queryKey: ['r'],
+          queryFn: () => of('a'),
+          enabled: false,
+        }))
+        const refetched = settled(result.refetch())
+
+        flushMicrotasks()
+
+        expect(refetched.value?.data).toBe('a')
+      }))
+
+      it("doesn't surface a failure nobody waits for as an unhandled rejection", fakeAsync(() => {
+        const { result } = mount(() => ({
+          queryKey: ['r'],
+          queryFn: () => throwError(() => new Error('down')),
+          retry: false,
+        }))
+
+        result.refetch()
+
+        // fakeAsync rethrows an unhandled rejection when microtasks run.
+        expect(() => flushMicrotasks()).not.toThrow()
+        expect(result.isError()).toBe(true)
+      }))
+    })
   })
 
   // One invalidateQueries() call costs one request per query, however many
@@ -715,8 +832,13 @@ describe('injectQuery', () => {
         }))
 
         constructor() {
+          // Stopped after 20 runs, so a loop fails the expectations rather
+          // than hanging the test.
           effect(() => {
             runs++
+
+            if (runs > 20) return
+
             client.invalidateQueries({ queryKey: ['dep'] })
           })
         }
@@ -734,6 +856,270 @@ describe('injectQuery', () => {
 
       expect(runs).toBe(1)
     })
+
+    // invalidateQueries() resolves once the matching queries on screen have
+    // their refetches back. Settled with no value is `{ value: undefined }`,
+    // pending is `{}`.
+    describe('invalidateQueries() promise', () => {
+      it('resolves once every query on screen has its refetch back', fakeAsync(() => {
+        const list = requests<string>()
+        const count = requests<number>()
+
+        mount(() => ({ queryKey: ['todos'], queryFn: list.queryFn }))
+        mount(() => ({ queryKey: ['todos', 'count'], queryFn: count.queryFn }))
+        list.resolve('a')
+        count.resolve(1)
+
+        const invalidated = settled(
+          client.invalidateQueries({ queryKey: ['todos'] }),
+        )
+
+        list.resolve('b')
+        flushMicrotasks()
+        expect(invalidated).toEqual({})
+
+        count.resolve(2)
+        flushMicrotasks()
+        expect(invalidated).toEqual({ value: undefined })
+      }))
+
+      it('resolves at once when no query on screen matches', fakeAsync(() => {
+        const other = requests<string>()
+
+        // On screen, still loading, under another key.
+        mount(() => ({ queryKey: ['other'], queryFn: other.queryFn }))
+        client.setQueryData(['todos'], 'cached')
+
+        const invalidated = settled(
+          client.invalidateQueries({ queryKey: ['todos'] }),
+        )
+
+        flushMicrotasks()
+
+        expect(invalidated).toEqual({ value: undefined })
+      }))
+
+      it("doesn't reject when a refetch fails", fakeAsync(() => {
+        const error = new Error('down')
+        let fail = false
+        const { result } = mount(() => ({
+          queryKey: ['todos'],
+          queryFn: () => (fail ? throwError(() => error) : of('a')),
+          retry: false,
+        }))
+
+        fail = true
+
+        const invalidated = settled(
+          client.invalidateQueries({ queryKey: ['todos'] }),
+        )
+
+        flushMicrotasks()
+
+        // The failure shows in the query, not in the promise.
+        expect(invalidated).toEqual({ value: undefined })
+        expect(result.error()).toBe(error)
+      }))
+
+      it('waits for the other refetches when one fails', fakeAsync(() => {
+        const count = requests<number>()
+        let fail = false
+
+        mount(() => ({
+          queryKey: ['todos'],
+          queryFn: () => (fail ? throwError(() => new Error('down')) : of('a')),
+          retry: false,
+        }))
+        mount(() => ({ queryKey: ['todos', 'count'], queryFn: count.queryFn }))
+        count.resolve(1)
+        fail = true
+
+        const invalidated = settled(
+          client.invalidateQueries({ queryKey: ['todos'] }),
+        )
+
+        flushMicrotasks()
+        expect(invalidated).toEqual({})
+
+        count.resolve(2)
+        flushMicrotasks()
+        expect(invalidated).toEqual({ value: undefined })
+      }))
+
+      it('waits for the refetch that replaces its own', fakeAsync(() => {
+        const { queryFn, resolve, cancelled } = requests<string>()
+
+        mount(() => ({ queryKey: ['todos'], queryFn }))
+        resolve('a')
+
+        const first = settled(client.invalidateQueries({ queryKey: ['todos'] }))
+        // A second invalidation replaces the first one's refetch.
+        const second = settled(
+          client.invalidateQueries({ queryKey: ['todos'] }),
+        )
+
+        flushMicrotasks()
+        expect(first).toEqual({})
+
+        resolve('b')
+        flushMicrotasks()
+
+        expect(cancelled()).toBe(1)
+        expect(first).toEqual({ value: undefined })
+        expect(second).toEqual({ value: undefined })
+      }))
+
+      it("only marks the queries with refetchType: 'none'", fakeAsync(() => {
+        const { queryFn, resolve } = requests<string>()
+
+        mount(() => ({ queryKey: ['todos'], queryFn, staleTime: Infinity }))
+        resolve('a')
+
+        const invalidated = settled(
+          client.invalidateQueries({
+            queryKey: ['todos'],
+            refetchType: 'none',
+          }),
+        )
+
+        flushMicrotasks()
+
+        expect(invalidated).toEqual({ value: undefined })
+        expect(queryFn).toHaveBeenCalledTimes(1)
+
+        // Marked stale, so the next component to show it refetches it,
+        // although its staleTime would keep the data fresh.
+        mount(() => ({ queryKey: ['todos'], queryFn, staleTime: Infinity }))
+
+        expect(queryFn).toHaveBeenCalledTimes(2)
+      }))
+
+      it("doesn't surface a failed refetch nobody waits for as an unhandled rejection", fakeAsync(() => {
+        let fail = false
+
+        mount(() => ({
+          queryKey: ['todos'],
+          queryFn: () => (fail ? throwError(() => new Error('down')) : of('a')),
+          retry: false,
+        }))
+        fail = true
+        client.invalidateQueries({ queryKey: ['todos'] })
+
+        // fakeAsync rethrows an unhandled rejection when microtasks run.
+        expect(() => flushMicrotasks()).not.toThrow()
+      }))
+    })
+  })
+
+  // refetchQueries() refetches the matching queries on screen, fresh or not,
+  // and leaves the rest as they are.
+  describe('refetchQueries', () => {
+    it('refetches a query on screen once, fresh as its data is', fakeAsync(() => {
+      const { queryFn, resolve } = requests<string>()
+      const { results } = mountMany(2, () => ({
+        queryKey: ['todos'],
+        queryFn,
+        staleTime: Infinity,
+      }))
+
+      resolve('a')
+
+      const refetched = settled(client.refetchQueries({ queryKey: ['todos'] }))
+
+      // Two components show it, one request.
+      expect(queryFn).toHaveBeenCalledTimes(2)
+
+      flushMicrotasks()
+      expect(refetched).toEqual({})
+
+      resolve('b')
+      flushMicrotasks()
+
+      expect(refetched).toEqual({ value: undefined })
+      expect(results[0].data()).toBe('b')
+    }))
+
+    it('refetches only the queries the filter matches', fakeAsync(() => {
+      const todos = jasmine.createSpy('todos').and.returnValue(of('a'))
+      const user = jasmine.createSpy('user').and.returnValue(of('Ann'))
+
+      mount(() => ({
+        queryKey: ['todos'],
+        queryFn: todos,
+        staleTime: Infinity,
+      }))
+      mount(() => ({ queryKey: ['user'], queryFn: user, staleTime: Infinity }))
+      client.refetchQueries({ queryKey: ['todos'] })
+
+      expect(todos).toHaveBeenCalledTimes(2)
+      expect(user).toHaveBeenCalledTimes(1)
+    }))
+
+    it('leaves a query nobody shows alone, not even marked stale', fakeAsync(() => {
+      const queryFn = jasmine.createSpy('queryFn').and.returnValue(of('a'))
+
+      client.setQueryData(['todos'], 'cached')
+
+      const refetched = settled(client.refetchQueries({ queryKey: ['todos'] }))
+
+      flushMicrotasks()
+
+      expect(refetched).toEqual({ value: undefined })
+
+      // Its data is still fresh for a component that keeps data fresh for
+      // long, so showing it fetches nothing.
+      mount(() => ({ queryKey: ['todos'], queryFn, staleTime: Infinity }))
+
+      expect(queryFn).not.toHaveBeenCalled()
+    }))
+
+    it('skips a query whose components are all disabled', fakeAsync(() => {
+      const queryFn = jasmine.createSpy('queryFn').and.returnValue(of('a'))
+
+      mount(() => ({ queryKey: ['todos'], queryFn, enabled: false }))
+
+      const refetched = settled(client.refetchQueries({ queryKey: ['todos'] }))
+
+      flushMicrotasks()
+
+      expect(refetched).toEqual({ value: undefined })
+      expect(queryFn).not.toHaveBeenCalled()
+    }))
+
+    it('replaces a fetch in flight', fakeAsync(() => {
+      const { queryFn, resolve, cancelled } = requests<string>()
+
+      // The first load is still in flight.
+      mount(() => ({ queryKey: ['todos'], queryFn }))
+
+      const refetched = settled(client.refetchQueries({ queryKey: ['todos'] }))
+
+      resolve('b')
+      flushMicrotasks()
+
+      expect(cancelled()).toBe(1)
+      expect(refetched).toEqual({ value: undefined })
+    }))
+
+    it("doesn't reject when a refetch fails", fakeAsync(() => {
+      const error = new Error('down')
+      let fail = false
+      const { result } = mount(() => ({
+        queryKey: ['todos'],
+        queryFn: () => (fail ? throwError(() => error) : of('a')),
+        retry: false,
+      }))
+
+      fail = true
+
+      const refetched = settled(client.refetchQueries({ queryKey: ['todos'] }))
+
+      flushMicrotasks()
+
+      // The failure shows in the query, not in the promise.
+      expect(refetched).toEqual({ value: undefined })
+      expect(result.error()).toBe(error)
+    }))
   })
 
   describe('options re-evaluation', () => {
