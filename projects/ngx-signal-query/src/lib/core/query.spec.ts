@@ -6,14 +6,15 @@ import { CancelledError } from './cancelled-error'
 import { Query, type QuerySubscriber } from './query'
 import type { QueryCache } from './query-cache'
 
-function createQuery<TData, TError = Error>() {
+function createQuery<TData, TError = Error>(gcTime = 5 * 60_000) {
   // Query only calls cache.remove(this) on gc; a stub is enough.
   const cache = { remove: jasmine.createSpy('remove') }
-  const query = new Query<TData, TError>(
-    ['key'],
-    '["key"]',
-    cache as unknown as QueryCache,
-  )
+  const query = new Query<TData, TError>({
+    key: ['key'],
+    queryHash: '["key"]',
+    cache: cache as unknown as QueryCache,
+    gcTime,
+  })
 
   return { query, cache }
 }
@@ -697,11 +698,20 @@ describe('Query', () => {
       expect(query.state().data).toBeUndefined()
     }))
 
+    it('removes a query nothing uses gcTime after it is created', fakeAsync(() => {
+      const { query, cache } = createQuery<number>(1000)
+
+      tick(999)
+      expect(cache.remove).not.toHaveBeenCalled()
+
+      tick(1)
+      expect(cache.remove).toHaveBeenCalledWith(query)
+    }))
+
     it('schedules gc removal when the last observer leaves', fakeAsync(() => {
-      const { query, cache } = createQuery<number>()
+      const { query, cache } = createQuery<number>(1000)
       const observer = stubObserver()
 
-      query.setGcTime(1000)
       query.addObserver(observer)
 
       query.removeObserver(observer)
@@ -712,10 +722,9 @@ describe('Query', () => {
     }))
 
     it('removes immediately when gcTime is 0 and the last observer leaves', fakeAsync(() => {
-      const { query, cache } = createQuery<number>()
+      const { query, cache } = createQuery<number>(0)
       const observer = stubObserver()
 
-      query.setGcTime(0)
       query.addObserver(observer)
 
       query.removeObserver(observer)
@@ -725,9 +734,7 @@ describe('Query', () => {
     }))
 
     it('schedules gc for an orphaned setData write (no observers)', fakeAsync(() => {
-      const { query, cache } = createQuery<number>()
-
-      query.setGcTime(1000)
+      const { query, cache } = createQuery<number>(1000)
 
       query.setData(1) // no observer → orphaned, must still be collected
 
@@ -736,9 +743,8 @@ describe('Query', () => {
     }))
 
     it('does not gc a setData write while it has observers', fakeAsync(() => {
-      const { query, cache } = createQuery<number>()
+      const { query, cache } = createQuery<number>(1000)
 
-      query.setGcTime(1000)
       query.addObserver(stubObserver())
 
       query.setData(1)
@@ -747,11 +753,26 @@ describe('Query', () => {
       expect(cache.remove).not.toHaveBeenCalled()
     }))
 
+    it('never removes a query whose gcTime is Infinity, or more than a timer can hold', async () => {
+      // A browser runs a timer it can't hold at once. fakeAsync doesn't mimic
+      // the browser here, hence real timers.
+      for (const gcTime of [Infinity, 2 ** 31]) {
+        const { query, cache } = createQuery<number>(gcTime)
+        const observer = stubObserver()
+
+        query.addObserver(observer)
+        query.removeObserver(observer)
+        query.setData(1)
+        await new Promise((resolve) => setTimeout(resolve, 20))
+
+        expect(cache.remove).not.toHaveBeenCalled()
+      }
+    })
+
     it('cancels a scheduled gc when an observer returns', fakeAsync(() => {
-      const { query, cache } = createQuery<number>()
+      const { query, cache } = createQuery<number>(1000)
       const observer = stubObserver()
 
-      query.setGcTime(1000)
       query.addObserver(observer)
       query.removeObserver(observer)
 
@@ -760,6 +781,90 @@ describe('Query', () => {
       tick(1000)
 
       expect(cache.remove).not.toHaveBeenCalled()
+    }))
+
+    it('keeps the longest gcTime it was given', fakeAsync(() => {
+      const { query, cache } = createQuery<number>(1000)
+      const observer = stubObserver()
+
+      query.updateGcTime(60_000)
+      query.updateGcTime(500)
+      query.addObserver(observer)
+      query.removeObserver(observer)
+
+      tick(59_999)
+      expect(cache.remove).not.toHaveBeenCalled()
+
+      tick(1)
+      expect(cache.remove).toHaveBeenCalledWith(query)
+    }))
+
+    it('treats a negative gcTime as 0', fakeAsync(() => {
+      const { query, cache } = createQuery<number>(-1)
+      const observer = stubObserver()
+
+      query.addObserver(observer)
+      query.removeObserver(observer)
+      tick(0)
+
+      expect(cache.remove).toHaveBeenCalledWith(query)
+    }))
+
+    it('keeps a query while a fetch of it is in flight, and removes it gcTime after the fetch lands', fakeAsync(() => {
+      const { query, cache } = createQuery<number>(1000)
+      const response = new Subject<number>()
+
+      query.setData(1)
+      tick(500)
+      query.fetch({ queryFn: () => response })
+      tick(700)
+      expect(cache.remove).not.toHaveBeenCalled()
+
+      response.next(2)
+      response.complete()
+      tick(999)
+      expect(cache.remove).not.toHaveBeenCalled()
+
+      tick(1)
+      expect(cache.remove).toHaveBeenCalledWith(query)
+    }))
+
+    it('removes a query nobody observes gcTime after a fetch of it fails', fakeAsync(() => {
+      const { query, cache } = createQuery<number>(1000)
+      const response = new Subject<number>()
+
+      query.fetch({ queryFn: () => response })
+      tick(500)
+      response.error(new Error('down'))
+      tick(999)
+      expect(cache.remove).not.toHaveBeenCalled()
+
+      tick(1)
+      expect(cache.remove).toHaveBeenCalledWith(query)
+    }))
+
+    it('removes a query nobody observes gcTime after a fetch of it is cancelled', fakeAsync(() => {
+      const { query, cache } = createQuery<number>(1000)
+
+      query.fetch({ queryFn: () => new Subject<number>() })
+      tick(1500)
+      query.cancel()
+      tick(999)
+      expect(cache.remove).not.toHaveBeenCalled()
+
+      tick(1)
+      expect(cache.remove).toHaveBeenCalledWith(query)
+    }))
+
+    it("doesn't put off gc when there's no fetch to cancel", fakeAsync(() => {
+      const { query, cache } = createQuery<number>(1000)
+
+      query.setData(1)
+      tick(600)
+      query.cancel()
+      tick(400)
+
+      expect(cache.remove).toHaveBeenCalledWith(query)
     }))
   })
 

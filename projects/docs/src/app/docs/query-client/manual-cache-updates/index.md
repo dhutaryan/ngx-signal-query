@@ -51,6 +51,9 @@ A few things worth knowing:
   what the cache holds, like a response: if it's equal, `data()` keeps its
   reference and nothing that reads it runs again. See
   [Structural Sharing](/queries/structural-sharing).
+- **A key no component shows is kept for `gcTime`** after the last write, 5
+  minutes by default, then removed like any other unused query. Each write
+  starts the clock over.
 
 ## Updating from a mutation response
 
@@ -112,7 +115,9 @@ page changes, say: see
 [Calling it from an effect](/query-client/overview#calling-it-from-an-effect).
 
 When the real `injectQuery` mounts, it finds the data already cached and renders
-without a loading state.
+without a loading state. If nothing shows it within `gcTime` of the fetch
+landing, 5 minutes by default, the prefetched query is removed like any other
+unused one. A fetch still in flight keeps it.
 
 ### Waiting for the data
 

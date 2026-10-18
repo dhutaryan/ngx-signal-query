@@ -1,7 +1,9 @@
-import { DOCUMENT, isPlatformBrowser } from '@angular/common'
-import { PLATFORM_ID, inject } from '@angular/core'
+import { DOCUMENT } from '@angular/common'
+import { inject } from '@angular/core'
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop'
 import { filter, fromEvent } from 'rxjs'
+
+import { inBrowser } from './platform'
 
 /**
  * Calls `listener` whenever the user comes back to the page, as the tab or
@@ -48,10 +50,4 @@ export function onReconnect(listener: () => void): void {
   fromEvent(window, 'online')
     .pipe(takeUntilDestroyed())
     .subscribe(() => listener())
-}
-
-// On the server, DOCUMENT is an emulated document that has listeners,
-// a window and no visibilityState: only the platform tells.
-function inBrowser(): boolean {
-  return isPlatformBrowser(inject(PLATFORM_ID))
 }

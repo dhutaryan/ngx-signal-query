@@ -1,4 +1,4 @@
-import { Component, effect, signal } from '@angular/core'
+import { Component, PLATFORM_ID, effect, signal } from '@angular/core'
 import {
   type ComponentFixture,
   fakeAsync,
@@ -65,6 +65,7 @@ describe('QueryClient', () => {
       })
 
       expect(defaulted.staleTime).toBe(0)
+      expect(defaulted.gcTime).toBe(5 * 60_000)
       expect(defaulted.retry).toBe(3)
       expect(typeof defaulted.retryDelay).toBe('function')
       expect(defaulted.refetchOnWindowFocus).toBe(true)
@@ -76,15 +77,47 @@ describe('QueryClient', () => {
         queryKey: ['a'],
         queryFn: () => of(1),
         staleTime: 5000,
+        gcTime: 1000,
         retry: 1,
         refetchOnWindowFocus: 'always',
         refetchOnReconnect: false,
       })
 
       expect(defaulted.staleTime).toBe(5000)
+      expect(defaulted.gcTime).toBe(1000)
       expect(defaulted.retry).toBe(1)
       expect(defaulted.refetchOnWindowFocus).toBe('always')
       expect(defaulted.refetchOnReconnect).toBe(false)
+    })
+
+    describe('on the server', () => {
+      beforeEach(() => {
+        TestBed.resetTestingModule()
+        TestBed.configureTestingModule({
+          providers: [
+            provideQueryClient(
+              withDefaultOptions({ queries: { gcTime: 60_000 } }),
+            ),
+            { provide: PLATFORM_ID, useValue: 'server' },
+          ],
+        })
+        client = TestBed.inject(QueryClient)
+      })
+
+      it('gives every query gcTime Infinity, whatever the query or the app asks for', () => {
+        const asked = client.defaultQueryOptions({
+          queryKey: ['a'],
+          queryFn: () => of(1),
+          gcTime: 1000,
+        })
+        const configured = client.defaultQueryOptions({
+          queryKey: ['b'],
+          queryFn: () => of(1),
+        })
+
+        expect(asked.gcTime).toBe(Infinity)
+        expect(configured.gcTime).toBe(Infinity)
+      })
     })
   })
 
@@ -97,6 +130,7 @@ describe('QueryClient', () => {
             withDefaultOptions({
               queries: {
                 staleTime: 1234,
+                gcTime: 60_000,
                 retry: 5,
                 retryDelay: 100,
                 refetchOnWindowFocus: false,
@@ -116,6 +150,7 @@ describe('QueryClient', () => {
       })
 
       expect(defaulted.staleTime).toBe(1234)
+      expect(defaulted.gcTime).toBe(60_000)
       expect(defaulted.retry).toBe(5)
       expect(defaulted.refetchOnWindowFocus).toBe(false)
       expect(defaulted.refetchOnReconnect).toBe(false)
@@ -126,10 +161,12 @@ describe('QueryClient', () => {
         queryKey: ['a'],
         queryFn: () => of(1),
         staleTime: 0,
+        gcTime: 1000,
         refetchOnWindowFocus: 'always',
       })
 
       expect(defaulted.staleTime).toBe(0)
+      expect(defaulted.gcTime).toBe(1000)
       expect(defaulted.retry).toBe(5)
       expect(defaulted.refetchOnWindowFocus).toBe('always')
       expect(defaulted.refetchOnReconnect).toBe(false)
@@ -567,6 +604,116 @@ describe('QueryClient', () => {
 
       expect(cache.get(['todos'])).toBeDefined()
       expect(cache.get(['todos', undefined])).toBeUndefined()
+    })
+  })
+
+  // A query nobody shows, from a prefetch or written by hand, is removed once
+  // it has gone unused for gcTime. A fetch in flight counts as use.
+  describe('garbage collection', () => {
+    it('removes a prefetched query nobody shows gcTime after its fetch lands', fakeAsync(() => {
+      const response = new Subject<string>()
+
+      client.fetchQuery(['todos'], () => response)
+      tick(60_000)
+      response.next('v1')
+      response.complete()
+
+      tick(5 * 60_000 - 1)
+      expect(client.getQueryData(['todos'])).toBe('v1')
+
+      tick(1)
+      expect(client.getQueryData(['todos'])).toBeUndefined()
+    }))
+
+    it("doesn't remove a query while it fetches, and removes it gcTime after the fetch lands", fakeAsync(() => {
+      const response = new Subject<string>()
+
+      client.setQueryData(['todos'], 'v1')
+      tick(5 * 60_000 - 1000)
+      client.fetchQuery(['todos'], () => response)
+      tick(1000)
+
+      expect(client.getQueryData(['todos'])).toBe('v1')
+
+      response.next('v2')
+      response.complete()
+
+      expect(client.getQueryData(['todos'])).toBe('v2')
+
+      tick(5 * 60_000 - 1)
+      expect(client.getQueryData(['todos'])).toBe('v2')
+
+      tick(1)
+      expect(client.getQueryData(['todos'])).toBeUndefined()
+    }))
+
+    it('keeps data written into a query nobody shows for gcTime after the last write', fakeAsync(() => {
+      client.setQueryData(['todos'], 'v1')
+      tick(4 * 60_000)
+      client.setQueryData(['todos'], 'v2')
+
+      tick(5 * 60_000 - 1)
+      expect(client.getQueryData(['todos'])).toBe('v2')
+
+      tick(1)
+      expect(client.getQueryData(['todos'])).toBeUndefined()
+    }))
+
+    it("doesn't put off removing queries cancelQueries finds nothing to cancel in", fakeAsync(() => {
+      client.setQueryData(['todos'], 'v1')
+      tick(3 * 60_000)
+      client.cancelQueries()
+      tick(2 * 60_000)
+
+      expect(client.getQueryData(['todos'])).toBeUndefined()
+    }))
+
+    describe('with a configured gcTime', () => {
+      beforeEach(() => {
+        TestBed.resetTestingModule()
+        TestBed.configureTestingModule({
+          providers: [
+            provideQueryClient(
+              withDefaultOptions({ queries: { gcTime: 1000 } }),
+            ),
+          ],
+        })
+        client = TestBed.inject(QueryClient)
+      })
+
+      it('removes data written into the cache by hand after it', fakeAsync(() => {
+        client.setQueryData(['todos'], 'v1')
+
+        tick(999)
+        expect(client.getQueryData(['todos'])).toBe('v1')
+
+        tick(1)
+        expect(client.getQueryData(['todos'])).toBeUndefined()
+      }))
+
+      it('removes a prefetched query nobody shows after it', fakeAsync(() => {
+        client.fetchQuery(['todos'], () => of('v1'))
+
+        tick(999)
+        expect(client.getQueryData(['todos'])).toBe('v1')
+
+        tick(1)
+        expect(client.getQueryData(['todos'])).toBeUndefined()
+      }))
+
+      it('removes a prefetch it cancels that long after the cancel', fakeAsync(() => {
+        // The prefetch is slow: it's still in flight when gcTime first runs
+        // out.
+        client.fetchQuery(['todos'], () => new Subject<string>())
+        tick(2000)
+        client.cancelQueries({ queryKey: ['todos'] })
+
+        tick(999)
+        expect(client.getQueryCache().get(['todos'])).toBeDefined()
+
+        tick(1)
+        expect(client.getQueryCache().get(['todos'])).toBeUndefined()
+      }))
     })
   })
 

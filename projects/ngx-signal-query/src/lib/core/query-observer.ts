@@ -99,7 +99,10 @@ export function createQueryObserver<TData, TError = Error>(
   // writes signals (the cache's entries, the query's state), so callers run it
   // untracked: reached from a computed, a tracked write throws NG0600.
   const resolve = (key: QueryKey): Query<TData, TError> => {
-    const q = cache.getOrCreate<TData, TError>(key)
+    const q = cache.getOrCreate<TData, TError>(
+      key,
+      untracked(defaultedOptions).gcTime,
+    )
 
     applyInitialData(q)
 
@@ -204,11 +207,8 @@ export function createQueryObserver<TData, TError = Error>(
 
   track((cleanup) => {
     const q = query()
-    const { gcTime } = untracked(defaultedOptions)
 
-    if (gcTime !== undefined) {
-      q.setGcTime(gcTime)
-    }
+    q.updateGcTime(untracked(defaultedOptions).gcTime)
 
     // This observer as q sees it.
     const subscriber: QuerySubscriber<TData, TError> = {
