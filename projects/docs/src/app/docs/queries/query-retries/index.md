@@ -120,6 +120,15 @@ that has no data yet is back in `'pending'`, with `error()` at `null` and
 query with data keeps showing it while it refetches; see
 [Trying again after an error](/queries/overview#trying-again-after-an-error).
 
+## When nothing shows the query any more
+
+Retries are for the components showing a query. When the last one goes away
+during a fetch, an `Observable` fetch is cancelled outright. A `Promise` fetch
+runs on, but a failure isn't tried again: it settles into `'error'` at once,
+or, if it was waiting for a retry, once the wait is over. A component that
+shows the key again before then picks the retries up where they were. See
+[Cancellation](/queries/query-functions#cancellation-observable-or-promise).
+
 ## Setting it once
 
 Rather than repeating a retry policy on every query, set it globally when you
