@@ -461,6 +461,26 @@ describe('Query', () => {
       expect(query.state().isFetching).toBe(false)
     }))
 
+    it('stops a fetch that its own queryFn cancels while it runs', () => {
+      const { query } = createQuery<number>()
+      const response = new Subject<number>()
+
+      query.fetch({
+        queryFn: () => {
+          query.cancel()
+
+          return response
+        },
+      })
+
+      expect(response.observed).toBe(false)
+
+      response.next(1)
+
+      expect(query.state().status).toBe('pending')
+      expect(query.state().data).toBeUndefined()
+    })
+
     it('goes back when the query is destroyed', () => {
       const error = new Error('down')
       const query = failedAndTriedAgain(error)
