@@ -15,6 +15,7 @@ import { injectMutation } from './inject-mutation'
 import { injectQuery } from './inject-query'
 import { provideQueryClient } from './provider'
 import { QueryClient } from './query-client'
+import { deferred } from './utils'
 
 // Runs `body` in an effect of a mounted component, the way an app calls the
 // client from one. Returns the fixture (detectChanges() flushes the effect
@@ -374,6 +375,34 @@ describe('QueryClient', () => {
 
         expect(result.value).toBe(1)
         expect(second).not.toHaveBeenCalled()
+      }))
+
+      it('resolves with the response of a request the component that started it left', fakeAsync(() => {
+        const response = deferred<string>()
+
+        @Component({ template: '' })
+        class TodoList {
+          readonly todos = injectQuery(() => ({
+            queryKey: ['todos'],
+            queryFn: () => response.promise,
+          }))
+        }
+
+        const fixture = TestBed.createComponent(TodoList)
+
+        fixture.detectChanges()
+
+        // A route resolver waits for the list that the page it navigates
+        // away from started loading.
+        const result = settled(
+          client.fetchQuery(['todos'], () => response.promise),
+        )
+
+        fixture.destroy()
+        response.resolve('a')
+        flushMicrotasks()
+
+        expect(result.value).toBe('a')
       }))
 
       it('resolves with the data as the cache keeps it', fakeAsync(() => {

@@ -5,6 +5,7 @@ import { settled } from '../../spec-helpers/promises'
 import { CancelledError } from './cancelled-error'
 import { Query, type QuerySubscriber } from './query'
 import type { QueryCache } from './query-cache'
+import { deferred } from './utils'
 
 function createQuery<TData, TError = Error>(gcTime = 5 * 60_000) {
   // Query only calls cache.remove(this) on gc; a stub is enough.
@@ -187,6 +188,97 @@ describe('Query', () => {
     expect(state.failureCount).toBe(3)
     expect(state.failureReason).toBe(err)
   }))
+
+  // A retry asks for a queryFn again rather than running the first one once
+  // more: one that reads its key's value when it runs may belong to a
+  // component that has moved on to another key by then.
+  describe('the queryFn a retry runs', () => {
+    // A queryFn whose request fails.
+    function failing(): jasmine.Spy<() => Observable<number>> {
+      return jasmine
+        .createSpy('failing')
+        .and.returnValue(throwError(() => new Error('down')))
+    }
+
+    it("leaves the first attempt to the caller's queryFn", () => {
+      const { query } = createQuery<number>()
+      const caller = jasmine.createSpy('caller').and.returnValue(of(1))
+      const observed = jasmine.createSpy('observed').and.returnValue(of(2))
+
+      query.addObserver(activeObserver(observed))
+      query.fetch({ queryFn: caller })
+
+      expect(caller).toHaveBeenCalledTimes(1)
+      expect(observed).not.toHaveBeenCalled()
+    })
+
+    it('is that of the first observer that wants the query fetched', fakeAsync(() => {
+      const { query } = createQuery<number>()
+      const started = failing()
+      const first = jasmine.createSpy('first').and.returnValue(of(2))
+      const second = jasmine.createSpy('second').and.returnValue(of(3))
+
+      query.addObserver(stubObserver())
+      query.addObserver(activeObserver(first))
+      query.addObserver(activeObserver(second))
+      query.fetch({ queryFn: started, retry: 1, retryDelay: 10 })
+      tick(10)
+
+      expect(started).toHaveBeenCalledTimes(1)
+      expect(first).toHaveBeenCalledTimes(1)
+      expect(second).not.toHaveBeenCalled()
+      expect(query.state().data).toBe(2)
+    }))
+
+    it('counts a queryFn that throws rather than returning as the first attempt', fakeAsync(() => {
+      const { query } = createQuery<number>()
+      const started = jasmine.createSpy('started').and.throwError('down')
+      const observed = jasmine.createSpy('observed').and.returnValue(of(2))
+
+      query.addObserver(activeObserver(observed))
+      query.fetch({ queryFn: started, retry: 1, retryDelay: 10 })
+      tick(10)
+
+      expect(started).toHaveBeenCalledTimes(1)
+      expect(observed).toHaveBeenCalledTimes(1)
+    }))
+
+    it('is that of whoever joined the fetch last while no observer wants it fetched', fakeAsync(() => {
+      const { query } = createQuery<number>()
+      const started = failing()
+      const joined = jasmine.createSpy('joined').and.returnValue(of(2))
+
+      query.addObserver(stubObserver())
+      query.fetch({ queryFn: started, retry: 1, retryDelay: 10 })
+      query.fetch({ queryFn: joined })
+      tick(10)
+
+      expect(started).toHaveBeenCalledTimes(1)
+      expect(joined).toHaveBeenCalledTimes(1)
+      expect(query.state().data).toBe(2)
+    }))
+
+    it("is the fetch's own once it replaced another that someone joined", fakeAsync(() => {
+      const { query } = createQuery<number>()
+      const replacing = jasmine.createSpy('replacing').and.returnValues(
+        throwError(() => new Error('down')),
+        of(2),
+      )
+      const joined = jasmine.createSpy('joined')
+
+      query.fetch({ queryFn: () => new Subject<number>() })
+      query.fetch({ queryFn: joined })
+      query.fetch(
+        { queryFn: replacing, retry: 1, retryDelay: 10 },
+        { cancelRefetch: true },
+      )
+      tick(10)
+
+      expect(joined).not.toHaveBeenCalled()
+      expect(replacing).toHaveBeenCalledTimes(2)
+      expect(query.state().data).toBe(2)
+    }))
+  })
 
   describe('fetching after a failure', () => {
     it("goes back to 'pending' with no error while it has no data", () => {
@@ -683,19 +775,153 @@ describe('Query', () => {
       expect(query.observerCount).toBe(1)
     })
 
-    it('cancels an in-flight fetch when the last observer leaves', fakeAsync(() => {
+    it('cancels an Observable fetch in flight when the last observer leaves', () => {
+      const { query } = createQuery<number>()
+      const observer = stubObserver()
+      const response = new Subject<number>()
+
+      query.addObserver(observer)
+      query.fetch({ queryFn: () => response })
+      query.removeObserver(observer)
+
+      // Unsubscribed, so an HttpClient request would be aborted.
+      expect(response.observed).toBe(false)
+      expect(query.state().status).toBe('pending')
+      expect(query.state().isFetching).toBe(false)
+    })
+
+    it('lets a promise fetch in flight land when the last observer leaves', fakeAsync(() => {
       const { query } = createQuery<number>()
       const observer = stubObserver()
 
       query.addObserver(observer)
       query.fetch({ queryFn: () => Promise.resolve(1) })
-
       query.removeObserver(observer)
+
+      // Its request runs to the end anyway.
+      expect(query.state().isFetching).toBe(true)
+
       tick()
 
-      // Fetch was cancelled before it could resolve.
-      expect(query.state().status).toBe('pending')
-      expect(query.state().data).toBeUndefined()
+      expect(query.state().status).toBe('success')
+      expect(query.state().data).toBe(1)
+    }))
+
+    it('goes by the request of the last attempt when the last observer leaves', fakeAsync(() => {
+      const { query } = createQuery<number>()
+      const observer = stubObserver()
+      const response = deferred<number>()
+
+      // The first attempt's Observable fails, and the retry sends the promise
+      // of a caller that joined meanwhile.
+      query.addObserver(observer)
+      query.fetch({
+        queryFn: () => throwError(() => new Error('down')),
+        retry: 1,
+        retryDelay: 10,
+      })
+      query.fetch({ queryFn: () => response.promise })
+      tick(10)
+      query.removeObserver(observer)
+      response.resolve(2)
+      flushMicrotasks()
+
+      expect(query.state().data).toBe(2)
+    }))
+
+    it("doesn't try a promise fetch again once its last observer left", fakeAsync(() => {
+      const { query } = createQuery<number>()
+      const observer = stubObserver()
+      const error = new Error('down')
+      const response = deferred<number>()
+      const queryFn = jasmine
+        .createSpy('queryFn')
+        .and.returnValue(response.promise)
+
+      query.addObserver(observer)
+      query.fetch({ queryFn, retry: 3, retryDelay: 10 })
+      query.removeObserver(observer)
+      response.reject(error)
+      flushMicrotasks()
+
+      // It fails at once, with no wait for a retry.
+      expect(query.state()).toEqual(
+        jasmine.objectContaining({ status: 'error', error, isFetching: false }),
+      )
+
+      tick(100)
+
+      expect(queryFn).toHaveBeenCalledTimes(1)
+    }))
+
+    it('ends a promise fetch with its error when the wait for a retry is over, if its last observer left during the wait', fakeAsync(() => {
+      const { query } = createQuery<number>()
+      const observer = stubObserver()
+      const error = new Error('down')
+      const queryFn = jasmine
+        .createSpy('queryFn')
+        .and.callFake(() => Promise.reject(error))
+
+      query.addObserver(observer)
+      query.fetch({ queryFn, retry: 3, retryDelay: 100 })
+      tick(50)
+      query.removeObserver(observer)
+
+      expect(query.state().isFetching).toBe(true)
+
+      tick(50)
+
+      expect(queryFn).toHaveBeenCalledTimes(1)
+      expect(query.state()).toEqual(
+        jasmine.objectContaining({
+          status: 'error',
+          error,
+          failureCount: 1,
+          isFetching: false,
+        }),
+      )
+    }))
+
+    it('tries a promise fetch again once someone joins it after its last observer left', fakeAsync(() => {
+      const { query } = createQuery<number>()
+      const observer = stubObserver()
+      const response = deferred<number>()
+      const queryFn = jasmine
+        .createSpy('queryFn')
+        .and.returnValues(response.promise, Promise.resolve(2))
+
+      query.addObserver(observer)
+      query.fetch({ queryFn, retry: 1, retryDelay: 10 })
+      query.removeObserver(observer)
+      query.fetch({ queryFn })
+      response.reject(new Error('down'))
+      tick(10)
+
+      expect(queryFn).toHaveBeenCalledTimes(2)
+      expect(query.state().data).toBe(2)
+    }))
+
+    it('tries a later fetch again as usual after one its last observer left', fakeAsync(() => {
+      const { query } = createQuery<number>()
+      const observer = stubObserver()
+      // Lands, then fails, then lands.
+      const queryFn = jasmine
+        .createSpy('queryFn')
+        .and.callFake(() =>
+          queryFn.calls.count() === 2
+            ? Promise.reject(new Error('down'))
+            : Promise.resolve(queryFn.calls.count()),
+        )
+
+      query.addObserver(observer)
+      query.fetch({ queryFn, retry: 1, retryDelay: 10 })
+      query.removeObserver(observer)
+      flushMicrotasks()
+      query.fetch({ queryFn, retry: 1, retryDelay: 10 })
+      tick(10)
+
+      expect(queryFn).toHaveBeenCalledTimes(3)
+      expect(query.state().data).toBe(3)
     }))
 
     it('removes a query nothing uses gcTime after it is created', fakeAsync(() => {

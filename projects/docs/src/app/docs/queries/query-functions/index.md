@@ -91,22 +91,35 @@ queryFn: async () => {
 Failures are retried before the query settles into `'error'` — see the retry
 options for how to tune that.
 
-## Cancellation: why `Observable` wins
+## Cancellation: `Observable` or `Promise`
 
-The library cancels an in-flight fetch by **unsubscribing** from it. That has a
-real consequence:
+The library cancels an in-flight fetch by **unsubscribing** from it. What that
+does depends on what `queryFn` returned:
 
 - **`Observable`** — unsubscribing propagates all the way down, and `HttpClient`
   **aborts the actual HTTP request**. Nothing is left in flight.
-- **`Promise`** — a promise can't be cancelled. Unsubscribing just means the
-  result is ignored; the request keeps running to completion in the background.
+- **`Promise`** — a promise can't be cancelled. Unsubscribing only means its
+  result is ignored; the request still runs to completion.
 
-A fetch still running is cancelled once no component shows its key: the last
-one showing it is destroyed, or its reactive key moves on. `refetch()` and
-`invalidateQueries()` cancel it to start a fresh one, and `cancelQueries()` and
-`removeQueries()` cancel it outright. If you care about not leaving orphaned
-requests behind (rapid typing in a search box, say), prefer `HttpClient` and
-its `Observable`.
+So when no component shows a key any more (the last one showing it is
+destroyed, or its reactive key moves on), a fetch still running stops only if
+it's an `Observable`. A `Promise` fetch runs on, and its response is cached as
+usual: come back before the query is [removed](/query-client/caching), and the
+data shows at once. Until then it still counts as fetching, in
+`injectIsFetching()` too. Nobody is left to want a failure tried again, though,
+so a failed attempt isn't retried, unless a component shows the key again
+before the fetch ends.
+
+`refetch()` and `invalidateQueries()` cancel a fetch in flight to start a fresh
+one, and `cancelQueries()` and `removeQueries()` cancel it outright, whatever
+`queryFn` returned: a promise's response is ignored then.
+
+So pick per query. To leave no requests behind (rapid typing in a search box,
+say), use `HttpClient` and its `Observable`. To keep a response the user may
+come back for, return a promise, e.g. `lastValueFrom(this.#http.get(...))`.
+Don't wrap a promise in an `Observable` (`from(fetch(...))`): unsubscribing
+can't abort the request, and its response is thrown away. Return the promise
+itself.
 
 ## Where do the variables come from?
 
@@ -138,3 +151,9 @@ one, and different data ends up sharing a cache entry.
 replayed. This is what makes retrying a `Promise` work at all (a promise is
 one-shot; retrying it would just hand back the same rejection), and it means
 your function should be safe to call more than once.
+
+A retry calls the `queryFn` of a component showing the key at that moment,
+when there is one, rather than always the one the fetch started with. So a
+function that reads a signal when it runs, as the one above does, still
+fetches the key it's retried for, even if its own component has moved on to
+another key by then.

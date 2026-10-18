@@ -117,7 +117,12 @@ export type StructuralSharingValue<TData> =
 export type QueryOptions<TData, TError = Error> = {
   /** Unique cache key for this query. See {@link QueryKey}. */
   queryKey: QueryKey
-  /** Fetcher returning the data as an `Observable` or `Promise`. */
+  /**
+   * Fetcher returning the data as an `Observable` or `Promise`. Once no
+   * component shows the query, an `Observable` fetch in flight is
+   * unsubscribed, which aborts an `HttpClient` request; a `Promise` one runs
+   * to the end, and its response is kept.
+   */
   queryFn: () => Observable<TData> | Promise<TData>
   /** How long fetched data stays fresh before refetching, in ms. Default `0`. */
   staleTime?: number

@@ -38,6 +38,7 @@ import { keepPreviousData } from './keep-previous-data'
 import { provideQueryClient } from './provider'
 import { QueryClient } from './query-client'
 import type { DefaultQueryOptions, QueryOptions, QueryResult } from './types'
+import { type Deferred, deferred } from './utils'
 
 // Mounts injectQuery in a host component, as mountHost() mounts anything:
 // its options may read the host's input.required `value`. Returns the result,
@@ -148,6 +149,27 @@ function requests<T>(): {
       subject.error(error)
     },
   }
+}
+
+// A queryFn whose requests return promises answered by hand: requests[n]
+// settles the n-th request sent. Unlike an Observable, a promise can't be
+// aborted: a request the query lets go of still runs to the end.
+function promiseRequests<T>(): {
+  queryFn: jasmine.Spy<(...args: unknown[]) => Promise<T>>
+  requests: Array<Deferred<T>>
+} {
+  const requests: Array<Deferred<T>> = []
+  const queryFn = jasmine
+    .createSpy<(...args: unknown[]) => Promise<T>>('queryFn')
+    .and.callFake(() => {
+      const request = deferred<T>()
+
+      requests.push(request)
+
+      return request.promise
+    })
+
+  return { queryFn, requests }
 }
 
 // A queryFn whose requests take `latency` ms each. `starts` records when each
@@ -1446,6 +1468,385 @@ describe('injectQuery', () => {
 
       expect(query?.observerCount).toBe(0)
     })
+  })
+
+  // The last component showing a query leaves while its request is in
+  // flight: it's destroyed, or its key moves on. Unsubscribing aborts an
+  // Observable request, so that one stops. A promise can't be aborted: its
+  // request runs to the end, and the response is kept for whoever shows the
+  // key next. Nobody is left to want a failure tried again.
+  describe('leaving while a request is in flight', () => {
+    describe('with an Observable', () => {
+      it('aborts the request and goes back to how it was before it', () => {
+        const { queryFn, inFlight, cancelled } = requests<string>()
+        const { fixture } = mount(() => ({ queryKey: ['todos'], queryFn }))
+
+        fixture.destroy()
+
+        expect(cancelled()).toBe(1)
+        expect(inFlight()).toBe(0)
+        expect(client.getQueryCache().get(['todos'])?.state()).toEqual(
+          jasmine.objectContaining({ status: 'pending', isFetching: false }),
+        )
+      })
+
+      it('aborts the request of the key it moves away from', () => {
+        const { queryFn, inFlight, cancelled } = requests<string>()
+        const { fixture, value } = mount(
+          (id) => ({ queryKey: ['todo', id()], queryFn }),
+          1,
+        )
+
+        value.set(2)
+        fixture.detectChanges()
+
+        // Todo 1's request is aborted, todo 2's is in flight.
+        expect(cancelled()).toBe(1)
+        expect(inFlight()).toBe(1)
+      })
+
+      it('stops waiting for a retry at once', fakeAsync(() => {
+        const { queryFn, fail } = requests<string>()
+        const { fixture } = mount(() => ({
+          queryKey: ['todos'],
+          queryFn,
+          retry: 3,
+          retryDelay: 100,
+        }))
+
+        fail(new Error('down'))
+        tick(50)
+        fixture.destroy()
+
+        expect(client.isFetching()).toBe(0)
+
+        tick(1000)
+
+        expect(queryFn).toHaveBeenCalledTimes(1)
+      }))
+    })
+
+    describe('with a promise', () => {
+      it('keeps the response and shows it at once when the key is shown again', fakeAsync(() => {
+        const { queryFn, requests } = promiseRequests<string>()
+        const options = (): QueryOptions<string> => ({
+          queryKey: ['todos'],
+          queryFn,
+        })
+
+        // The user leaves the page before the list loads...
+        mount(options).fixture.destroy()
+        requests[0].resolve('a')
+        flushMicrotasks()
+
+        // ...and comes back to it.
+        const { result } = mount(options)
+
+        expect(result.data()).toBe('a')
+        expect(result.isLoading()).toBe(false)
+      }))
+
+      it('keeps the response of the key it moves away from', fakeAsync(() => {
+        const { queryFn, requests } = promiseRequests<string>()
+        const { fixture, result, value } = mount(
+          (id) => ({ queryKey: ['todo', id()], queryFn }),
+          1,
+        )
+
+        // The user picks todo 2 before todo 1 loads...
+        value.set(2)
+        fixture.detectChanges()
+        requests[0].resolve('todo 1')
+        requests[1].resolve('todo 2')
+        flushMicrotasks()
+
+        // ...then goes back to todo 1.
+        value.set(1)
+        fixture.detectChanges()
+
+        expect(result.data()).toBe('todo 1')
+      }))
+
+      it('joins the request when the key is shown again before it lands, retries included', fakeAsync(() => {
+        const { queryFn, requests } = promiseRequests<string>()
+        const options = (): QueryOptions<string> => ({
+          queryKey: ['todos'],
+          queryFn,
+          retry: 1,
+          retryDelay: 100,
+        })
+
+        mount(options).fixture.destroy()
+
+        const { result } = mount(options)
+
+        // It waits for the request in flight rather than sending another.
+        expect(queryFn).toHaveBeenCalledTimes(1)
+
+        // The component showing the key wants the data, so a failure is
+        // tried again.
+        requests[0].reject(new Error('down'))
+        tick(100)
+
+        expect(queryFn).toHaveBeenCalledTimes(2)
+
+        requests[1].resolve('a')
+        flushMicrotasks()
+
+        expect(result.data()).toBe('a')
+      }))
+
+      it('counts as fetching until the response lands', fakeAsync(() => {
+        const { queryFn, requests } = promiseRequests<string>()
+
+        mount(() => ({ queryKey: ['todos'], queryFn })).fixture.destroy()
+
+        expect(client.isFetching()).toBe(1)
+
+        requests[0].resolve('a')
+        flushMicrotasks()
+
+        expect(client.isFetching()).toBe(0)
+      }))
+
+      it("doesn't try a failure again once nothing shows the key", fakeAsync(() => {
+        const { queryFn, requests } = promiseRequests<string>()
+        const error = new Error('down')
+
+        mount(() => ({
+          queryKey: ['todos'],
+          queryFn,
+          retry: 3,
+          retryDelay: 100,
+        })).fixture.destroy()
+        requests[0].reject(error)
+        flushMicrotasks()
+
+        // It fails at once, with no wait for a retry.
+        expect(client.getQueryCache().get(['todos'])?.state()).toEqual(
+          jasmine.objectContaining({
+            status: 'error',
+            error,
+            isFetching: false,
+          }),
+        )
+
+        tick(1000)
+
+        expect(queryFn).toHaveBeenCalledTimes(1)
+      }))
+
+      it('fails with the last error once the wait for a retry is over, without trying again', fakeAsync(() => {
+        const { queryFn, requests } = promiseRequests<string>()
+        const error = new Error('down')
+        const { fixture } = mount(() => ({
+          queryKey: ['todos'],
+          queryFn,
+          retry: 3,
+          retryDelay: 100,
+        }))
+
+        // The first request fails, and the user leaves halfway through the
+        // wait for the retry.
+        requests[0].reject(error)
+        tick(50)
+        fixture.destroy()
+
+        // The key may still be shown again in time for the retry.
+        expect(client.isFetching()).toBe(1)
+
+        tick(50)
+
+        expect(queryFn).toHaveBeenCalledTimes(1)
+        expect(client.getQueryCache().get(['todos'])?.state()).toEqual(
+          jasmine.objectContaining({
+            status: 'error',
+            error,
+            failureCount: 1,
+            isFetching: false,
+          }),
+        )
+      }))
+
+      it('tries again on schedule when the key is shown again during the wait for a retry', fakeAsync(() => {
+        const { queryFn, requests } = promiseRequests<string>()
+        const options = (): QueryOptions<string> => ({
+          queryKey: ['todos'],
+          queryFn,
+          retry: 3,
+          retryDelay: 100,
+        })
+        const { fixture } = mount(options)
+
+        requests[0].reject(new Error('down'))
+        tick(30)
+        fixture.destroy()
+        tick(20)
+
+        const { result } = mount(options)
+
+        // It joins the wait rather than sending a request at once...
+        expect(queryFn).toHaveBeenCalledTimes(1)
+
+        // ...and the retry goes out when it was due.
+        tick(50)
+        expect(queryFn).toHaveBeenCalledTimes(2)
+
+        requests[1].resolve('a')
+        flushMicrotasks()
+
+        expect(result.data()).toBe('a')
+      }))
+
+      it('tries a failure of a later request again as usual', fakeAsync(() => {
+        const { queryFn, requests } = promiseRequests<string>()
+        const options = (): QueryOptions<string> => ({
+          queryKey: ['todos'],
+          queryFn,
+          retry: 1,
+          retryDelay: 100,
+        })
+
+        mount(options).fixture.destroy()
+        requests[0].resolve('a')
+        flushMicrotasks()
+
+        // Shown again, its stale data is refetched, and that request fails.
+        mount(options)
+        requests[1].reject(new Error('down'))
+        tick(100)
+
+        expect(queryFn).toHaveBeenCalledTimes(3)
+      }))
+
+      it('drops the response once cancelQueries() stops the request', fakeAsync(() => {
+        const { queryFn, requests } = promiseRequests<string>()
+
+        mount(() => ({ queryKey: ['todos'], queryFn })).fixture.destroy()
+        client.cancelQueries({ queryKey: ['todos'] })
+        requests[0].resolve('a')
+        flushMicrotasks()
+
+        expect(client.getQueryData(['todos'])).toBeUndefined()
+        expect(client.isFetching()).toBe(0)
+      }))
+    })
+  })
+
+  // A queryFn that reads its key's value when it runs, as
+  // `() => api(this.id())` does, asks for whatever the signal holds by then.
+  // A retry of a key must still ask for that key, whichever component's
+  // queryFn it runs and wherever that component has moved by then.
+  describe('retrying a key a component moved away from', () => {
+    const retryOptions = { retry: 1, retryDelay: 100 }
+
+    // A panel showing the todo its `id` input names: its queryFn reads the
+    // input when it runs. Mounted on todo 1.
+    function panel(api: (id: number) => Promise<string>) {
+      return mount(
+        (id) => ({
+          queryKey: ['todo', id()],
+          queryFn: () => api(id()),
+          ...retryOptions,
+        }),
+        1,
+      )
+    }
+
+    // A widget pinned to todo 1.
+    function widget(api: (id: number) => Promise<string>) {
+      return mount(() => ({
+        queryKey: ['todo', 1],
+        queryFn: () => api(1),
+        ...retryOptions,
+      }))
+    }
+
+    it('asks for the key the components still showing it are on', fakeAsync(() => {
+      const { queryFn: api, requests } = promiseRequests<string>()
+      const shown = panel(api)
+      const pinned = widget(api)
+
+      // Todo 1's request fails while both show it, and the panel moves on to
+      // todo 2 before the retry.
+      requests[0].reject(new Error('down'))
+      tick(50)
+      shown.value.set(2)
+      shown.fixture.detectChanges()
+      requests[1].resolve('todo 2')
+      tick(50)
+
+      expect(api.calls.allArgs()).toEqual([[1], [2], [1]])
+
+      requests[2].resolve('todo 1')
+      flushMicrotasks()
+
+      expect(pinned.result.data()).toBe('todo 1')
+    }))
+
+    it('asks for that key when the component that joined the request last moved away', fakeAsync(() => {
+      const { queryFn: api, requests } = promiseRequests<string>()
+      const pinned = widget(api)
+      const shown = panel(api)
+
+      requests[0].reject(new Error('down'))
+      tick(50)
+      shown.value.set(2)
+      shown.fixture.detectChanges()
+      requests[1].resolve('todo 2')
+      tick(50)
+
+      expect(api.calls.allArgs()).toEqual([[1], [2], [1]])
+
+      requests[2].resolve('todo 1')
+      flushMicrotasks()
+
+      expect(pinned.result.data()).toBe('todo 1')
+    }))
+
+    it('asks for that key when a component shows it after the one that started the request moved away', fakeAsync(() => {
+      const { queryFn: api, requests } = promiseRequests<string>()
+      const shown = panel(api)
+
+      // The panel moves on to todo 2 while todo 1's request is in flight,
+      // then a widget pinned to todo 1 shows up, and that request fails.
+      shown.value.set(2)
+      shown.fixture.detectChanges()
+
+      const pinned = widget(api)
+
+      requests[0].reject(new Error('down'))
+      tick(100)
+
+      expect(api.calls.allArgs()).toEqual([[1], [2], [1]])
+
+      requests[2].resolve('todo 1')
+      flushMicrotasks()
+
+      expect(pinned.result.data()).toBe('todo 1')
+    }))
+
+    it('asks for that key when fetchQuery() waits for it after the component that started the request moved away', fakeAsync(() => {
+      const { queryFn: api, requests } = promiseRequests<string>()
+      const shown = panel(api)
+
+      shown.value.set(2)
+      shown.fixture.detectChanges()
+
+      // E.g. hovering a link to todo 1 prefetches it, and todo 1's request
+      // fails.
+      const prefetched = settled(client.fetchQuery(['todo', 1], () => api(1)))
+
+      requests[0].reject(new Error('down'))
+      tick(100)
+
+      expect(api.calls.allArgs()).toEqual([[1], [2], [1]])
+
+      requests[2].resolve('todo 1')
+      flushMicrotasks()
+
+      expect(prefetched.value).toBe('todo 1')
+    }))
   })
 
   describe('after removeQueries', () => {
@@ -3995,6 +4396,25 @@ describe('injectQuery', () => {
       response.complete()
 
       expect(client.getQueryData(['todo', 1])).toBe('v2')
+    }))
+
+    it('removes a query gcTime after the response of a request its component left lands', fakeAsync(() => {
+      const { queryFn, requests } = promiseRequests<string>()
+
+      mount(() => ({
+        queryKey: ['todos'],
+        queryFn,
+        gcTime: 1000,
+      })).fixture.destroy()
+      tick(500)
+      requests[0].resolve('a')
+      flushMicrotasks()
+
+      tick(999)
+      expect(client.getQueryData(['todos'])).toBe('a')
+
+      tick(1)
+      expect(client.getQueryData(['todos'])).toBeUndefined()
     }))
 
     it('removes a query its component created but was gone before showing', fakeAsync(() => {
