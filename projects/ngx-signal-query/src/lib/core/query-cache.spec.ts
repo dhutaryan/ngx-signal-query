@@ -2,6 +2,9 @@ import { computed } from '@angular/core'
 
 import { QueryCache } from './query-cache'
 
+// How long the queries here stay once unused: gc plays no part in these specs.
+const gcTime = Infinity
+
 describe('QueryCache', () => {
   let cache: QueryCache
 
@@ -11,23 +14,23 @@ describe('QueryCache', () => {
 
   describe('getOrCreate', () => {
     it('creates a query and caches it by key', () => {
-      const query = cache.getOrCreate(['todos'])
+      const query = cache.getOrCreate(['todos'], gcTime)
 
       expect(query.key).toEqual(['todos'])
       expect(cache.get(['todos'])).toBe(query)
     })
 
     it('returns the same instance for an equal key (order-independent hash)', () => {
-      const a = cache.getOrCreate(['k', { a: 1, b: 2 }])
-      const b = cache.getOrCreate(['k', { b: 2, a: 1 }])
+      const a = cache.getOrCreate(['k', { a: 1, b: 2 }], gcTime)
+      const b = cache.getOrCreate(['k', { b: 2, a: 1 }], gcTime)
 
       expect(a).toBe(b)
       expect(cache.getAll().length).toBe(1)
     })
 
     it('creates distinct queries for distinct keys', () => {
-      const a = cache.getOrCreate(['a'])
-      const b = cache.getOrCreate(['b'])
+      const a = cache.getOrCreate(['a'], gcTime)
+      const b = cache.getOrCreate(['b'], gcTime)
 
       expect(a).not.toBe(b)
       expect(cache.getAll().length).toBe(2)
@@ -46,7 +49,7 @@ describe('QueryCache', () => {
 
       expect(found()).toBeUndefined()
 
-      const query = cache.getOrCreate(['x'])
+      const query = cache.getOrCreate(['x'], gcTime)
 
       expect(found()).toBe(query)
 
@@ -58,9 +61,9 @@ describe('QueryCache', () => {
 
   describe('findAll', () => {
     beforeEach(() => {
-      cache.getOrCreate(['todos'])
-      cache.getOrCreate(['todos', 1])
-      cache.getOrCreate(['users'])
+      cache.getOrCreate(['todos'], gcTime)
+      cache.getOrCreate(['todos', 1], gcTime)
+      cache.getOrCreate(['users'], gcTime)
     })
 
     it('returns every query when no filter is given', () => {
@@ -81,8 +84,17 @@ describe('QueryCache', () => {
   })
 
   describe('remove', () => {
+    it('destroys the query it removes', () => {
+      const query = cache.getOrCreate(['x'], gcTime)
+
+      spyOn(query, 'destroy')
+      cache.remove(query)
+
+      expect(query.destroy).toHaveBeenCalled()
+    })
+
     it('drops the query from the cache', () => {
-      const query = cache.getOrCreate(['x'])
+      const query = cache.getOrCreate(['x'], gcTime)
 
       cache.remove(query)
 
@@ -91,12 +103,12 @@ describe('QueryCache', () => {
     })
 
     it('only removes the instance currently stored under the key', () => {
-      const stale = cache.getOrCreate(['x'])
+      const stale = cache.getOrCreate(['x'], gcTime)
 
       cache.remove(stale)
 
       // A fresh query is created under the same key.
-      const current = cache.getOrCreate(['x'])
+      const current = cache.getOrCreate(['x'], gcTime)
 
       expect(current).not.toBe(stale)
 
@@ -107,8 +119,8 @@ describe('QueryCache', () => {
     })
 
     it('is a no-op for a query that is not cached', () => {
-      const tracked = cache.getOrCreate(['kept'])
-      const orphan = cache.getOrCreate(['orphan'])
+      const tracked = cache.getOrCreate(['kept'], gcTime)
+      const orphan = cache.getOrCreate(['orphan'], gcTime)
 
       cache.remove(orphan)
 
@@ -119,8 +131,8 @@ describe('QueryCache', () => {
 
   describe('clear', () => {
     it('destroys every query and empties the cache', () => {
-      const a = cache.getOrCreate(['a'])
-      const b = cache.getOrCreate(['b'])
+      const a = cache.getOrCreate(['a'], gcTime)
+      const b = cache.getOrCreate(['b'], gcTime)
 
       spyOn(a, 'destroy')
       spyOn(b, 'destroy')

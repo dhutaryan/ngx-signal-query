@@ -8,16 +8,19 @@ import type { QueryFilters, QueryKey } from './types'
 /** @internal */
 @Injectable()
 export class QueryCache extends Cache<Query<unknown, unknown>> {
-  getOrCreate<TData, TError = Error>(key: QueryKey): Query<TData, TError> {
+  getOrCreate<TData, TError = Error>(
+    key: QueryKey,
+    gcTime: number,
+  ): Query<TData, TError> {
     const queryHash = hashKey(key)
     const exist = this.getEntry(queryHash)
 
     if (exist) return exist as Query<TData, TError>
 
-    return this.addEntry(queryHash, new Query(key, queryHash, this)) as Query<
-      TData,
-      TError
-    >
+    return this.addEntry(
+      queryHash,
+      new Query({ key, queryHash, cache: this, gcTime }),
+    ) as Query<TData, TError>
   }
 
   get<TData, TError = Error>(key: QueryKey): Query<TData, TError> | undefined {
@@ -57,6 +60,9 @@ export class QueryCache extends Cache<Query<unknown, unknown>> {
     // Guard on identity, not just the hash: a stale instance (already removed
     // and recreated under the same key) must not evict the current query.
     if (this.getEntry(query.queryHash) === query) {
+      // Whoever removes it, gc or removeQueries, it leaves cleaned up: its
+      // fetch cancelled and its gc timer cleared.
+      query.destroy()
       this.removeEntry(query.queryHash)
     }
   }

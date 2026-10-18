@@ -32,8 +32,13 @@ To fetch less, raise `staleTime`. See [Caching](/query-client/caching).
 When the last component showing a query is gone, the query stays in the cache
 for 5 minutes (`gcTime`). Coming back within that time shows its data at once,
 then refetches it if it's stale. Once the 5 minutes are up, the query is
-removed, and the next visit loads it from scratch. The clock only runs while no
-component shows the query. See [Caching](/query-client/caching).
+removed, and the next visit loads it from scratch. The clock only runs while
+nothing uses the query: no component shows it, and no fetch of it is running.
+
+Data you prefetch with `fetchQuery` or write with `setQueryData` for a key no
+component shows gets the same 5 minutes, counted from the fetch landing or from
+the last write. On the server nothing is removed: the cache lives as long as
+the app that renders the request. See [Caching](/query-client/caching).
 
 ## Failed queries retry 3 times
 

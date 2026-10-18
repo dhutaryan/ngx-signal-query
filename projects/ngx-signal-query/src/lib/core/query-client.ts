@@ -9,6 +9,7 @@ import {
 import type { Observable } from 'rxjs'
 
 import { onReconnect, onWindowFocus } from './browser-events'
+import { inBrowser } from './platform'
 import { QueryCache } from './query-cache'
 import { MutationCache } from './mutation-cache'
 import type { MutationOptions } from './mutation'
@@ -26,6 +27,8 @@ import type {
   Updater,
 } from './types'
 import { QUERY_CLIENT_CONFIG } from './injection-tokens'
+
+const DEFAULT_GC_TIME = 5 * 60 * 1000
 
 /**
  * Central registry and cache for queries and mutations.
@@ -52,6 +55,7 @@ export class QueryClient {
   readonly #cache = inject(QueryCache)
   readonly #mutationCache = inject(MutationCache)
   readonly #config = inject(QUERY_CLIENT_CONFIG, { optional: true }) ?? {}
+  readonly #onServer = !inBrowser()
   /** @internal */
   readonly #injector = inject(EnvironmentInjector)
   /**
@@ -104,7 +108,7 @@ export class QueryClient {
     return {
       ...options,
       staleTime: options.staleTime ?? defaults?.staleTime ?? 0,
-      gcTime: options.gcTime ?? defaults?.gcTime,
+      gcTime: this.#gcTime(options.gcTime),
       retry: options.retry ?? defaults?.retry ?? 3,
       retryDelay:
         options.retryDelay ?? defaults?.retryDelay ?? defaultRetryDelay,
@@ -158,6 +162,9 @@ export class QueryClient {
    * set here or in {@link withDefaultOptions}, so whoever waits for the data
    * hears of the failure at once.
    *
+   * A query no component shows is removed `gcTime` after the fetch lands (the
+   * configured default, or 5 minutes), as any unused query is.
+   *
    * @param key - The query key to fetch and cache under.
    * @param queryFn - Function returning the data as an `Observable` or `Promise`.
    * @param options - Fetch tuning (`staleTime`, `retry`, `retryDelay`,
@@ -204,7 +211,11 @@ export class QueryClient {
           this.#config.defaultOptions?.queries?.retry ??
           false,
       })
-      const query = this.#cache.getOrCreate<TData>(key)
+      const query = this.#cache.getOrCreate<TData>(key, defaulted.gcTime)
+
+      // A query already in the cache keeps this call's gcTime if it's
+      // longer, as it does for each component showing it.
+      query.updateGcTime(defaulted.gcTime)
 
       return query.shouldFetch(defaulted.staleTime)
         ? query.fetch(defaulted, { cancelRefetch })
@@ -235,6 +246,9 @@ export class QueryClient {
    * nothing. It merges as the query showing the key asks; with none showing
    * it, the way the cached data was fetched; otherwise by the default.
    *
+   * A key no component shows is kept for `gcTime` after the last write, then
+   * removed.
+   *
    * @param key - The query key to write.
    * @param updater - The new data, or a function `(prev) => next`.
    *
@@ -248,7 +262,7 @@ export class QueryClient {
     updater: Updater<TData | undefined, TData>,
   ): void {
     untracked(() => {
-      const query = this.#cache.getOrCreate<TData>(key)
+      const query = this.#cache.getOrCreate<TData>(key, this.#gcTime())
       const data = functionalUpdate(updater, query.state().data)
 
       // Matches TanStack: an updater returning undefined is a no-op.
@@ -347,10 +361,9 @@ export class QueryClient {
    */
   removeQueries(filters?: QueryFilters): void {
     untracked(() =>
-      this.#cache.findAll(filters).forEach((query) => {
-        query.destroy()
-        this.#cache.remove(query)
-      }),
+      this.#cache
+        .findAll(filters)
+        .forEach((query) => this.#cache.remove(query)),
     )
   }
 
@@ -379,6 +392,25 @@ export class QueryClient {
   isMutating(): number {
     return untracked(
       () => this.#mutationCache.findAll({ status: 'pending' }).length,
+    )
+  }
+
+  /**
+   * How long a query stays in the cache once nothing uses it: the gcTime it
+   * asks for, else the configured default, else 5 minutes. Every path that
+   * puts a query into the cache takes it from here.
+   *
+   * On the server it's Infinity, whatever was asked: the cache lives as long
+   * as the app that renders the request, and a pending timer would hold up a
+   * render with zone.js.
+   *
+   * @internal
+   */
+  #gcTime(time?: number): number {
+    if (this.#onServer) return Infinity
+
+    return (
+      time ?? this.#config.defaultOptions?.queries?.gcTime ?? DEFAULT_GC_TIME
     )
   }
 

@@ -2,6 +2,7 @@ import {
   Component,
   type EnvironmentProviders,
   Injector,
+  NgZone,
   type OnInit,
   PLATFORM_ID,
   type Provider,
@@ -191,6 +192,15 @@ describe('injectQuery', () => {
     TestBed.configureTestingModule({ providers: [provideQueryClient()] })
     client = TestBed.inject(QueryClient)
   })
+
+  // Replaces the client every spec starts with by one with these providers.
+  function reprovide(
+    ...providers: Array<Provider | EnvironmentProviders>
+  ): void {
+    TestBed.resetTestingModule()
+    TestBed.configureTestingModule({ providers })
+    client = TestBed.inject(QueryClient)
+  }
 
   it('resolves a synchronous queryFn to success', () => {
     const { result } = mount(() => ({
@@ -2657,15 +2667,6 @@ describe('injectQuery', () => {
   })
 
   describe('focus and reconnect', () => {
-    // Replaces the client every spec starts with by one with these providers.
-    function reprovide(
-      ...providers: Array<Provider | EnvironmentProviders>
-    ): void {
-      TestBed.resetTestingModule()
-      TestBed.configureTestingModule({ providers })
-      client = TestBed.inject(QueryClient)
-    }
-
     afterEach(restoreVisibility)
 
     describe('refetchOnWindowFocus', () => {
@@ -3854,6 +3855,206 @@ describe('injectQuery', () => {
         client.setQueryData(['row', 1], rows()[0])
 
         expect(client.getQueryData(['row', 1])).not.toBe(first)
+      })
+    })
+  })
+
+  // An unused query stays in the cache for gcTime, then it's removed. A query
+  // is in use while a component shows it or a fetch of it is in flight. The
+  // Caching docs page states these, so a change here goes there too.
+  describe('garbage collection', () => {
+    it('removes a query gcTime after the last component showing it is gone', fakeAsync(() => {
+      const { fixture } = mount(() => ({
+        queryKey: ['todos'],
+        queryFn: () => of('v1'),
+        gcTime: 60_000,
+      }))
+
+      fixture.destroy()
+
+      tick(59_999)
+      expect(client.getQueryData(['todos'])).toBe('v1')
+
+      tick(1)
+      expect(client.getQueryData(['todos'])).toBeUndefined()
+    }))
+
+    it('keeps a query while a component shows it, however long', fakeAsync(() => {
+      mount(() => ({
+        queryKey: ['todos'],
+        queryFn: () => of('v1'),
+        gcTime: 1000,
+      }))
+
+      tick(60 * 60_000)
+
+      expect(client.getQueryData(['todos'])).toBe('v1')
+    }))
+
+    it('keeps a query with gcTime Infinity, or one no timer can hold, once the last component showing it is gone', async () => {
+      // A browser runs a timer it can't hold at once, as if its delay were 0.
+      // fakeAsync doesn't mimic the browser here, hence real timers.
+      const gcTimes = [Infinity, 2 ** 31]
+      const fixtures = gcTimes.map(
+        (gcTime) =>
+          mount(() => ({
+            queryKey: ['todos', String(gcTime)],
+            queryFn: () => of('v1'),
+            gcTime,
+          })).fixture,
+      )
+
+      fixtures.forEach((fixture) => fixture.destroy())
+      await new Promise((resolve) => setTimeout(resolve, 50))
+
+      expect(client.getQueryData(['todos', 'Infinity'])).toBe('v1')
+      expect(client.getQueryData(['todos', String(2 ** 31)])).toBe('v1')
+    })
+
+    it('keeps a query for the longest gcTime of the components showing it, whichever came last', fakeAsync(() => {
+      const show = (key: string, gcTime: number): ComponentFixture<unknown> =>
+        mount(() => ({ queryKey: [key], queryFn: () => of('v1'), gcTime }))
+          .fixture
+      const fixtures = [
+        show('longer first', 10 * 60_000),
+        show('longer first', 1000),
+        show('shorter first', 1000),
+        show('shorter first', 10 * 60_000),
+      ]
+
+      fixtures.forEach((fixture) => fixture.destroy())
+
+      tick(10 * 60_000 - 1)
+      expect(client.getQueryData(['longer first'])).toBe('v1')
+      expect(client.getQueryData(['shorter first'])).toBe('v1')
+
+      tick(1)
+      expect(client.getQueryData(['longer first'])).toBeUndefined()
+      expect(client.getQueryData(['shorter first'])).toBeUndefined()
+    }))
+
+    it('keeps the longest gcTime a component asked for after that component is gone', fakeAsync(() => {
+      const show = (gcTime: number): void =>
+        mount(() => ({
+          queryKey: ['todos'],
+          queryFn: () => of('v1'),
+          gcTime,
+        })).fixture.destroy()
+
+      show(10 * 60_000)
+      show(1000)
+
+      tick(10 * 60_000 - 1)
+      expect(client.getQueryData(['todos'])).toBe('v1')
+
+      tick(1)
+      expect(client.getQueryData(['todos'])).toBeUndefined()
+    }))
+
+    it('keeps a prefetched query for the default gcTime at least, whatever shorter one a component showing it asks for', fakeAsync(() => {
+      const show = (id: number): ComponentFixture<unknown> =>
+        mount(() => ({
+          queryKey: ['todo', id],
+          queryFn: () => of(`todo ${id}`),
+          gcTime: 1000,
+        })).fixture
+
+      // Todo 1 is prefetched before a component shows it, todo 2 while one
+      // does.
+      client.fetchQuery(['todo', 1], () => of('todo 1'))
+
+      const fixtures = [show(1), show(2)]
+
+      client.fetchQuery(['todo', 2], () => of('todo 2'))
+      fixtures.forEach((fixture) => fixture.destroy())
+
+      tick(5 * 60_000 - 1)
+      expect(client.getQueryData(['todo', 1])).toBe('todo 1')
+      expect(client.getQueryData(['todo', 2])).toBe('todo 2')
+
+      tick(1)
+      expect(client.getQueryData(['todo', 1])).toBeUndefined()
+      expect(client.getQueryData(['todo', 2])).toBeUndefined()
+    }))
+
+    it("doesn't remove a query while a prefetch of it is in flight", fakeAsync(() => {
+      const response = new Subject<string>()
+      const { fixture } = mount(() => ({
+        queryKey: ['todo', 1],
+        queryFn: () => of('v1'),
+      }))
+
+      // The user leaves the page, and hovers a link back to it just before
+      // the query would be removed.
+      fixture.destroy()
+      tick(5 * 60_000 - 100)
+      client.fetchQuery(['todo', 1], () => response)
+      tick(100)
+
+      response.next('v2')
+      response.complete()
+
+      expect(client.getQueryData(['todo', 1])).toBe('v2')
+    }))
+
+    it('removes a query its component created but was gone before showing', fakeAsync(() => {
+      @Component({ template: '' })
+      class TodoCount {
+        readonly todos = injectQuery(() => ({
+          queryKey: ['todos'],
+          queryFn: () => of(['a']),
+        }))
+
+        // Read while the component is being constructed, which creates the
+        // query before any change detection.
+        readonly initial = this.todos.data()
+      }
+
+      TestBed.createComponent(TodoCount).destroy()
+
+      tick(5 * 60_000 - 1)
+      expect(client.getQueryCache().get(['todos'])).toBeDefined()
+
+      tick(1)
+      expect(client.getQueryCache().get(['todos'])).toBeUndefined()
+    }))
+
+    // The cache lives as long as the app that renders the request.
+    describe('on the server', () => {
+      beforeEach(() =>
+        reprovide(provideQueryClient(), {
+          provide: PLATFORM_ID,
+          useValue: 'server',
+        }),
+      )
+
+      it('keeps a query once the last component showing it is gone, whatever its gcTime', fakeAsync(() => {
+        const { fixture } = mount(() => ({
+          queryKey: ['todos'],
+          queryFn: () => of('v1'),
+          gcTime: 1000,
+        }))
+
+        fixture.destroy()
+        tick(60 * 60_000)
+
+        expect(client.getQueryData(['todos'])).toBe('v1')
+      }))
+
+      it('leaves no timer behind that would hold up a server render', () => {
+        @Component({ template: '' })
+        class TodoPage {
+          constructor() {
+            client.setQueryData(['user'], 'Ann')
+            client.fetchQuery(['todos'], () => of(['a']))
+          }
+        }
+
+        TestBed.createComponent(TodoPage).detectChanges()
+
+        // With zone.js, a server render writes out the page only once no
+        // timer is pending.
+        expect(TestBed.inject(NgZone).hasPendingMacrotasks).toBe(false)
       })
     })
   })

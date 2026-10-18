@@ -121,7 +121,15 @@ export type QueryOptions<TData, TError = Error> = {
   queryFn: () => Observable<TData> | Promise<TData>
   /** How long fetched data stays fresh before refetching, in ms. Default `0`. */
   staleTime?: number
-  /** How long unused data is kept before garbage collection, in ms. */
+  /**
+   * How long the query stays in the cache once nothing uses it (no component
+   * shows it, no fetch of it is in flight), in ms. Default 5 minutes.
+   * `Infinity` keeps it until it's removed, and so does anything over about
+   * 24.8 days (2³¹−1 ms), the most a timer can hold. When components showing
+   * it ask for different gcTimes, or fetchQuery asks for the default, the
+   * longest wins for as long as the query stays in the cache. On the server
+   * it's always `Infinity`.
+   */
   gcTime?: number
   /** Retry policy on failure. Default `3`. See {@link RetryValue}. */
   retry?: RetryValue<TError>
@@ -183,6 +191,7 @@ export type DefaultedQueryOptions<TData, TError = Error> = QueryOptions<
   TError
 > & {
   staleTime: number
+  gcTime: number
   retry: RetryValue<TError>
   retryDelay: RetryDelayValue<TError>
   structuralSharing: StructuralSharingValue<TData>
@@ -237,7 +246,11 @@ export type QueryResult<TData, TError = Error> = {
 export interface DefaultQueryOptions {
   /** How long fetched data is considered fresh, in ms. Defaults to `0`. */
   staleTime?: number
-  /** How long unused (unobserved) data is kept before garbage collection, in ms. */
+  /**
+   * How long a query stays in the cache once nothing uses it, in ms. Defaults
+   * to 5 minutes. It applies to queries fetchQuery prefetches and setQueryData
+   * writes too.
+   */
   gcTime?: number
   /** Retry policy on failure: a boolean, a count, or a predicate. Defaults to `3`. */
   retry?: RetryValue<unknown>

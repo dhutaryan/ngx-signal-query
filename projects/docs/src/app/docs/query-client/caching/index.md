@@ -38,8 +38,8 @@ Follow one query key through its whole life. [Defaults](/important-defaults):
 5. **No remount, `gcTime` elapses.** The timer fires and the entry is removed.
    The next mount starts over from step 1 — a cold fetch.
 
-An **observed** query is never garbage-collected: the clock only runs while
-nobody's watching.
+A query **in use** is never garbage-collected: a component shows it, or a fetch
+of it is running. The clock only runs while neither is true.
 
 ## `staleTime` — freshness
 
@@ -68,9 +68,12 @@ waiting for a refresh.
 
 ## `gcTime` — retention
 
-`gcTime` (garbage-collection time) is how long an entry survives **after its last
-observer leaves**. The timer starts at zero observers and is cancelled the moment
-one comes back.
+`gcTime` (garbage-collection time) is how long an entry survives **once nothing
+uses it**: no component shows it and no fetch of it is running. The timer starts
+when the last component showing it leaves, and is cancelled the moment one comes
+back. An entry no component has shown yet, prefetched with `fetchQuery` or
+written with `setQueryData`, runs on the same clock, from the moment its fetch
+lands or from the last write.
 
 ```ts
 queryOptions({
@@ -84,6 +87,20 @@ The default is **5 minutes**. Raise it to keep data warm for slow back-and-forth
 navigation; lower it to free memory sooner. It has nothing to do with freshness —
 a query can be stale but still cached (so it renders instantly, then refetches),
 or fresh but collected (gone, because nobody looked at it for `gcTime`).
+
+**`Infinity`** keeps unused data until you remove it with `removeQueries`. So
+does any value above about 24.8 days (2³¹−1 ms), the most a browser timer can
+hold.
+
+When components showing the same query ask for different `gcTime`s, the
+**longest** one wins, and the query keeps it for as long as it stays in the
+cache. A component that sets none asks for the default, and so does
+`fetchQuery`. So one component's shorter `gcTime` doesn't cut short a query that
+another component shows, or one that was prefetched. To shorten it everywhere,
+set it where the query is defined, in its `queryOptions`, or for the whole app.
+
+On the server nothing is collected, whatever `gcTime` says: the cache lives as
+long as the app that renders the request.
 
 ## Setting the defaults
 
@@ -132,7 +149,7 @@ scroll where you left it — then it quietly refetches if it went stale.
 | | `staleTime` | `gcTime` |
 | --- | --- | --- |
 | controls | refetching | deletion |
-| applies to | data being observed | data with no observers |
+| applies to | data being observed | data nothing uses |
 | default | `0` (always stale) | `5 min` |
 | "too low" symptom | refetches constantly | data evicted, cold reloads |
 

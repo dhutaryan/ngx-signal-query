@@ -13,7 +13,7 @@ import {
 import { CancelledError } from './cancelled-error'
 import type { QueryCache } from './query-cache'
 import { defaultRetryDelay, resolveRetryDelay, shouldRetry } from './retryer'
-import { type Deferred, deferred, replaceData } from './utils'
+import { type Deferred, deferred, isValidTimeout, replaceData } from './utils'
 import type {
   DefaultedQueryOptions,
   QueryKey,
@@ -21,8 +21,6 @@ import type {
   QueryState,
   StructuralSharingValue,
 } from './types'
-
-const DEFAULT_GC_TIME = 5 * 60 * 1000
 
 /**
  * An observer of a query, as the query sees it: the query asks its observers
@@ -56,8 +54,24 @@ export interface QuerySubscriber<TData, TError = Error> {
   structuralSharing(): StructuralSharingValue<TData>
 }
 
+/**
+ * What a query is created with: its key and the key's hash, the cache it
+ * lives in, and how long it stays there once nothing uses it.
+ *
+ * @internal
+ */
+export interface QueryConfig {
+  key: QueryKey
+  queryHash: string
+  cache: QueryCache
+  gcTime: number
+}
+
 /** @internal */
 export class Query<TData, TError = Error> {
+  readonly key: QueryKey
+  readonly queryHash: string
+
   readonly #state = signal<QueryState<TData, TError>>({
     data: undefined,
     status: 'pending',
@@ -85,24 +99,30 @@ export class Query<TData, TError = Error> {
   // The structuralSharing of the fetch whose response the query holds.
   #fetchedStructuralSharing: StructuralSharingValue<TData> | undefined
   readonly #observers = new Set<QuerySubscriber<TData, TError>>()
-  #gcTime = DEFAULT_GC_TIME
+  #gcTime = 0
   #gcTimer: ReturnType<typeof setTimeout> | null = null
   readonly #cache: QueryCache
 
-  constructor(
-    readonly key: QueryKey,
-    readonly queryHash: string,
-    cache: QueryCache,
-  ) {
+  constructor({ key, queryHash, cache, gcTime }: QueryConfig) {
+    this.key = key
+    this.queryHash = queryHash
     this.#cache = cache
+    this.updateGcTime(gcTime)
+    // A new query has nothing using it yet: its creator is about to, and if
+    // nothing ever does, gc removes it.
+    this.#scheduleGc()
   }
 
   get observerCount(): number {
     return this.#observers.size
   }
 
-  setGcTime(ms: number): void {
-    this.#gcTime = ms
+  // Keeps the longest gcTime asked for by anything that used the query, as
+  // in TanStack: whoever created it, each component that showed it, each
+  // fetchQuery. A shorter one doesn't cut short a longer one asked for
+  // before. Never below 0.
+  updateGcTime(ms: number): void {
+    this.#gcTime = Math.max(this.#gcTime, ms)
   }
 
   addObserver(observer: QuerySubscriber<TData, TError>): void {
@@ -265,6 +285,7 @@ export class Query<TData, TError = Error> {
             updatedAt: Date.now(),
           })
           outcome.resolve(data)
+          this.#scheduleGc()
         },
         error: (err) => {
           this.#outcome = null
@@ -276,6 +297,7 @@ export class Query<TData, TError = Error> {
             isFetching: false,
           }))
           outcome.reject(err)
+          this.#scheduleGc()
         },
       })
 
@@ -308,9 +330,9 @@ export class Query<TData, TError = Error> {
     // A write made during a fetch is what stopping the fetch goes back to.
     if (this.#inFlight()) this.#beforeFetch = this.state()
 
-    // Keep an orphaned query (no observers) alive for another gcTime so a
-    // setQueryData write isn't collected before anyone subscribes.
-    if (this.#observers.size === 0) this.#scheduleGc()
+    // A write counts as use: a query nobody observes is kept for another
+    // gcTime, so a setQueryData write isn't collected before anyone shows it.
+    this.#scheduleGc()
   }
 
   invalidate(): void {
@@ -331,12 +353,17 @@ export class Query<TData, TError = Error> {
   // holds, as in TanStack, or a CancelledError if it holds none.
   cancel(): void {
     const { data } = this.state()
+    const fetching = this.#inFlight()
 
     this.#stop((outcome) =>
       data === undefined
         ? outcome.reject(new CancelledError())
         : outcome.resolve(data),
     )
+
+    // Only a fetch that stops can leave the query unused: cancelling none
+    // mustn't put off its gc.
+    if (fetching) this.#scheduleGc()
   }
 
   // The query is thrown away with its data, so whoever waits for its fetch
@@ -405,12 +432,23 @@ export class Query<TData, TError = Error> {
     }
   }
 
+  // Removes the query gcTime from now, unless something uses it by then: an
+  // observer, or a fetch of it in flight. Called whenever the query may have
+  // become unused: when it's created, when its last observer leaves, when a
+  // fetch of it ends, when data is written into it by hand.
   #scheduleGc(): void {
     this.#clearGcTimer()
 
+    // While observed, the query is in use: the last observer leaving calls
+    // this again. Infinity, or a gcTime no timer can hold, keeps the query
+    // until something removes it: a browser would run the timer at once.
+    if (this.#observers.size > 0 || !isValidTimeout(this.#gcTime)) return
+
     this.#gcTimer = setTimeout(() => {
       this.#gcTimer = null
-      this.#cache.remove(this)
+
+      // A fetch still in flight keeps it: the fetch's end calls this again.
+      if (!this.#inFlight()) this.#cache.remove(this)
     }, this.#gcTime)
   }
 
