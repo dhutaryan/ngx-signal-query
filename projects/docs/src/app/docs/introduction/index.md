@@ -44,9 +44,13 @@ library takes TanStack Query's model and builds it on Angular's own primitives:
    configuration, and an injection context for default mutation hooks, so a
    global `onError` can `inject()` what it needs.
 
-3. **Small, and kept honest.** About 5 KB min+gzip. Bug fixes ship with a spec
-   that fails without the fix, and releases follow semver, with a `dev` channel
-   for previews.
+3. **Small, and kept honest.** [![bundle size][size-badge]][size-page]
+   Tree-shakable, with no runtime dependencies beyond `tslib`. Bug fixes ship
+   with a spec that fails without the fix, and releases follow semver, with a
+   `dev` channel for previews.
+
+[size-badge]: https://deno.bundlejs.com/badge?q=ngx-signal-query&config=%7B%22esbuild%22%3A%7B%22external%22%3A%5B%22%40angular/core%22%2C%22%40angular/common%22%2C%22rxjs%22%2C%22rxjs/operators%22%2C%22tslib%22%5D%7D%7D
+[size-page]: https://bundlejs.com/?q=ngx-signal-query&config=%7B%22esbuild%22%3A%7B%22external%22%3A%5B%22%40angular/core%22%2C%22%40angular/common%22%2C%22rxjs%22%2C%22rxjs/operators%22%2C%22tslib%22%5D%7D%7D
 
 It's deliberately focused. If you need infinite queries, devtools or
 persistence today, TanStack Query is the better pick. If you want Observables

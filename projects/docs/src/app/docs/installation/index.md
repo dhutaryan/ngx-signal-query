@@ -12,9 +12,9 @@ pnpm add ngx-signal-query
 yarn add ngx-signal-query
 ```
 
-Requires **Angular 19+** and **RxJS 7.4+** — `@angular/core` and `rxjs` are
-peer dependencies, and an Angular project already has both. There are no other
-runtime dependencies beyond `tslib`.
+Requires **Angular 19+** and **RxJS 7.4+** — `@angular/core`, `@angular/common`
+and `rxjs` are peer dependencies, and an Angular project already has all three.
+There are no other runtime dependencies beyond `tslib`.
 
 ## 1. Provide the query client
 

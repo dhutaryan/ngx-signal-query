@@ -16,7 +16,7 @@ over.
 
 - 🔌 **Observables end to end.** Return `http.get()` from a `queryFn` or `mutationFn`. For a query, unsubscribing is the cancellation: once no component needs it, the request is aborted, with no `AbortSignal` plumbing.
 - 🅰️ **Angular all the way down.** State is signals, configuration is `provideQueryClient(withDefaultOptions(...))`, and default mutation hooks run in an injection context, so a global `onError` can `inject()` what it needs.
-- 🪶 **Small.** About 5 KB min+gzip, tree-shakable ESM, no runtime dependencies beyond `tslib`.
+- 🪶 **Small.** Tree-shakable ESM, no runtime dependencies beyond `tslib`.
 - 🧭 **Familiar concepts.** `queryKey`, `staleTime`, `invalidateQueries` and `placeholderData` mean what you'd expect. Moving to TanStack Query later is mostly mechanical: wrap Observables in `lastValueFrom` and swap the provider.
 
 ## Features
@@ -41,8 +41,8 @@ them today, TanStack Query has them.
 npm install ngx-signal-query
 ```
 
-Requires **Angular 19+** and **RxJS 7.4+** (peer dependencies `@angular/core`
-and `rxjs`).
+Requires **Angular 19+** and **RxJS 7.4+** (peer dependencies `@angular/core`,
+`@angular/common` and `rxjs`).
 
 ## Quick start
 
