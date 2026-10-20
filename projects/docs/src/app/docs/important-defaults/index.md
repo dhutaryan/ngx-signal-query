@@ -37,8 +37,7 @@ nothing uses the query: no component shows it, and no fetch of it is running.
 
 Data you prefetch with `fetchQuery` or write with `setQueryData` for a key no
 component shows gets the same 5 minutes, counted from the fetch landing or from
-the last write. On the server nothing is removed: the cache lives as long as
-the app that renders the request. See [Caching](/query-client/caching).
+the last write. See [Caching](/query-client/caching).
 
 ## Failed queries retry 3 times
 
@@ -77,6 +76,23 @@ response. For a large response refetched often, turn it off. See
 A query polls only when you set `refetchInterval`, and polling ignores
 `staleTime`: fresh data is polled all the same. See
 [Polling](/queries/polling).
+
+## On the server
+
+When a page is rendered on the server, a query skips what only makes sense in
+the browser:
+
+- **It doesn't poll.** `refetchInterval` is ignored: the page shows one fetch,
+  and polling starts once the browser takes over.
+- **It doesn't retry unless you ask.** A failed query shows its error at once
+  rather than holding up the page, and the browser tries again once it takes
+  over. A `retry` you set on the query or in
+  [Default Options](/query-client/default-options) still applies, and the page
+  waits for it.
+- **It isn't removed from the cache**, whatever its `gcTime`: the cache lives
+  as long as the app that renders the request.
+- **It doesn't refetch on focus or reconnect.** There's no tab to come back to
+  and no network to lose.
 
 ## Not automatic
 

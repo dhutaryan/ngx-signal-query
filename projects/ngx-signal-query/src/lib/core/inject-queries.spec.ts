@@ -3,6 +3,7 @@ import {
   computed,
   Injector,
   type OnInit,
+  PLATFORM_ID,
   type Signal,
   type WritableSignal,
   input,
@@ -622,6 +623,39 @@ describe('injectQueries', () => {
       expect(optionsFn).not.toHaveBeenCalled()
       expect(client.getQueryCache().get(['gone'])).toBeUndefined()
     })
+  })
+
+  describe('on the server', () => {
+    beforeEach(() => {
+      TestBed.resetTestingModule()
+      TestBed.configureTestingModule({
+        providers: [
+          provideQueryClient(),
+          { provide: PLATFORM_ID, useValue: 'server' },
+        ],
+      })
+    })
+
+    it("doesn't poll", fakeAsync(() => {
+      const queryFn = jasmine
+        .createSpy('queryFn')
+        .and.callFake((id: number) => of(id))
+      const { fixture } = mount(() => ({
+        queries: [1, 2].map((id) => ({
+          queryKey: ['p', id],
+          queryFn: () => queryFn(id),
+          refetchInterval: 100,
+        })),
+      }))
+
+      tick(1_000)
+      fixture.detectChanges()
+
+      // Each fetched once, on mount: the browser polls once it takes over.
+      expect(queryFn.calls.allArgs()).toEqual([[1], [2]])
+
+      fixture.destroy()
+    }))
   })
 
   describe('injection context', () => {

@@ -120,6 +120,37 @@ describe('QueryClient', () => {
         expect(asked.gcTime).toBe(Infinity)
         expect(configured.gcTime).toBe(Infinity)
       })
+
+      it('turns polling off, whatever the query asks for', () => {
+        const asNumber = client.defaultQueryOptions({
+          queryKey: ['a'],
+          queryFn: () => of(1),
+          refetchInterval: 100,
+        })
+        const asFunction = client.defaultQueryOptions({
+          queryKey: ['b'],
+          queryFn: () => of(1),
+          refetchInterval: () => 100,
+        })
+
+        expect(asNumber.refetchInterval).toBe(false)
+        expect(asFunction.refetchInterval).toBe(false)
+      })
+
+      it("doesn't retry unless the query asks", () => {
+        const unasked = client.defaultQueryOptions({
+          queryKey: ['a'],
+          queryFn: () => of(1),
+        })
+        const asked = client.defaultQueryOptions({
+          queryKey: ['b'],
+          queryFn: () => of(1),
+          retry: 2,
+        })
+
+        expect(unasked.retry).toBe(0)
+        expect(asked.retry).toBe(2)
+      })
     })
   })
 
@@ -479,6 +510,40 @@ describe('QueryClient', () => {
         // fakeAsync rethrows an unhandled rejection when microtasks run.
         expect(() => flushMicrotasks()).not.toThrow()
         expect(client.getQueryCache().get(['n'])?.state().status).toBe('error')
+      }))
+    })
+
+    describe('on the server', () => {
+      beforeEach(() => {
+        TestBed.resetTestingModule()
+        TestBed.configureTestingModule({
+          providers: [
+            provideQueryClient(),
+            { provide: PLATFORM_ID, useValue: 'server' },
+          ],
+        })
+        client = TestBed.inject(QueryClient)
+      })
+
+      // As in the browser: a resolver that waits for the data hears of a
+      // failure at once, unless the call asks for retries.
+      it('retries a failing fetch only as the call asks', fakeAsync(() => {
+        const start = Date.now()
+        const sent = { unasked: [] as number[], asked: [] as number[] }
+        const failing = (attempts: number[]) => () => {
+          attempts.push(Date.now() - start)
+
+          return throwError(() => new Error('down'))
+        }
+
+        client.fetchQuery(['unasked'], failing(sent.unasked))
+        client.fetchQuery(['asked'], failing(sent.asked), {
+          retry: 2,
+          retryDelay: 10,
+        })
+        tick(60_000)
+
+        expect(sent).toEqual({ unasked: [0], asked: [0, 10, 20] })
       }))
     })
   })

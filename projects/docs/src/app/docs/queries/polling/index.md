@@ -19,6 +19,10 @@ as the query is observed and enabled. It stops when the component that injected
 the query is destroyed, and a [disabled query](/queries/disabling-queries)
 doesn't poll.
 
+Nor does a query on the server: the page shows one fetch, and polling starts
+once the browser takes over. See
+[Important Defaults](/important-defaults#on-the-server).
+
 A poll that brings the same data as before doesn't change `data()`: the query
 keeps what it holds, so nothing that reads it runs again. See
 [Structural Sharing](/queries/structural-sharing).

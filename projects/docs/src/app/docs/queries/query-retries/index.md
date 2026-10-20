@@ -13,6 +13,10 @@ That's the default, and it's usually what you want: most failures are a blip.
 Note that `queryFn` is called again for each retry — it isn't invoked once and
 replayed.
 
+On the server, a query doesn't retry unless you set `retry`: a failure shows at
+once rather than holding up the page, and the browser tries again once it takes
+over. See [Important Defaults](/important-defaults#on-the-server).
+
 ## retry
 
 Takes one of four things:

@@ -3091,6 +3091,50 @@ describe('injectQuery', () => {
       // Each fetched once, on mount.
       expect(fetched).toEqual(intervals)
     })
+
+    // The page shows one fetch: the browser polls once it takes over.
+    describe('on the server', () => {
+      beforeEach(() =>
+        reprovide(provideQueryClient(), {
+          provide: PLATFORM_ID,
+          useValue: 'server',
+        }),
+      )
+
+      it("doesn't poll, whatever the interval", fakeAsync(() => {
+        const queryFn = jasmine.createSpy('queryFn').and.returnValue(of(1))
+        const intervals = [100, () => 100]
+        const fixtures = intervals.map(
+          (interval, index) =>
+            mount(() => ({
+              queryKey: ['prices', index],
+              queryFn,
+              refetchInterval: interval,
+            })).fixture,
+        )
+
+        elapse(1_000, ...fixtures)
+
+        // Each fetched once, on mount.
+        expect(queryFn).toHaveBeenCalledTimes(intervals.length)
+
+        fixtures.forEach((fixture) => fixture.destroy())
+      }))
+
+      it('leaves no polling timer that would hold up a server render', () => {
+        const { fixture } = mount(() => ({
+          queryKey: ['prices'],
+          queryFn: () => of(1),
+          refetchInterval: 100,
+        }))
+
+        // With zone.js, a server render writes out the page only once no
+        // timer is pending.
+        expect(TestBed.inject(NgZone).hasPendingMacrotasks).toBe(false)
+
+        fixture.destroy()
+      })
+    })
   })
 
   describe('focus and reconnect', () => {
@@ -4614,6 +4658,78 @@ describe('injectQuery', () => {
 
       expect(queryFn).toHaveBeenCalledTimes(1)
     }))
+
+    // A render waits for no retry: the page shows the error, and the browser
+    // tries again once it takes over. A retry the query or the app asks for
+    // still applies.
+    describe('on the server', () => {
+      beforeEach(() =>
+        reprovide(provideQueryClient(), {
+          provide: PLATFORM_ID,
+          useValue: 'server',
+        }),
+      )
+
+      it("doesn't retry a failing query, so the page shows the error at once", () => {
+        const error = new Error('down')
+        const queryFn = jasmine
+          .createSpy('queryFn')
+          .and.callFake(() => throwError(() => error))
+        const { fixture, result } = mount<string>(() => ({
+          queryKey: ['todos'],
+          queryFn,
+        }))
+
+        expect(result.isError()).toBe(true)
+        expect(result.error()).toBe(error)
+        expect(queryFn).toHaveBeenCalledTimes(1)
+        // With zone.js, a server render writes out the page only once no
+        // timer is pending.
+        expect(TestBed.inject(NgZone).hasPendingMacrotasks).toBe(false)
+
+        fixture.destroy()
+      })
+
+      it('retries a failing query as the query asks', fakeAsync(() => {
+        const queryFn = jasmine
+          .createSpy('queryFn')
+          .and.callFake(() => throwError(() => new Error('down')))
+        const { result } = mount<string>(() => ({
+          queryKey: ['todos'],
+          queryFn,
+          retry: 1,
+        }))
+
+        tick(999)
+        expect(result.isError()).toBe(false)
+
+        tick(1)
+        expect(result.isError()).toBe(true)
+        expect(queryFn).toHaveBeenCalledTimes(2)
+      }))
+
+      it('retries a failing query as the app asks', fakeAsync(() => {
+        reprovide(
+          provideQueryClient(withDefaultOptions({ queries: { retry: 1 } })),
+          { provide: PLATFORM_ID, useValue: 'server' },
+        )
+
+        const queryFn = jasmine
+          .createSpy('queryFn')
+          .and.callFake(() => throwError(() => new Error('down')))
+        const { result } = mount<string>(() => ({
+          queryKey: ['todos'],
+          queryFn,
+        }))
+
+        tick(999)
+        expect(result.isError()).toBe(false)
+
+        tick(1)
+        expect(result.isError()).toBe(true)
+        expect(queryFn).toHaveBeenCalledTimes(2)
+      }))
+    })
   })
 
   describe('injection context', () => {

@@ -37,6 +37,10 @@ don't set keeps the built-in default: [`staleTime: 0`, `gcTime: 5 min`,
 [refetching on focus and reconnect](/queries/focus-and-reconnect) for queries,
 no retries and no hooks for mutations.
 
+On the server a query never polls, retries only if `retry` is set here or on
+the query, and stays in the cache whatever its `gcTime`; see
+[Important Defaults](/important-defaults#on-the-server).
+
 ## What you can default
 
 For queries, these seven:
