@@ -2124,6 +2124,32 @@ describe('injectQuery', () => {
     })
   })
 
+  describe('after clear()', () => {
+    // clear() removes every query, as removeQueries() does.
+
+    it('keeps its data, then shows what the cache holds once the key is back', () => {
+      const { queryFn, resolve } = requests<string>()
+      const { fixture, result } = mount(
+        (id) => ({ queryKey: ['todo', id()], queryFn, staleTime: Infinity }),
+        1,
+      )
+
+      resolve('v1')
+      fixture.detectChanges()
+      client.clear()
+      fixture.detectChanges()
+
+      expect(result.data()).toBe('v1')
+      expect(client.getQueryData(['todo', 1])).toBeUndefined()
+
+      client.setQueryData(['todo', 1], 'edited')
+      fixture.detectChanges()
+
+      expect(result.data()).toBe('edited')
+      expect(queryFn).toHaveBeenCalledTimes(1)
+    })
+  })
+
   describe('initialData', () => {
     it('renders success immediately and skips fetch when fresh', () => {
       const queryFn = jasmine

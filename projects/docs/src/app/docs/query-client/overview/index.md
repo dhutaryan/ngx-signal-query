@@ -40,6 +40,7 @@ everywhere else.
 | `setQueryData(key, updater)` | Write to the cache by hand. See [Manual Cache Updates](/query-client/manual-cache-updates). |
 | `cancelQueries(filters?)` | Cancel in-flight fetches. See [Cancellation & Removal](/query-client/cancellation-and-removal). |
 | `removeQueries(filters?)` | Drop queries from the cache entirely. See [Cancellation & Removal](/query-client/cancellation-and-removal). |
+| `clear()` | Empty the cache, mutations included, e.g. on logout. See [Cancellation & Removal](/query-client/cancellation-and-removal#clear--empty-the-cache). |
 | `fetchQuery(key, queryFn, options?)` | Fetch and cache imperatively, e.g. to prefetch, and get the data. See [Manual Cache Updates](/query-client/manual-cache-updates). |
 | `getQueryCache()` / `getMutationCache()` | The underlying caches — an escape hatch for advanced use. |
 

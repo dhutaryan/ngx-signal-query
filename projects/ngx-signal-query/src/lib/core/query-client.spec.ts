@@ -2,6 +2,7 @@ import { Component, PLATFORM_ID, effect, signal } from '@angular/core'
 import {
   type ComponentFixture,
   fakeAsync,
+  flush,
   flushMicrotasks,
   TestBed,
   tick,
@@ -636,6 +637,54 @@ describe('QueryClient', () => {
     })
   })
 
+  describe('clear', () => {
+    it('empties the query cache and the mutation cache', () => {
+      const save = TestBed.runInInjectionContext(() =>
+        injectMutation(() => ({ mutationFn: () => new Subject<string>() })),
+      )
+
+      client.setQueryData(['todos'], ['a'])
+      client.setQueryData(['user'], 'Ann')
+      save.mutate()
+
+      client.clear()
+
+      expect(client.getQueryCache().getAll()).toEqual([])
+      expect(client.getQueryData(['todos'])).toBeUndefined()
+      expect(client.getMutationCache().getAll()).toEqual([])
+      // The run goes on outside the cache, where nothing counts it.
+      expect(client.isMutating()).toBe(0)
+    })
+
+    it('cancels the fetches in flight, and a fetchQuery() waiting for one rejects with a CancelledError', fakeAsync(() => {
+      const response = new Subject<string[]>()
+      const result = settled(client.fetchQuery(['todos'], () => response))
+
+      client.clear()
+      flushMicrotasks()
+
+      expect(response.observed).toBe(false)
+      expect(result.error).toBeInstanceOf(CancelledError)
+      expect(client.isFetching()).toBe(0)
+    }))
+
+    it('leaves no timer of the removed queries behind', fakeAsync(() => {
+      const queryFn = jasmine
+        .createSpy('queryFn')
+        .and.returnValue(throwError(() => new Error('down')))
+
+      // One waits to be collected, the other to try its failed fetch again.
+      client.setQueryData(['todos'], ['a'])
+      client.fetchQuery(['todo', 1], queryFn, { retry: 3, retryDelay: 1000 })
+
+      client.clear()
+
+      // Nothing is left to run, so flush() has no time to move on.
+      expect(flush()).toBe(0)
+      expect(queryFn).toHaveBeenCalledTimes(1)
+    }))
+  })
+
   // A query nobody shows, from a prefetch or written by hand, is removed once
   // it has gone unused for gcTime. A fetch in flight counts as use.
   describe('garbage collection', () => {
@@ -902,6 +951,15 @@ describe('QueryClient', () => {
       const { fixture } = inEffect(() =>
         client.removeQueries({ queryKey: ['todos'] }),
       )
+
+      client.setQueryData(['todos'], ['a'])
+      fixture.detectChanges()
+
+      expect(client.getQueryData(['todos'])).toEqual(['a'])
+    })
+
+    it("clear doesn't remove an entry created after it", () => {
+      const { fixture } = inEffect(() => client.clear())
 
       client.setQueryData(['todos'], ['a'])
       fixture.detectChanges()

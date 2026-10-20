@@ -66,23 +66,23 @@ describe('MutationCache', () => {
   })
 
   describe('clear', () => {
-    it('cancels every mutation and empties the cache', () => {
-      const a = cache.build<number, Error, void, unknown>({
-        mutationFn: () => new Subject<number>(),
-      })
-      const b = cache.build<number, Error, void, unknown>({
-        mutationFn: () => new Subject<number>(),
+    it('forgets every mutation, and lets a run in flight go on', () => {
+      const response = new Subject<number>()
+      const mutation = cache.build<number, Error, void, unknown>({
+        mutationFn: () => response,
       })
 
-      a.execute()
-      b.execute()
-      spyOn(a, 'cancel')
-      spyOn(b, 'cancel')
-
+      cache.build<number, Error, void, unknown>({ mutationFn: () => of(1) })
+      mutation.execute()
       cache.clear()
 
-      expect(a.cancel).toHaveBeenCalled()
-      expect(b.cancel).toHaveBeenCalled()
+      expect(cache.getAll()).toEqual([])
+
+      response.next(1)
+      response.complete()
+
+      // It lands, and doesn't come back into the cache.
+      expect(mutation.state().status).toBe('success')
       expect(cache.getAll()).toEqual([])
     })
   })

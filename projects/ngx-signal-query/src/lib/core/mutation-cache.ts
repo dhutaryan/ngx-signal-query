@@ -43,9 +43,4 @@ export class MutationCache extends Cache<
   ): void {
     this.removeEntry(String(mutation.mutationId))
   }
-
-  override clear(): void {
-    this.getAll().forEach((mutation) => mutation.cancel())
-    super.clear()
-  }
 }
