@@ -37,7 +37,12 @@ import { injectQuery } from './inject-query'
 import { keepPreviousData } from './keep-previous-data'
 import { provideQueryClient } from './provider'
 import { QueryClient } from './query-client'
-import type { DefaultQueryOptions, QueryOptions, QueryResult } from './types'
+import type {
+  DefaultQueryOptions,
+  QueryKey,
+  QueryOptions,
+  QueryResult,
+} from './types'
 import { type Deferred, deferred } from './utils'
 
 // Mounts injectQuery in a host component, as mountHost() mounts anything:
@@ -2241,6 +2246,24 @@ describe('injectQuery', () => {
       expect(result.isSuccess()).toBe(true)
     })
 
+    it('seeds a key that another component is loading for the first time', () => {
+      const { queryFn } = requests<string>()
+      const loading = mount(() => ({ queryKey: ['todo'], queryFn }))
+
+      expect(loading.result.isLoading()).toBe(true)
+
+      const seeded = mount(() => ({
+        queryKey: ['todo'],
+        queryFn,
+        initialData: 'seed',
+      }))
+
+      // One query: both show the seed while the first load runs on.
+      expect(seeded.result.data()).toBe('seed')
+      expect(loading.result.data()).toBe('seed')
+      expect(queryFn).toHaveBeenCalledTimes(1)
+    })
+
     // A function that returns undefined has nothing to seed: the query loads
     // as if it had no initialData. That's how a detail query seeded from a
     // cached list skips a row the list lacks, or a list too old to trust.
@@ -2401,6 +2424,172 @@ describe('injectQuery', () => {
 
       expect(result.data()).toBe('cached')
       expect(initialData).not.toHaveBeenCalled()
+    })
+
+    it("doesn't seed a key whose data is null: only undefined means no data", () => {
+      client.setQueryData<string | null>(['todo'], null)
+
+      const { result } = mount<string | null>(() => ({
+        queryKey: ['todo'],
+        queryFn: () => new Subject<string | null>(),
+        initialData: 'seed',
+      }))
+
+      expect(result.data()).toBeNull()
+    })
+
+    // A query whose fetch failed before it had any data has none to show
+    // either, so it's seeded as a new one is. Say a detail opened while
+    // offline is opened again once the list has loaded.
+    describe('a key whose last fetch failed before it had data', () => {
+      // Shows the key in a component whose request fails, then leaves: the
+      // query stays in the cache, in 'error' with no data.
+      function failedEarlier(key: QueryKey): void {
+        const { fixture, result } = mount(() => ({
+          queryKey: key,
+          queryFn: () => throwError(() => new Error('offline')),
+          retry: false,
+        }))
+
+        expect(result.status()).toBe('error')
+        fixture.destroy()
+      }
+
+      it('is seeded, and refetched in the background', () => {
+        failedEarlier(['todo', 1])
+
+        const { queryFn } = requests<string>()
+        const { result } = mount(() => ({
+          queryKey: ['todo', 1],
+          queryFn,
+          initialData: 'from the list',
+        }))
+
+        expect(result.status()).toBe('success')
+        expect(result.data()).toBe('from the list')
+        expect(result.error()).toBeNull()
+        // The seed is stale at the default staleTime: it shows while the
+        // refetch runs.
+        expect(result.isFetching()).toBe(true)
+        expect(result.isLoading()).toBe(false)
+        expect(queryFn).toHaveBeenCalledTimes(1)
+      })
+
+      it('shows a row from a list that has loaded since, even when the request fails again', () => {
+        const error = new Error('offline')
+        const detail = (id: Signal<number>): QueryOptions<Todo> => ({
+          queryKey: ['todo', id()],
+          queryFn: () => throwError(() => error),
+          retry: false,
+          initialData: () =>
+            client
+              .getQueryData<Todo[]>(['todos'])
+              ?.find((todo) => todo.id === id()),
+        })
+
+        // Opened before the list loaded: nothing to seed, and the request
+        // fails.
+        const first = mount<Todo>(detail, 1)
+
+        expect(first.result.status()).toBe('error')
+        first.fixture.destroy()
+
+        client.setQueryData<Todo[]>(['todos'], [{ id: 1, title: 'listed' }])
+
+        const { result } = mount<Todo>(detail, 1)
+
+        expect(result.data()).toEqual({ id: 1, title: 'listed' })
+        expect(result.error()).toBe(error)
+      })
+
+      it("isn't refetched while the seed is fresh", () => {
+        failedEarlier(['todo', 1])
+
+        const queryFn = jasmine
+          .createSpy('queryFn')
+          .and.returnValue(of('fetched'))
+        const { result } = mount(() => ({
+          queryKey: ['todo', 1],
+          queryFn,
+          initialData: 'from the list',
+          staleTime: 60_000,
+        }))
+
+        expect(result.data()).toBe('from the list')
+        expect(queryFn).not.toHaveBeenCalled()
+      })
+
+      it('is seeded when the component switches back to it', () => {
+        const { queryFn, fail } = requests<Todo>()
+        const { fixture, result, value } = mount<Todo>(
+          (id) => ({
+            queryKey: ['todo', id()],
+            queryFn,
+            retry: false,
+            initialData: () =>
+              client
+                .getQueryData<Todo[]>(['todos'])
+                ?.find((todo) => todo.id === id()),
+          }),
+          1,
+        )
+
+        fail(new Error('offline'))
+
+        expect(result.status()).toBe('error')
+
+        value.set(2)
+        fixture.detectChanges()
+        client.setQueryData<Todo[]>(['todos'], [{ id: 1, title: 'listed' }])
+        value.set(1)
+        fixture.detectChanges()
+
+        expect(result.status()).toBe('success')
+        expect(result.data()).toEqual({ id: 1, title: 'listed' })
+        expect(result.isFetching()).toBe(true)
+      })
+
+      it("isn't seeded once it has data, even if its refetch failed", () => {
+        client.setQueryData(['todo', 1], 'cached')
+
+        const first = mount<string>(() => ({
+          queryKey: ['todo', 1],
+          queryFn: () => throwError(() => new Error('offline')),
+          retry: false,
+        }))
+
+        expect(first.result.status()).toBe('error')
+        first.fixture.destroy()
+
+        const initialData = jasmine
+          .createSpy('initialData')
+          .and.returnValue('seed')
+        const { result } = mount(() => ({
+          queryKey: ['todo', 1],
+          queryFn: () => new Subject<string>(),
+          initialData,
+        }))
+
+        expect(result.data()).toBe('cached')
+        expect(initialData).not.toHaveBeenCalled()
+      })
+
+      it('loads as it does now when the function returns undefined', () => {
+        failedEarlier(['todo', 1])
+
+        const { queryFn } = requests<string>()
+        const { result } = mount(() => ({
+          queryKey: ['todo', 1],
+          queryFn,
+          initialData: () => undefined,
+          // Nothing was seeded, so there's nothing to keep fresh.
+          staleTime: 60_000,
+        }))
+
+        expect(result.status()).toBe('pending')
+        expect(result.isLoading()).toBe(true)
+        expect(queryFn).toHaveBeenCalledTimes(1)
+      })
     })
   })
 

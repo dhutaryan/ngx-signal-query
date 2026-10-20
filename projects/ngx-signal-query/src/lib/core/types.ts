@@ -167,9 +167,10 @@ export type QueryOptions<TData, TError = Error> = {
    */
   refetchOnReconnect?: boolean | 'always'
   /**
-   * Seed data to render immediately (treated as already-resolved). A
-   * function runs only while the query has no data yet; returning `undefined`
-   * seeds nothing, so the query stays `'pending'` and fetches.
+   * Seed data to render immediately (treated as already-resolved). It seeds a
+   * query that has no data yet: a new one, or one whose fetch failed before it
+   * had any. A function runs only then; returning `undefined` seeds nothing,
+   * so the query loads as it would without it.
    */
   initialData?: TData | (() => TData | undefined)
   /**

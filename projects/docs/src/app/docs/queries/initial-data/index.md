@@ -23,8 +23,8 @@ components reading the same key will see it.
 ## A value or a function
 
 If computing the data is expensive, pass a function. It's only called when the
-query actually needs seeding — a query that already has data in the cache won't
-call it at all:
+query has no data to show — a new query, or one whose fetch failed before it
+got any. A query that already has data in the cache won't call it at all:
 
 ```ts
 initialData: () => JSON.parse(localStorage.getItem('todos') ?? '[]')
@@ -104,6 +104,11 @@ the query starts `'pending'` as usual.
 
 This works with a reactive key too: the seed function runs again for each new
 id, so navigating between todos keeps seeding from the list.
+
+A detail whose request failed before it had any data is seeded the same way.
+Say the user opened it while offline, before the list loaded: opened again once
+the list has the row, it shows the row right away and tries the request again
+in the background.
 
 ## Seeding with the right timestamp
 
