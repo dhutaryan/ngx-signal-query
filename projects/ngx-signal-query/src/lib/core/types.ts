@@ -136,14 +136,20 @@ export type QueryOptions<TData, TError = Error> = {
    * it's always `Infinity`.
    */
   gcTime?: number
-  /** Retry policy on failure. Default `3`. See {@link RetryValue}. */
+  /**
+   * Retry policy on failure. Default `3`. On the server the default is `0`,
+   * so the page shows a failure at once; a value set here or in
+   * {@link withDefaultOptions} applies there too. See {@link RetryValue}.
+   */
   retry?: RetryValue<TError>
   /** Delay between retries. See {@link RetryDelayValue}. */
   retryDelay?: RetryDelayValue<TError>
   /**
    * Refetch on a timer while the query is observed and enabled, whatever its
    * `staleTime`. The timer restarts only when the key, `enabled` or the
-   * interval changes. See {@link RefetchIntervalValue}.
+   * interval changes. On the server it doesn't poll: the page shows one
+   * fetch, and polling starts once the browser takes over. See
+   * {@link RefetchIntervalValue}.
    */
   refetchInterval?: RefetchIntervalValue<TData, TError>
   /**
@@ -257,7 +263,10 @@ export interface DefaultQueryOptions {
    * writes too.
    */
   gcTime?: number
-  /** Retry policy on failure: a boolean, a count, or a predicate. Defaults to `3`. */
+  /**
+   * Retry policy on failure: a boolean, a count, or a predicate. Defaults to
+   * `3`, or to `0` on the server; a value set here applies there too.
+   */
   retry?: RetryValue<unknown>
   /** Delay between retries, in ms or a function of the attempt. */
   retryDelay?: RetryDelayValue<unknown>

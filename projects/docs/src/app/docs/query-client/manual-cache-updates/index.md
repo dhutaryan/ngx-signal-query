@@ -135,9 +135,9 @@ export const todoResolver: ResolveFn<Todo> = (route) => {
 ```
 
 It resolves with the data, at once if the cached data is fresh, and rejects with
-the error if the fetch fails. Unlike a component's query, `fetchQuery` doesn't
-retry a failure unless you ask, with `retry` in the call or in
-[Default Options](/query-client/default-options): whoever waits for the data
-hears of the failure at once. If the query is removed while you wait, say on
-sign-out, it rejects with a `CancelledError`; see
+the error if the fetch fails. Unlike a component's query in the browser,
+`fetchQuery` doesn't retry a failure unless you ask, with `retry` in the call
+or in [Default Options](/query-client/default-options): whoever waits for the
+data hears of the failure at once. If the query is removed while you wait, say
+on sign-out, it rejects with a `CancelledError`; see
 [Cancellation & Removal](/query-client/cancellation-and-removal).

@@ -100,7 +100,8 @@ another component shows, or one that was prefetched. To shorten it everywhere,
 set it where the query is defined, in its `queryOptions`, or for the whole app.
 
 On the server nothing is collected, whatever `gcTime` says: the cache lives as
-long as the app that renders the request.
+long as the app that renders the request. For what else a query does
+differently there, see [Important Defaults](/important-defaults#on-the-server).
 
 ## Setting the defaults
 

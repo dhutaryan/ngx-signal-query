@@ -83,7 +83,9 @@ not.
 ## Server rendering
 
 On the server there's no page to come back to and no network to lose, so
-nothing listens for either. In the browser, everything above applies.
+nothing listens for either. In the browser, everything above applies. For what
+else a query does differently on the server, see
+[Important Defaults](/important-defaults#on-the-server).
 
 ## When switching tabs doesn't refetch
 

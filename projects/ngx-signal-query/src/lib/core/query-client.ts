@@ -99,17 +99,25 @@ export class QueryClient {
    * `staleTime`, `gcTime`, `retry`, `retryDelay`, `structuralSharing`,
    * `refetchOnWindowFocus` and `refetchOnReconnect`. Used internally by
    * {@link injectQuery}.
+   *
+   * On the server a query doesn't poll, whatever its `refetchInterval`, and
+   * doesn't retry a failure unless the query or the app sets `retry`, so the
+   * page renders without waiting on a timer; the browser polls and tries
+   * again once it takes over. `gcTime` is always `Infinity` there.
    */
   defaultQueryOptions<TData, TError = Error>(
     options: QueryOptions<TData, TError>,
   ): DefaultedQueryOptions<TData, TError> {
     const defaults = this.#config.defaultOptions?.queries
 
+    // A render with zone.js waits for every pending timer, so on the server a
+    // query starts none: it isn't collected (see #gcTime), doesn't poll, and
+    // retries only when the query or the app asks.
     return {
       ...options,
       staleTime: options.staleTime ?? defaults?.staleTime ?? 0,
       gcTime: this.#gcTime(options.gcTime),
-      retry: options.retry ?? defaults?.retry ?? 3,
+      retry: options.retry ?? defaults?.retry ?? (this.#onServer ? 0 : 3),
       retryDelay:
         options.retryDelay ?? defaults?.retryDelay ?? defaultRetryDelay,
       structuralSharing:
@@ -118,6 +126,7 @@ export class QueryClient {
         options.refetchOnWindowFocus ?? defaults?.refetchOnWindowFocus ?? true,
       refetchOnReconnect:
         options.refetchOnReconnect ?? defaults?.refetchOnReconnect ?? true,
+      refetchInterval: this.#onServer ? false : options.refetchInterval,
     }
   }
 
@@ -158,9 +167,9 @@ export class QueryClient {
    * removed query always rejects with one. Nothing has to wait for the
    * promise: a prefetch that fails only leaves the query in `'error'`.
    *
-   * Unlike a component's query, it doesn't retry a failure unless `retry` is
-   * set here or in {@link withDefaultOptions}, so whoever waits for the data
-   * hears of the failure at once.
+   * Unlike a component's query in the browser, it doesn't retry a failure
+   * unless `retry` is set here or in {@link withDefaultOptions}, so whoever
+   * waits for the data hears of the failure at once.
    *
    * A query no component shows is removed `gcTime` after the fetch lands (the
    * configured default, or 5 minutes), as any unused query is.
