@@ -1,8 +1,7 @@
 import { fakeAsync, flushMicrotasks } from '@angular/core/testing'
-import { of, Subject, throwError } from 'rxjs'
+import { of, throwError } from 'rxjs'
 
 import { settled } from '../../spec-helpers/promises'
-import { CancelledError } from './cancelled-error'
 import type { MutationOptions } from './mutation'
 import { MutationCache } from './mutation-cache'
 import { deferred } from './utils'
@@ -48,17 +47,6 @@ describe('Mutation', () => {
       flushMicrotasks()
 
       expect(result.error).toBe(error)
-    }))
-
-    it('rejects with a CancelledError when the run is cancelled', fakeAsync(() => {
-      const mutation = build({ mutationFn: () => new Subject<string>() })
-      const result = settled(mutation.execute())
-
-      mutation.cancel()
-      flushMicrotasks()
-
-      expect(result.error).toBeInstanceOf(CancelledError)
-      expect((result.error as Error).message).toBe('The mutation was cancelled')
     }))
   })
 })

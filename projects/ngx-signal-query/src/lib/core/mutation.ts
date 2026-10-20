@@ -16,14 +16,12 @@ import {
   throwIfEmpty,
   timer,
   type Observable,
-  type Subscription,
 } from 'rxjs'
 
-import { CancelledError } from './cancelled-error'
 import type { MutationCache } from './mutation-cache'
 import { defaultRetryDelay, resolveRetryDelay, shouldRetry } from './retryer'
 import type { RetryDelayValue, RetryValue } from './types'
-import { type Deferred, deferred, isPromiseLike } from './utils'
+import { deferred, isPromiseLike } from './utils'
 
 /** Lifecycle status of a mutation: not yet run, running (hooks included), succeeded, or failed. */
 export type MutationStatus = 'idle' | 'pending' | 'success' | 'error'
@@ -195,10 +193,6 @@ export class Mutation<
   // eslint-disable-next-line @typescript-eslint/member-ordering
   readonly state = this.#state.asReadonly()
 
-  #subscription: Subscription | null = null
-  // The promise of the run in flight and how to settle it; null once it has
-  // settled, or before the run.
-  #run: Deferred<TData> | null = null
   #observers = 0
   readonly #options: MutationOptions<TData, TError, TVariables, TContext>
   readonly #cache: MutationCache
@@ -242,7 +236,6 @@ export class Mutation<
   execute(variables: TVariables): Promise<TData> {
     const run = deferred<TData>()
 
-    this.#run = run
     this.#state.set({
       status: 'pending',
       data: undefined,
@@ -257,8 +250,10 @@ export class Mutation<
     // The outcome is fixed before the hooks that report it run: by onMutate,
     // whose failure calls off the write, then by the write. A hook that fails
     // after that can't turn a write that went through into an error. The run
-    // stays pending, and in the cache, until its last hook is done.
-    this.#subscription = awaitHook(() => this.#options.onMutate?.(variables))
+    // stays pending, and in the cache, until its last hook is done. Nothing
+    // stops it before that: the write has most likely reached the server
+    // (see removeObserver), so clearing the cache only forgets the run.
+    awaitHook(() => this.#options.onMutate?.(variables))
       .pipe(
         tap((context) =>
           this.#state.update((state) => ({ ...state, context })),
@@ -286,7 +281,6 @@ export class Mutation<
       )
       .subscribe((outcome) => {
         this.#state.update((state) => ({ ...state, ...outcome }))
-        this.#run = null
         this.#disposeIfDone()
 
         if (outcome.status === 'success') {
@@ -297,15 +291,6 @@ export class Mutation<
       })
 
     return run.promise
-  }
-
-  // Whoever waits for the run hears that it was cancelled, so its promise
-  // doesn't hang.
-  cancel(): void {
-    this.#subscription?.unsubscribe()
-    this.#subscription = null
-    this.#run?.reject(new CancelledError('The mutation was cancelled'))
-    this.#run = null
   }
 
   /** Sends the write, retrying as `retry` allows, and emits its data once. */

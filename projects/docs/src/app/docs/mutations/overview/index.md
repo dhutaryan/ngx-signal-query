@@ -228,4 +228,7 @@ hooks. If the operation isn't safe to run twice, guard the trigger:
 in flight runs to completion, and its `onSuccess` / `onError` / `onSettled` still
 fire. That's deliberate: the request has most likely reached the server already,
 so aborting it would only skip the cache update and leave the UI showing stale
-data for a write that actually happened.
+data for a write that actually happened. Emptying the cache with the client's
+[`clear()`](/query-client/cancellation-and-removal#clear--empty-the-cache)
+doesn't stop it either: the mutation is forgotten, but it lands and its hooks
+fire.

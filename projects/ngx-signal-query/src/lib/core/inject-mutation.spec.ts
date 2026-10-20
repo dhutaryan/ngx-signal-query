@@ -862,6 +862,87 @@ describe('injectMutation', () => {
     })
   })
 
+  describe('after clear()', () => {
+    // clear() forgets every mutation but stops none: as when its component
+    // goes away, a run in flight has most likely reached the server.
+
+    it('lets a run in flight finish and run its hooks, and shows how it went', fakeAsync(() => {
+      const response = new Subject<string>()
+      const onSuccess = jasmine.createSpy('onSuccess')
+      const onSettled = jasmine.createSpy('onSettled')
+      const m = setup<string, Error, void>(() => ({
+        mutationFn: () => response,
+        onSuccess,
+        onSettled,
+      }))
+
+      m.mutate()
+      client.clear()
+
+      expect(m.isPending()).toBe(true)
+
+      response.next('saved')
+      response.complete()
+      flushMicrotasks()
+
+      expect(onSuccess).toHaveBeenCalledWith('saved', undefined, undefined)
+      expect(onSettled).toHaveBeenCalled()
+      expect(m.isSuccess()).toBe(true)
+      expect(m.data()).toBe('saved')
+    }))
+
+    it('lets the run that calls it from a hook finish', fakeAsync(() => {
+      // e.g. a sign-out that clears the cache once the server confirms it
+      const response = new Subject<string>()
+      const onSettled = jasmine.createSpy('onSettled')
+      const signOut = setup<string, Error, void>(() => ({
+        mutationFn: () => response,
+        onSuccess: () => client.clear(),
+        onSettled,
+      }))
+      const result = settled(signOut.mutateAsync())
+
+      response.next('signed out')
+      response.complete()
+      flushMicrotasks()
+
+      expect(onSettled).toHaveBeenCalled()
+      expect(result.value).toBe('signed out')
+      expect(signOut.isSuccess()).toBe(true)
+    }))
+
+    it('lets a run waiting to retry try again', fakeAsync(() => {
+      const mutationFn = jasmine.createSpy('mutationFn').and.returnValues(
+        throwError(() => new Error('down')),
+        of('saved'),
+      )
+      const m = setup<unknown, Error, void>(() => ({
+        mutationFn,
+        retry: 1,
+        retryDelay: 100,
+      }))
+
+      m.mutate()
+      client.clear()
+      tick(100)
+
+      expect(mutationFn).toHaveBeenCalledTimes(2)
+      expect(m.data()).toBe('saved')
+    }))
+
+    it('keeps showing a run that has settled', () => {
+      const m = setup<string, Error, string>(() => ({
+        mutationFn: (title) => of(title),
+      }))
+
+      m.mutate('milk')
+      client.clear()
+
+      expect(m.isSuccess()).toBe(true)
+      expect(m.data()).toBe('milk')
+    })
+  })
+
   describe('concurrent calls', () => {
     it('keeps the latest call as the result, even if an earlier one lands later', fakeAsync(() => {
       const slow = new Subject<string>()

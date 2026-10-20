@@ -93,6 +93,28 @@ describe('injectIsMutating', () => {
     })
   })
 
+  it('drops to 0 once clear() forgets the runs, and counts the ones after it', () => {
+    TestBed.runInInjectionContext(() => {
+      const isMutating = injectIsMutating()
+      const m = injectMutation<number, Error, void>(() => ({
+        mutationFn: () => new Subject<number>(),
+      }))
+
+      m.mutate()
+      expect(isMutating()).toBe(1)
+
+      client.clear()
+
+      // The run goes on, and its component still shows it, but it has left
+      // the cache.
+      expect(isMutating()).toBe(0)
+      expect(m.isPending()).toBe(true)
+
+      m.mutate()
+      expect(isMutating()).toBe(1)
+    })
+  })
+
   describe('injection context', () => {
     it('throws when called outside an injection context', () => {
       expect(() => injectIsMutating()).toThrowError(/NG0203|injection context/)
