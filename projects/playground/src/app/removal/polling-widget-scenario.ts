@@ -121,9 +121,6 @@ export class PollingWidgetScenario {
   )
 
   protected readonly rows = computed((): CardRow[] => {
-    // The widgets before the entry: the first read of a widget's result puts
-    // the key in the cache, and #entry read earlier in this computed would
-    // keep the value from before that.
     const widgets = [
       ['widget A', this.widgetA()] as const,
       ['widget B', this.widgetB()] as const,

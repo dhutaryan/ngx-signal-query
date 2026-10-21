@@ -120,8 +120,23 @@ export function createQueryObserver<TData, TError = Error>(
   // owner is being constructed. A read before the key effect's first run
   // resolves the current key on the spot, so it already sees cached data and
   // initialData; from then on the key and follow effects switch queries.
+  //
+  // Such a read may put a new query in the cache in the middle of a
+  // computation: say a parent's computed reads injectIsFetching(), then this
+  // result for the first time. That computed doesn't hear of the new entry,
+  // so the cache tells its readers again once the computation is over.
   const query = computed(
-    () => switched() ?? untracked(() => resolve(defaultedOptions().queryKey)),
+    () =>
+      switched() ??
+      untracked(() => {
+        const key = defaultedOptions().queryKey
+        const created = cache.get(key) === undefined
+        const q = resolve(key)
+
+        if (created) cache.notifyLater()
+
+        return q
+      }),
   )
 
   // Data of the last query that had any, fed to the placeholderData function

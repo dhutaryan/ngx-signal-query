@@ -104,9 +104,6 @@ export class ResetScenario {
   protected readonly mountedB = signal(false)
 
   protected readonly rows = computed((): CardRow[] => {
-    // The lists before the entry: the first read of a list's result puts the
-    // key in the cache, and #entry read earlier in this computed would keep
-    // the value from before that.
     const lists = [
       ['list A', this.listA()] as const,
       ['list B', this.listB()] as const,

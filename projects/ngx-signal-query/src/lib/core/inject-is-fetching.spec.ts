@@ -1,10 +1,35 @@
-import { Injector } from '@angular/core'
-import { TestBed, fakeAsync, tick } from '@angular/core/testing'
+import { Component, Injector, computed, viewChild } from '@angular/core'
+import {
+  TestBed,
+  fakeAsync,
+  flushMicrotasks,
+  tick,
+} from '@angular/core/testing'
 import { Subject } from 'rxjs'
 
 import { injectIsFetching } from './inject-is-fetching'
+import { injectQueries } from './inject-queries'
+import { injectQuery } from './inject-query'
 import { provideQueryClient } from './provider'
 import { QueryClient } from './query-client'
+
+@Component({ selector: 'app-todo', template: '' })
+class TodoComponent {
+  readonly todo = injectQuery(() => ({
+    queryKey: ['todo'],
+    queryFn: () => new Subject<string>(),
+  }))
+}
+
+@Component({ selector: 'app-todos', template: '' })
+class TodosComponent {
+  readonly todos = injectQueries(() => ({
+    queries: [1, 2].map((id) => ({
+      queryKey: ['todos', id],
+      queryFn: () => new Subject<string>(),
+    })),
+  }))
+}
 
 describe('injectIsFetching', () => {
   let client: QueryClient
@@ -48,6 +73,82 @@ describe('injectIsFetching', () => {
 
     expect(all()).toBe(3)
     expect(aOnly()).toBe(2)
+  })
+
+  // A query is created on the first read of its result, so a computed that
+  // reads a child's query for the first time puts the key in the cache in
+  // the middle of its own computation, after it may have read the count.
+  describe('a query first read in a computed', () => {
+    it('is counted once the computed is done, though it read the count first', fakeAsync(() => {
+      @Component({
+        imports: [TodoComponent],
+        template: '{{ summary() }} <app-todo />',
+      })
+      class PageComponent {
+        readonly isFetching = injectIsFetching()
+        readonly child = viewChild(TodoComponent)
+        readonly summary = computed(
+          () => `${this.isFetching()} ${this.child()?.todo.isFetching()}`,
+        )
+      }
+
+      const fixture = TestBed.createComponent(PageComponent)
+
+      fixture.detectChanges()
+      flushMicrotasks()
+      fixture.detectChanges()
+
+      expect(fixture.componentInstance.summary()).toBe('1 true')
+      expect(fixture.nativeElement.textContent.trim()).toBe('1 true')
+    }))
+
+    it('counts the queries of an injectQueries the computed reads after the count', fakeAsync(() => {
+      @Component({
+        imports: [TodosComponent],
+        template: '{{ summary() }} <app-todos />',
+      })
+      class PageComponent {
+        readonly isFetching = injectIsFetching()
+        readonly child = viewChild(TodosComponent)
+        readonly summary = computed(() => {
+          const count = this.isFetching()
+          const todos = this.child()?.todos() ?? []
+
+          return `${count} ${todos.filter((todo) => todo.isFetching()).length}`
+        })
+      }
+
+      const fixture = TestBed.createComponent(PageComponent)
+
+      fixture.detectChanges()
+      flushMicrotasks()
+      fixture.detectChanges()
+
+      expect(fixture.componentInstance.summary()).toBe('2 2')
+    }))
+
+    it('counts it at once when the computed reads the count after it', () => {
+      @Component({
+        imports: [TodoComponent],
+        template: '{{ summary() }} <app-todo />',
+      })
+      class PageComponent {
+        readonly isFetching = injectIsFetching()
+        readonly child = viewChild(TodoComponent)
+        readonly summary = computed(() => {
+          const fetching = this.child()?.todo.isFetching()
+
+          return `${this.isFetching()} ${fetching}`
+        })
+      }
+
+      const fixture = TestBed.createComponent(PageComponent)
+
+      fixture.detectChanges()
+
+      // No wait: the count is read once the cache already has the key.
+      expect(fixture.componentInstance.summary()).toBe('1 true')
+    })
   })
 
   describe('injection context', () => {
