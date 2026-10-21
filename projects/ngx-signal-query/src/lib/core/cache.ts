@@ -20,6 +20,15 @@ export abstract class Cache<TEntry> {
     this.#sync()
   }
 
+  // Updates the snapshot again once the current computation is over, in a
+  // microtask. An entry added in the middle of a computation is in the
+  // snapshot at once, but a computed that read the snapshot earlier in that
+  // computation doesn't hear of it: it only starts listening once its
+  // computation is done. The second update reaches it.
+  notifyLater(): void {
+    queueMicrotask(() => this.#sync())
+  }
+
   protected addEntry(key: string, entry: TEntry): TEntry {
     this.#entriesMap.set(key, entry)
     this.#sync()
