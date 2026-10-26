@@ -11,7 +11,7 @@ import {
   restoreVisibility,
   setVisibility,
 } from '../../spec-helpers/page-events'
-import { onReconnect, onWindowFocus } from './browser-events'
+import { onReconnect, onWindowFocus, pageVisibility } from './browser-events'
 
 // The injectors startIn() created and nothing has destroyed yet. Destroying
 // TestBed's injector doesn't destroy them, so stopAll() does it after each
@@ -42,6 +42,30 @@ function stopAll(): void {
 }
 
 const onTheServer = { provide: PLATFORM_ID, useValue: 'server' }
+
+describe('pageVisibility', () => {
+  afterEach(restoreVisibility)
+
+  it('tells whether the page is visible at the moment it is asked', () => {
+    const visible = TestBed.runInInjectionContext(pageVisibility)
+
+    setVisibility('hidden')
+    expect(visible()).toBe(false)
+
+    setVisibility('visible')
+    expect(visible()).toBe(true)
+  })
+
+  it('counts a page that is neither visible nor hidden as visible', () => {
+    const visible = TestBed.runInInjectionContext(pageVisibility)
+
+    // jsdom, which many test setups run in, says 'prerender' unless it's
+    // told to pretend to be visual.
+    setVisibility('prerender' as DocumentVisibilityState)
+
+    expect(visible()).toBe(true)
+  })
+})
 
 describe('onWindowFocus', () => {
   afterEach(() => {

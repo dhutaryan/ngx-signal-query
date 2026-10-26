@@ -144,6 +144,23 @@ while they run is a real return, and can slip a refetch into the test that's
 running. If that gets in the way, turn the refetches off in the test client:
 `withDefaultOptions({ queries: { refetchOnWindowFocus: false } })`.
 
+## Polling
+
+[Polling waits while the page is hidden](/queries/polling#in-a-background-tab),
+and in a real browser the page your tests run in is hidden while its window is
+minimized or another tab is in front. A test that waits for a poll then sees
+none. Keep polling going in the test client:
+
+```ts
+provideQueryClient(
+  withDefaultOptions({ queries: { refetchIntervalInBackground: true } }),
+)
+```
+
+A simulated DOM, such as jsdom, has no window to hide: the page there always
+counts as visible. To test the pause itself, define `visibilityState` as
+`'hidden'` the same way as above, and delete it once the test is done.
+
 ## Testing a mutation
 
 Call `mutate()`, then assert the resulting state and any side effects:

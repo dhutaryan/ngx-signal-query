@@ -1,7 +1,7 @@
 <section class="panel">
   <h2>
     Polling
-    <small>(issue #16)</small>
+    <small>(issues #16, #23)</small>
   </h2>
 
   <p class="hint">
@@ -17,7 +17,12 @@
     <code>retry</code>
     , through
     <code>injectQueries</code>
-    a neighbour query in the same list reads it.
+    a neighbour query in the same list reads it. While the tab is hidden, no
+    poll should go out, unless
+    <strong>keep polling</strong>
+    sets
+    <code>refetchIntervalInBackground</code>
+    on the observers.
   </p>
 
   <div class="controls">
@@ -64,6 +69,27 @@
   </div>
 
   <div class="controls">
+    <span class="label">in a hidden tab</span>
+    <button (click)="setBackground(false)" [class.on]="!background()">
+      pause
+    </button>
+    <button (click)="setBackground(true)" [class.on]="background()">
+      keep polling
+    </button>
+
+    <button (click)="hideTab()" [disabled]="!running() || hiding()">
+      hide the tab for {{ hideFor / 1000 }} s
+    </button>
+    <span class="state">
+      @if (hiding()) {
+        hidden · {{ hidingLeft() }} s left
+      } @else {
+        or switch to another tab and back
+      }
+    </span>
+  </div>
+
+  <div class="controls">
     <button (click)="invalidate()" [disabled]="!running()">
       invalidateQueries
     </button>
@@ -79,12 +105,14 @@
           [n]="n"
           [interval]="intervalChoice()"
           [noise]="noise()"
+          [background]="background()"
         />
       } @else {
         <app-polling-queries-observer
           [n]="n"
           [interval]="intervalChoice()"
           [noise]="noise()"
+          [background]="background()"
         />
       }
     } @empty {
@@ -134,21 +162,31 @@
       </tr>
     </thead>
     <tbody>
-      @for (row of timeline(); track row.id) {
-        <tr>
-          <td>{{ row.at | number: '1.2-2' }} s</td>
-          <td>#{{ row.observer }}</td>
-          <td [class.bad]="isOffBeat(row)">
-            @if (row.cause) {
-              <span class="cause">{{ row.cause }}</span>
-            } @else if (row.sinceResponse === null) {
-              —
-            } @else {
-              {{ row.sinceResponse }} ms
-            }
-          </td>
-          <td class="state">{{ row.state }}</td>
-        </tr>
+      @for (row of timeline(); track row.key) {
+        @if (row.kind === 'mark') {
+          <tr class="mark">
+            <td>{{ row.at | number: '1.2-2' }} s</td>
+            <td colspan="3">{{ row.text }}</td>
+          </tr>
+        } @else {
+          <tr>
+            <td>{{ row.at | number: '1.2-2' }} s</td>
+            <td>#{{ row.observer }}</td>
+            <td [class.bad]="row.bad">
+              @if (row.cause) {
+                <span class="cause">{{ row.cause }}</span>
+              } @else if (row.sinceResponse === null) {
+                —
+              } @else {
+                {{ row.sinceResponse }} ms
+                @if (row.note) {
+                  · {{ row.note }}
+                }
+              }
+            </td>
+            <td class="state">{{ row.state }}</td>
+          </tr>
+        }
       } @empty {
         <tr>
           <td colspan="4" class="hint">No requests yet.</td>
@@ -159,8 +197,15 @@
 
   <p class="hint">
     A poll should come {{ interval }} ms (± {{ tolerance }}) after the last
-    response; red marks the ones that don't. The fetch on mount and requests you
-    trigger are labelled instead.
+    response; red marks the ones that don't, and the ones sent while the tab was
+    hidden with
+    <strong>pause</strong>
+    on. With
+    <strong>keep polling</strong>
+    those aren't timed: browsers slow timers down in a background tab. The first
+    poll after the tab comes back shows how long after the return it came. The
+    fetch on mount and requests you trigger are labelled instead. The counters
+    are judged again 5 s after the tab comes back.
   </p>
 
   <details>
@@ -214,6 +259,15 @@
         <strong><code>Infinity</code></strong>
         — requests back to back: the browser takes the delay as 0. Should not
         poll at all.
+      </li>
+      <li>
+        <strong>hide the tab for {{ hideFor / 1000 }} s</strong>
+        , or switch to another tab for a few seconds — polls go on while the tab
+        is hidden. There should be none, and the first poll should come within
+        {{ interval / 1000 }} s of coming back: this demo turns the refetch on
+        coming back off. With
+        <strong>keep polling</strong>
+        they should go on.
       </li>
     </ul>
   </details>

@@ -15,9 +15,9 @@ export class PricesComponent {
 ```
 
 Polling ignores `staleTime`: fresh data is polled all the same. It runs as long
-as the query is observed and enabled. It stops when the component that injected
-the query is destroyed, and a [disabled query](/queries/disabling-queries)
-doesn't poll.
+as the query is observed and enabled, and waits while the tab is hidden. It
+stops when the component that injected the query is destroyed, and a
+[disabled query](/queries/disabling-queries) doesn't poll.
 
 Nor does a query on the server: the page shows one fetch, and polling starts
 once the browser takes over. See
@@ -46,6 +46,40 @@ when that component stops polling, the next shortest takes over.
 And a poll that comes due while a request is still in flight joins that
 request instead of sending another, so a slow request doesn't pile up
 duplicates behind it.
+
+## In a background tab
+
+While the page is hidden, because the user is on another tab or has minimized
+the window, the query doesn't poll: nobody would see the data.
+
+Coming back brings the data up to date. If it's stale, the query refetches at
+once, as on [any return to the page](/queries/focus-and-reconnect), and the
+next poll comes an interval after that response. If it isn't, or
+`refetchOnWindowFocus` is off, the poll that comes due next goes out, at most
+one interval after the return.
+
+For data that has to stay current while the user is away, such as an unread
+count in the tab's title, keep polling with `refetchIntervalInBackground`:
+
+```ts
+export class InboxComponent {
+  readonly #http = inject(HttpClient)
+
+  protected readonly unread = injectQuery(() => ({
+    queryKey: ['unread'],
+    queryFn: () => this.#http.get<number>('/api/unread'),
+    refetchInterval: 30_000,
+    refetchIntervalInBackground: true,
+  }))
+}
+```
+
+Or for every query, in [Default Options](/query-client/default-options).
+Browsers slow timers down in a background tab, so polls there can come less
+often than the interval says.
+
+Only polls wait. A component that starts showing a query in a hidden page still
+loads it, and `refetch()` and invalidation still refetch it.
 
 ## What restarts the timer
 
@@ -118,9 +152,6 @@ query doesn't poll instead.
   here only new data pushes the next poll back, a failed request doesn't. So
   while requests fail, polling keeps its schedule, where TanStack waits a full
   interval after each failure.
-- **Background tabs.** TanStack pauses polling while the tab is hidden, unless
-  `refetchIntervalInBackground` is set. This library keeps polling
-  ([#23](https://github.com/dhutaryan/ngx-signal-query/issues/23)).
 - **The function form** receives `{ state }` rather than the `Query` object, so
   `query.state.data` reads the same in both.
 - **Out-of-range values.** TanStack skips `Infinity` and negative intervals as

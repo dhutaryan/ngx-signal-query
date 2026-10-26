@@ -13,6 +13,17 @@ export function restoreVisibility(): void {
   Reflect.deleteProperty(document, 'visibilityState')
 }
 
+// The page counts as visible, whatever the test runner's window does, until
+// restoreVisibility(): polling pauses in a hidden page, and a runner's window
+// is hidden while it's minimized or behind another tab. Fires no
+// visibilitychange: a spec mustn't see the user coming back.
+export function pinVisible(): void {
+  Object.defineProperty(document, 'visibilityState', {
+    configurable: true,
+    get: () => 'visible',
+  })
+}
+
 // The user leaves the page and comes back to it, as when they switch to
 // another tab and back. The real visibilityState comes back afterwards.
 export function leaveAndComeBack(): void {

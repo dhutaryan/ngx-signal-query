@@ -97,8 +97,8 @@ export class QueryClient {
   /**
    * Merges per-query options with the configured defaults, filling in
    * `staleTime`, `gcTime`, `retry`, `retryDelay`, `structuralSharing`,
-   * `refetchOnWindowFocus` and `refetchOnReconnect`. Used internally by
-   * {@link injectQuery}.
+   * `refetchOnWindowFocus`, `refetchOnReconnect` and
+   * `refetchIntervalInBackground`. Used internally by {@link injectQuery}.
    *
    * On the server a query doesn't poll, whatever its `refetchInterval`, and
    * doesn't retry a failure unless the query or the app sets `retry`, so the
@@ -127,6 +127,10 @@ export class QueryClient {
       refetchOnReconnect:
         options.refetchOnReconnect ?? defaults?.refetchOnReconnect ?? true,
       refetchInterval: this.#onServer ? false : options.refetchInterval,
+      refetchIntervalInBackground:
+        options.refetchIntervalInBackground ??
+        defaults?.refetchIntervalInBackground ??
+        false,
     }
   }
 

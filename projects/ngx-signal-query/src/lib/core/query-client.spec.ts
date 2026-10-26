@@ -72,6 +72,7 @@ describe('QueryClient', () => {
       expect(typeof defaulted.retryDelay).toBe('function')
       expect(defaulted.refetchOnWindowFocus).toBe(true)
       expect(defaulted.refetchOnReconnect).toBe(true)
+      expect(defaulted.refetchIntervalInBackground).toBe(false)
     })
 
     it('keeps explicitly provided options', () => {
@@ -83,6 +84,7 @@ describe('QueryClient', () => {
         retry: 1,
         refetchOnWindowFocus: 'always',
         refetchOnReconnect: false,
+        refetchIntervalInBackground: true,
       })
 
       expect(defaulted.staleTime).toBe(5000)
@@ -90,6 +92,7 @@ describe('QueryClient', () => {
       expect(defaulted.retry).toBe(1)
       expect(defaulted.refetchOnWindowFocus).toBe('always')
       expect(defaulted.refetchOnReconnect).toBe(false)
+      expect(defaulted.refetchIntervalInBackground).toBe(true)
     })
 
     describe('on the server', () => {
@@ -168,6 +171,7 @@ describe('QueryClient', () => {
                 retryDelay: 100,
                 refetchOnWindowFocus: false,
                 refetchOnReconnect: false,
+                refetchIntervalInBackground: true,
               },
             }),
           ),
@@ -187,6 +191,7 @@ describe('QueryClient', () => {
       expect(defaulted.retry).toBe(5)
       expect(defaulted.refetchOnWindowFocus).toBe(false)
       expect(defaulted.refetchOnReconnect).toBe(false)
+      expect(defaulted.refetchIntervalInBackground).toBe(true)
     })
 
     it('lets per-query options override the configured defaults', () => {
@@ -196,6 +201,7 @@ describe('QueryClient', () => {
         staleTime: 0,
         gcTime: 1000,
         refetchOnWindowFocus: 'always',
+        refetchIntervalInBackground: false,
       })
 
       expect(defaulted.staleTime).toBe(0)
@@ -203,6 +209,7 @@ describe('QueryClient', () => {
       expect(defaulted.retry).toBe(5)
       expect(defaulted.refetchOnWindowFocus).toBe('always')
       expect(defaulted.refetchOnReconnect).toBe(false)
+      expect(defaulted.refetchIntervalInBackground).toBe(false)
     })
 
     it('applies the configured staleTime in fetchQuery', () => {

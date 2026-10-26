@@ -4,10 +4,12 @@ import {
   type Injector,
   computed,
   effect,
+  runInInjectionContext,
   signal,
   untracked,
 } from '@angular/core'
 
+import { pageVisibility } from './browser-events'
 import { startPolling } from './polling'
 import { QueryClient } from './query-client'
 import type { Query, QuerySubscriber } from './query'
@@ -280,6 +282,9 @@ export function createQueryObserver<TData, TError = Error>(
     return isValidTimeout(value) && value > 0 ? value : false
   })
 
+  // Whether the user can see the page right now; polls wait while they can't.
+  const pageVisible = runInInjectionContext(injector, pageVisibility)
+
   // Polling: refetch on an interval, independent of staleTime. The timer
   // restarts when the observed query switches, or when enabled or the interval
   // changes, as in TanStack's setOptions. It doesn't restart on every
@@ -309,10 +314,16 @@ export function createQueryObserver<TData, TError = Error>(
     // removeQueries dropped it: then the poll puts the key back, as TanStack's
     // observer does before every fetch, and the follow effect moves this
     // observer there.
+    //
+    // While the page is hidden, the poll is skipped unless the options ask to
+    // keep polling there, as in TanStack: nobody sees the data, and coming
+    // back refetches it if it's stale. The timer keeps its schedule, so the
+    // poll due next goes out once the page shows again.
     const poll = (): void => {
       const options = fetchOptionsFor(q)
+      const { refetchIntervalInBackground } = untracked(defaultedOptions)
 
-      if (options) {
+      if (options && (refetchIntervalInBackground || pageVisible())) {
         resolve(q.key).fetch(options)
       }
     }

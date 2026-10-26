@@ -6,6 +6,20 @@ import { filter, fromEvent } from 'rxjs'
 import { inBrowser } from './platform'
 
 /**
+ * Returns a function that tells whether the user can see the page right now:
+ * `false` while its tab is in the background or its window is minimized. A
+ * page that is neither visible nor hidden, as a test DOM may say
+ * (`'prerender'`), counts as visible. Must run in an injection context.
+ *
+ * @internal
+ */
+export function pageVisibility(): () => boolean {
+  const document = inject(DOCUMENT)
+
+  return () => document.visibilityState !== 'hidden'
+}
+
+/**
  * Calls `listener` whenever the user comes back to the page, as the tab or
  * the window turns visible again. The window's `focus` event isn't used: it
  * also fires when an alert or a file picker closes, or on coming back from
@@ -21,10 +35,11 @@ export function onWindowFocus(listener: () => void): void {
   if (!inBrowser()) return
 
   const document = inject(DOCUMENT)
+  const visible = pageVisibility()
 
   fromEvent(document, 'visibilitychange')
     .pipe(
-      filter(() => document.visibilityState !== 'hidden'),
+      filter(() => visible()),
       takeUntilDestroyed(),
     )
     .subscribe(() => listener())

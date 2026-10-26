@@ -49,6 +49,11 @@ h2 {
       background: #0860ca;
     }
   }
+
+  .state {
+    color: #57606a;
+    font-size: 0.85rem;
+  }
 }
 
 .observers {
@@ -123,6 +128,13 @@ button {
   td.state,
   .cause {
     color: #57606a;
+  }
+
+  // The tab hiding or coming back, or the hidden-tab setting changing.
+  tr.mark td {
+    color: #57606a;
+    font-style: italic;
+    text-align: left;
   }
 }
 

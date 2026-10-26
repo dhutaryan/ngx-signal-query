@@ -33,9 +33,10 @@ export const appConfig: ApplicationConfig = {
 From then on, every query and mutation starts from those values. Anything you
 don't set keeps the built-in default: [`staleTime: 0`, `gcTime: 5 min`,
 `retry: 3`](/important-defaults),
-[structural sharing](/queries/structural-sharing) and
-[refetching on focus and reconnect](/queries/focus-and-reconnect) for queries,
-no retries and no hooks for mutations.
+[structural sharing](/queries/structural-sharing),
+[refetching on focus and reconnect](/queries/focus-and-reconnect) and
+[no polling in a background tab](/queries/polling#in-a-background-tab) for
+queries, no retries and no hooks for mutations.
 
 On the server a query never polls, retries only if `retry` is set here or on
 the query, and stays in the cache whatever its `gcTime`; see
@@ -43,7 +44,7 @@ the query, and stays in the cache whatever its `gcTime`; see
 
 ## What you can default
 
-For queries, these seven:
+For queries, these eight:
 
 ```ts
 type DefaultQueryOptions = {
@@ -54,6 +55,7 @@ type DefaultQueryOptions = {
   structuralSharing?: StructuralSharingValue
   refetchOnWindowFocus?: boolean | 'always'
   refetchOnReconnect?: boolean | 'always'
+  refetchIntervalInBackground?: boolean
 }
 ```
 

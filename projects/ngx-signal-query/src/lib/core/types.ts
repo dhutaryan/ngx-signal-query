@@ -146,12 +146,22 @@ export type QueryOptions<TData, TError = Error> = {
   retryDelay?: RetryDelayValue<TError>
   /**
    * Refetch on a timer while the query is observed and enabled, whatever its
-   * `staleTime`. The timer restarts only when the key, `enabled` or the
-   * interval changes. On the server it doesn't poll: the page shows one
-   * fetch, and polling starts once the browser takes over. See
-   * {@link RefetchIntervalValue}.
+   * `staleTime`. While the page is hidden it doesn't poll, unless
+   * `refetchIntervalInBackground` is set. The timer restarts only when the
+   * key, `enabled` or the interval changes. On the server it doesn't poll:
+   * the page shows one fetch, and polling starts once the browser takes over.
+   * See {@link RefetchIntervalValue}.
    */
   refetchInterval?: RefetchIntervalValue<TData, TError>
+  /**
+   * Whether the query keeps polling while the page is hidden: the user is on
+   * another tab, or the window is minimized. Default `false`: no poll goes out
+   * while it's hidden; coming back refetches stale data (see
+   * `refetchOnWindowFocus`), and polling goes on from there. Turn it on for
+   * data that must stay current while the user is away, such as a count in
+   * the tab's title.
+   */
+  refetchIntervalInBackground?: boolean
   /**
    * Whether the query refetches when the user comes back to the page, as the
    * tab or window turns visible again: `true` refetches stale data (see
@@ -209,6 +219,7 @@ export type DefaultedQueryOptions<TData, TError = Error> = QueryOptions<
   structuralSharing: StructuralSharingValue<TData>
   refetchOnWindowFocus: boolean | 'always'
   refetchOnReconnect: boolean | 'always'
+  refetchIntervalInBackground: boolean
 }
 
 /** Reactive result returned by {@link injectQuery}; every field is a signal. */
@@ -277,6 +288,8 @@ export interface DefaultQueryOptions {
   refetchOnWindowFocus?: boolean | 'always'
   /** Whether queries refetch when the network comes back. Defaults to `true`. */
   refetchOnReconnect?: boolean | 'always'
+  /** Whether queries keep polling while the page is hidden. Defaults to `false`. */
+  refetchIntervalInBackground?: boolean
 }
 
 /**

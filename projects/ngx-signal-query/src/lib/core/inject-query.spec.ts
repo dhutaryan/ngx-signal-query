@@ -28,6 +28,7 @@ import { mountHost } from '../../spec-helpers/host'
 import {
   goOfflineAndBack,
   leaveAndComeBack,
+  pinVisible,
   restoreVisibility,
   setVisibility,
 } from '../../spec-helpers/page-events'
@@ -219,6 +220,11 @@ describe('injectQuery', () => {
     TestBed.configureTestingModule({ providers: [provideQueryClient()] })
     client = TestBed.inject(QueryClient)
   })
+
+  // Polling waits while the page is hidden, so the specs mustn't depend on
+  // what the test runner's window does. A spec hides the page itself.
+  beforeEach(pinVisible)
+  afterEach(restoreVisibility)
 
   // Replaces the client every spec starts with by one with these providers.
   function reprovide(
@@ -3279,6 +3285,181 @@ describe('injectQuery', () => {
 
       // Each fetched once, on mount.
       expect(fetched).toEqual(intervals)
+    })
+
+    // Nobody sees a hidden page, so its polls wait, unless the query asks to
+    // keep polling there. The timer keeps its schedule meanwhile: coming back
+    // refetches stale data at once, and otherwise the poll due next goes out.
+    describe('in a hidden tab', () => {
+      it("doesn't poll while the page is hidden", fakeAsync(() => {
+        const { queryFn, starts } = timed(30)
+        const { fixture } = mount(() => ({
+          queryKey: ['prices'],
+          queryFn,
+          refetchInterval: 100,
+        }))
+
+        elapse(50, fixture)
+        setVisibility('hidden')
+        elapse(400, fixture)
+
+        // Fetched on mount only.
+        expect(starts).toEqual([0])
+
+        fixture.destroy()
+      }))
+
+      it('refetches stale data as the page shows again, then polls an interval after that response', fakeAsync(() => {
+        const { queryFn, starts } = timed(30)
+        const { fixture } = mount(() => ({
+          queryKey: ['prices'],
+          queryFn,
+          refetchInterval: 100,
+        }))
+
+        elapse(50, fixture)
+        setVisibility('hidden')
+        elapse(350, fixture)
+        setVisibility('visible')
+        elapse(200, fixture)
+
+        // Back at 400: the refetch on coming back, then a poll 100 ms after
+        // its response at 430.
+        expect(starts).toEqual([0, 400, 530])
+
+        fixture.destroy()
+      }))
+
+      it('polls when the next poll is due once the page shows again, without refetching on coming back', fakeAsync(() => {
+        const { queryFn, starts } = timed(30)
+        const { fixture } = mount(() => ({
+          queryKey: ['prices'],
+          queryFn,
+          refetchInterval: 100,
+          refetchOnWindowFocus: false,
+        }))
+
+        elapse(50, fixture)
+        setVisibility('hidden')
+        elapse(350, fixture)
+        setVisibility('visible')
+        elapse(150, fixture)
+
+        // Back at 400. The polls due at 130, 230 and 330 were skipped, not
+        // made up for at once, and the one due at 430 goes out.
+        expect(starts).toEqual([0, 430])
+
+        fixture.destroy()
+      }))
+
+      it('keeps polling with refetchIntervalInBackground', fakeAsync(() => {
+        const { queryFn, starts } = timed(30)
+        const { fixture } = mount(() => ({
+          queryKey: ['prices'],
+          queryFn,
+          refetchInterval: 100,
+          refetchIntervalInBackground: true,
+        }))
+
+        elapse(50, fixture)
+        setVisibility('hidden')
+        elapse(350, fixture)
+
+        expect(starts).toEqual([0, 130, 260, 390])
+
+        fixture.destroy()
+      }))
+
+      it('keeps polling with refetchIntervalInBackground set for the app', fakeAsync(() => {
+        reprovide(
+          provideQueryClient(
+            withDefaultOptions({
+              queries: { refetchIntervalInBackground: true },
+            }),
+          ),
+        )
+
+        const { queryFn, starts } = timed(30)
+        const { fixture } = mount(() => ({
+          queryKey: ['prices'],
+          queryFn,
+          refetchInterval: 100,
+        }))
+
+        elapse(50, fixture)
+        setVisibility('hidden')
+        elapse(350, fixture)
+
+        expect(starts).toEqual([0, 130, 260, 390])
+
+        fixture.destroy()
+      }))
+
+      it('reads refetchIntervalInBackground when a poll comes due', fakeAsync(() => {
+        const background = signal(false)
+        const { queryFn, starts } = timed(30)
+        const { fixture } = mount(() => ({
+          queryKey: ['prices'],
+          queryFn,
+          refetchInterval: 100,
+          refetchIntervalInBackground: background(),
+        }))
+
+        elapse(50, fixture)
+        setVisibility('hidden')
+        elapse(250, fixture)
+        background.set(true)
+        elapse(100, fixture)
+
+        // Turned on at 300: the poll due at 330 goes out, on the timer's
+        // schedule, which the change didn't restart.
+        expect(starts).toEqual([0, 330])
+
+        fixture.destroy()
+      }))
+
+      it('polls in a page that is neither visible nor hidden', fakeAsync(() => {
+        // jsdom, which many test setups run in, says 'prerender' unless it's
+        // told to pretend to be visual.
+        setVisibility('prerender' as DocumentVisibilityState)
+
+        const { queryFn, starts } = timed(30)
+        const { fixture } = mount(() => ({
+          queryKey: ['prices'],
+          queryFn,
+          refetchInterval: 100,
+        }))
+
+        elapse(400, fixture)
+
+        expect(starts).toEqual([0, 130, 260, 390])
+
+        fixture.destroy()
+      }))
+
+      it('still loads a query that polls when it mounts in a hidden page, and refetches it on an invalidation', fakeAsync(() => {
+        // Say a link opened in a background tab, and a push message
+        // invalidating the data while the user is still elsewhere.
+        setVisibility('hidden')
+
+        const queryFn = jasmine.createSpy('queryFn').and.returnValue(of(1))
+        const { fixture, result } = mount(() => ({
+          queryKey: ['prices'],
+          queryFn,
+          refetchInterval: 100,
+        }))
+
+        expect(result.data()).toBe(1)
+
+        elapse(150, fixture)
+        client.invalidateQueries({ queryKey: ['prices'] })
+        elapse(150, fixture)
+
+        // On mount and on the invalidation; no poll.
+        expect(queryFn).toHaveBeenCalledTimes(2)
+
+        fixture.destroy()
+      }))
     })
 
     // The page shows one fetch: the browser polls once it takes over.

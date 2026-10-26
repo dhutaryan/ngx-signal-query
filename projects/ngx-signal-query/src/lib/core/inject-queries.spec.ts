@@ -19,7 +19,12 @@ import {
 import { of, Subject, throwError } from 'rxjs'
 
 import { mountHost } from '../../spec-helpers/host'
-import { leaveAndComeBack } from '../../spec-helpers/page-events'
+import {
+  leaveAndComeBack,
+  pinVisible,
+  restoreVisibility,
+  setVisibility,
+} from '../../spec-helpers/page-events'
 import { injectQueries, type InjectQueriesOptions } from './inject-queries'
 import { injectQuery } from './inject-query'
 import { provideQueryClient } from './provider'
@@ -57,6 +62,11 @@ describe('injectQueries', () => {
     TestBed.configureTestingModule({ providers: [provideQueryClient()] })
     client = TestBed.inject(QueryClient)
   })
+
+  // Polling waits while the page is hidden, so the specs mustn't depend on
+  // what the test runner's window does. A spec hides the page itself.
+  beforeEach(pinVisible)
+  afterEach(restoreVisibility)
 
   it('returns one result per query, each with its own data', () => {
     const { results } = mount(() => ({
@@ -623,6 +633,30 @@ describe('injectQueries', () => {
       expect(optionsFn).not.toHaveBeenCalled()
       expect(client.getQueryCache().get(['gone'])).toBeUndefined()
     })
+  })
+
+  describe('in a hidden tab', () => {
+    it("doesn't poll the list's queries", fakeAsync(() => {
+      const queryFn = jasmine
+        .createSpy('queryFn')
+        .and.callFake((id: number) => of(id))
+      const { fixture } = mount(() => ({
+        queries: [1, 2].map((id) => ({
+          queryKey: ['p', id],
+          queryFn: () => queryFn(id),
+          refetchInterval: 100,
+        })),
+      }))
+
+      setVisibility('hidden')
+      tick(300)
+      fixture.detectChanges()
+
+      // Each fetched once, on mount.
+      expect(queryFn.calls.allArgs()).toEqual([[1], [2]])
+
+      fixture.destroy()
+    }))
   })
 
   describe('on the server', () => {
