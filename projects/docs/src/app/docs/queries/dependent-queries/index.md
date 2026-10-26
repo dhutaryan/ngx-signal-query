@@ -112,7 +112,7 @@ protected readonly error = computed(
 `enabled` handles a **fixed** chain: query A, then query B. To fan out into a
 _variable_ number of dependent queries — one per id in a list you just fetched,
 say — combine the first query with `injectQueries` from
-[Parallel Queries](../parallel-queries):
+[Parallel Queries](/queries/parallel-queries):
 
 ```ts
 export class UserProjectsComponent {

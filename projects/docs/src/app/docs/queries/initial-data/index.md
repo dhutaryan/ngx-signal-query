@@ -170,8 +170,8 @@ is now the cached value for that key. Anything else reading it gets the partial
 version, and a mutation writing to that key merges into it.
 
 For "show this while we load the real thing" there's a separate mechanism —
-[`placeholderData`](../placeholder-data), which shows data **without** writing it
-to the cache:
+[`placeholderData`](/queries/placeholder-data), which shows data **without**
+writing it to the cache:
 
 - Data you'd be happy to keep? `initialData`.
 - Data that's just a stand-in? `placeholderData`.
