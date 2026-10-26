@@ -1,17 +1,20 @@
 import {
   ChangeDetectionStrategy,
   Component,
+  DOCUMENT,
   computed,
   effect,
   inject,
   signal,
   viewChild,
 } from '@angular/core'
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop'
 import {
   type QueryKey,
   type QueryOptions,
   injectQueryClient,
 } from 'ngx-signal-query'
+import { fromEvent } from 'rxjs'
 
 import { Log } from '../core/log/log'
 import { type CardRow, RemovalCard, viewRow } from './removal-card'
@@ -89,6 +92,7 @@ const CODE = `injectQuery(() => ({
 })
 export class PollingWidgetScenario {
   readonly #client = injectQueryClient()
+  readonly #document = inject(DOCUMENT)
   readonly #log = inject(Log)
   readonly #trace = inject(RemovalTrace)
 
@@ -101,6 +105,8 @@ export class PollingWidgetScenario {
   readonly #startedAt = signal(0)
   /** Ticks while running, for the request count. */
   readonly #now = signal(0)
+  /** When the tab last turned visible; null while it's hidden. */
+  readonly #visibleSince = signal<number | null>(0)
 
   /** The key's entry, live: undefined while the cache has none. */
   readonly #entry = computed(() =>
@@ -134,8 +140,13 @@ export class PollingWidgetScenario {
     const perWindow = this.#trace
       .sentAt()
       .filter((at) => at >= startedAt && now - at <= WINDOW).length
-    // Judged once a whole window has passed since the start.
-    const judged = this.running() && now - startedAt >= WINDOW
+    // Judged once the tab has been visible for a whole window since the
+    // start: polls wait while it's hidden.
+    const visibleSince = this.#visibleSince()
+    const judged =
+      this.running() &&
+      visibleSince !== null &&
+      now - Math.max(startedAt, visibleSince) >= WINDOW
 
     return [
       ...widgets.map(([label, actual]) =>
@@ -164,6 +175,15 @@ export class PollingWidgetScenario {
 
       onCleanup(() => clearInterval(id))
     })
+
+    // The tab hiding and coming back, for when the request count is judged.
+    fromEvent(this.#document, 'visibilitychange')
+      .pipe(takeUntilDestroyed())
+      .subscribe(() =>
+        this.#visibleSince.set(
+          this.#document.visibilityState === 'hidden' ? null : Date.now(),
+        ),
+      )
   }
 
   protected toggleRunning(): void {

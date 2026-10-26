@@ -93,6 +93,8 @@ export class PollingQueryObserver {
   readonly n = input.required<number>()
   readonly interval = input.required<IntervalChoice>()
   readonly noise = input.required<number>()
+  /** Whether to keep polling while the tab is hidden. */
+  readonly background = input.required<boolean>()
 
   readonly #trace = inject(PollTrace)
 
@@ -100,6 +102,7 @@ export class PollingQueryObserver {
     queryKey: POLLING_DEMO_KEY,
     queryFn: () => this.#trace.request(this.n()),
     refetchInterval: refetchIntervalFor(this.interval()),
+    refetchIntervalInBackground: this.background(),
     // A refetch on coming back to the tab, or on reconnect, would show up in
     // the timeline as an off-beat poll.
     refetchOnWindowFocus: false,
@@ -126,6 +129,8 @@ export class PollingQueriesObserver {
   readonly n = input.required<number>()
   readonly interval = input.required<IntervalChoice>()
   readonly noise = input.required<number>()
+  /** Whether to keep polling while the tab is hidden. */
+  readonly background = input.required<boolean>()
 
   readonly #trace = inject(PollTrace)
 
@@ -135,6 +140,7 @@ export class PollingQueriesObserver {
         queryKey: POLLING_DEMO_KEY,
         queryFn: () => this.#trace.request(this.n()),
         refetchInterval: refetchIntervalFor(this.interval()),
+        refetchIntervalInBackground: this.background(),
         // Not refetched on coming back to the tab or on reconnect either.
         refetchOnWindowFocus: false,
         refetchOnReconnect: false,

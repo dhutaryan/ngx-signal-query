@@ -32,6 +32,10 @@ A query whose last fetch failed counts as stale, whatever its `staleTime`, so
 coming back tries it again. If it has no data yet, it shows its loading state
 while it does, not the old error.
 
+A query that polls doesn't poll while the page is hidden, so for it this
+refetch is what brings the data up to date; see
+[Polling](/queries/polling#in-a-background-tab).
+
 ## The network coming back
 
 A query also refetches when the browser reports that the network is back (its

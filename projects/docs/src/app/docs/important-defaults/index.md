@@ -74,7 +74,8 @@ response. For a large response refetched often, turn it off. See
 ## No polling unless you ask
 
 A query polls only when you set `refetchInterval`, and polling ignores
-`staleTime`: fresh data is polled all the same. See
+`staleTime`: fresh data is polled all the same. It doesn't poll while the tab
+is hidden, unless you set `refetchIntervalInBackground`. See
 [Polling](/queries/polling).
 
 ## On the server
@@ -96,15 +97,12 @@ the browser:
 
 ## Not automatic
 
-A few things don't happen on their own:
+One thing doesn't happen on its own:
 
-- **Pausing polling in a background tab.** Polling goes on while the tab is
-  hidden. Tracked in
-  [#23](https://github.com/dhutaryan/ngx-signal-query/issues/23).
-- **Pausing while offline or in a background tab.** A query without a
+- **Pausing a fetch while offline or in a background tab.** A query without a
   connection fails and goes through its retries, and a failing query goes on
   retrying while the tab is hidden; see
   [Disabling Queries](/queries/disabling-queries#there-is-no-pausing).
 
-TanStack Query does both by default, so if you're coming from it, these are the
-ones to watch for.
+TanStack Query does this by default, so if you're coming from it, this is the
+one to watch for.

@@ -1,4 +1,4 @@
-import { Injectable, signal } from '@angular/core'
+import { DOCUMENT, Injectable, inject, signal } from '@angular/core'
 import { type Observable, map, tap, timer } from 'rxjs'
 
 /** How long the fake server takes to answer, in ms. */
@@ -14,6 +14,8 @@ export type PollRequest = {
   /** Why it was sent, when it wasn't a poll: a mount, or the user asked. */
   cause?: string
   startedAt: number
+  /** Whether the page was hidden when it was sent. */
+  hidden: boolean
   /** When the response arrived; unset while in flight or if cancelled. */
   resolvedAt?: number
   cancelled?: boolean
@@ -29,6 +31,8 @@ export type PollRequest = {
 export class PollTrace {
   /** The requests since the last reset(), oldest first. */
   readonly requests = signal<readonly PollRequest[]>([])
+
+  readonly #document = inject(DOCUMENT)
 
   #nextId = 1
   #version = 0
@@ -72,7 +76,15 @@ export class PollTrace {
     this.#seen.add(observer)
     this.requests.update((requests) => [
       ...requests.slice(1 - KEPT),
-      { id, observer, cause, startedAt: Date.now() },
+      {
+        id,
+        observer,
+        cause,
+        startedAt: Date.now(),
+        // Read as the request goes out, so it's the state the poll ran in,
+        // whatever order the browser fires visibilitychange in.
+        hidden: this.#document.visibilityState === 'hidden',
+      },
     ])
 
     return timer(LATENCY).pipe(
