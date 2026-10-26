@@ -1,8 +1,8 @@
 `placeholderData` lets a query show *something* while it loads its first data —
 a preview, a stand-in, the previous page — instead of a spinner. Unlike
-[Initial Data](../initial-data), it is **never written to the cache**: the query
-stays `'pending'` underneath, and the placeholder vanishes the moment real data
-arrives.
+[Initial Data](/queries/initial-data), it is **never written to the cache**: the
+query stays `'pending'` underneath, and the placeholder vanishes the moment real
+data arrives.
 
 ## The basics
 
@@ -135,7 +135,8 @@ sit on opposite sides of the cache:
 | Other observers see it? | No | Yes |
 | Good for | temporary stand-ins, previous page | real data you'd keep |
 
-The rule of thumb from the [Initial Data](../initial-data) guide still holds:
+The rule of thumb from the [Initial Data](/queries/initial-data) guide still
+holds:
 
 - Data you'd be happy to keep and share across the app? `initialData`.
 - Data that's just a stand-in until the real thing loads? `placeholderData`.

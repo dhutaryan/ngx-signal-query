@@ -19,8 +19,8 @@ export class DashboardComponent {
 ```
 
 Each has its own key, cache entry and state; none of them waits for another.
-That's the opposite of [Dependent Queries](../dependent-queries), where one
-query is deliberately held back until another has resolved.
+That's the opposite of [Dependent Queries](/queries/dependent-queries), where
+one query is deliberately held back until another has resolved.
 
 ## Dynamic parallel queries with `injectQueries`
 
