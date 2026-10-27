@@ -1056,6 +1056,21 @@ describe('Query', () => {
       expect(cache.remove).toHaveBeenCalledWith(query)
     }))
 
+    it('lets the next gcTime replace a NaN one', fakeAsync(() => {
+      const { query, cache } = createQuery<number>(NaN)
+      const observer = stubObserver()
+
+      query.updateGcTime(1000)
+      query.addObserver(observer)
+      query.removeObserver(observer)
+
+      tick(999)
+      expect(cache.remove).not.toHaveBeenCalled()
+
+      tick(1)
+      expect(cache.remove).toHaveBeenCalledWith(query)
+    }))
+
     it('keeps a query while a fetch of it is in flight, and removes it gcTime after the fetch lands', fakeAsync(() => {
       const { query, cache } = createQuery<number>(1000)
       const response = new Subject<number>()

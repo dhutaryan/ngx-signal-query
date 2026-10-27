@@ -143,9 +143,11 @@ export class Query<TData, TError = Error> {
   // Keeps the longest gcTime asked for by anything that used the query, as
   // in TanStack: whoever created it, each component that showed it, each
   // fetchQuery. A shorter one doesn't cut short a longer one asked for
-  // before. Never below 0.
+  // before. Never below 0. A NaN, such as `Number()` of a missing setting,
+  // keeps the query as Infinity does, but only until the next gcTime
+  // replaces it, as in TanStack: Math.max with a NaN would keep it for good.
   updateGcTime(ms: number): void {
-    this.#gcTime = Math.max(this.#gcTime, ms)
+    this.#gcTime = Math.max(this.#gcTime || 0, ms)
   }
 
   addObserver(observer: QuerySubscriber<TData, TError>): void {
