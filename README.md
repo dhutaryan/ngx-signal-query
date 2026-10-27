@@ -8,9 +8,9 @@
 A data fetching, caching and mutation library for Angular, built on signals and
 RxJS. Queries and mutations take an `Observable` as is, so `HttpClient` works
 without `lastValueFrom`, and when no component needs a query any more, its
-request is cancelled. The model (query keys, staleness, invalidation) follows
-[TanStack Query](https://tanstack.com/query), so what you know from it carries
-over.
+`HttpClient` request is cancelled. The model (query keys, staleness,
+invalidation) follows [TanStack Query](https://tanstack.com/query), so what you
+know from it carries over.
 
 ## Why this one
 
