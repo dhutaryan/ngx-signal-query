@@ -16,6 +16,10 @@ import type { QueryFilters } from './types'
  * Pass {@link QueryFilters} to count only matching queries; omit them to count
  * every fetching query in the cache.
  *
+ * A fetch whose `queryFn` returns a Promise counts until it ends, even after
+ * the last component showing its key is gone: a Promise can't be aborted, so
+ * the fetch runs on and its response is cached.
+ *
  * Must run in an injection context, or be given an explicit `injector`.
  *
  * @param filters - Optional filters (e.g. `{ queryKey: ['todos'] }`) to narrow

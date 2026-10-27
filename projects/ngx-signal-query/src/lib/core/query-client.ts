@@ -386,7 +386,8 @@ export class QueryClient {
    *
    * A removed query's data is thrown away and its fetch cancelled; a
    * component still showing its key keeps what it shows until something puts
-   * the key back in the cache. A mutation in flight isn't stopped: its write
+   * the key back in the cache, such as that component's next poll or
+   * `refetch()`. A mutation in flight isn't stopped: its write
    * has most likely reached the server, so it finishes and runs its hooks, as
    * when its component goes away, and a component showing it sees how it
    * went. A hook that writes into the cache puts that key back.
