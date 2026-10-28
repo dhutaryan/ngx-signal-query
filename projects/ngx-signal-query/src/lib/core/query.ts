@@ -35,8 +35,8 @@ export interface QuerySubscriber<TData, TError = Error> {
   /**
    * How this observer would fetch the query right now, and when it wants it
    * refetched, read from its live options; `null` while it doesn't want the
-   * query fetched: it is disabled, or its key has already moved on to another
-   * query.
+   * query fetched: it is disabled, its options throw, or its key has already
+   * moved on to another query.
    */
   fetchOptions(): Pick<
     DefaultedQueryOptions<TData, TError>,

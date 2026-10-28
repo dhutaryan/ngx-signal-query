@@ -188,14 +188,25 @@ export function createQueryObserver<TData, TError = Error>(
   })
 
   // How this observer would fetch q right now, and when it wants q
-  // refetched, from the live options; null while it is disabled, or once the
-  // key has moved on. Before the key effect above catches up, queryFn already
-  // fetches the next query's data, so q must not be fetched with it. Every
-  // refetch made on our behalf goes by it: through q's subscriber handle the
-  // invalidation one and the window focus and reconnect ones, and polling.
+  // refetched, from the live options; null while it is disabled, its options
+  // throw, or once the key has moved on. Before the key effect above catches
+  // up, queryFn already fetches the next query's data, so q must not be fetched
+  // with it. Every refetch made on our behalf goes by it: through q's
+  // subscriber handle the invalidation one and the window focus and reconnect
+  // ones, and polling.
   const fetchOptionsFor = (
     q: Query<TData, TError>,
   ): ReturnType<QuerySubscriber<TData, TError>['fetchOptions']> => {
+    let options: ReturnType<typeof defaultedOptions>
+
+    try {
+      options = untracked(defaultedOptions)
+    } catch {
+      // The owner's effects still report this error to Angular. A read on
+      // its behalf mustn't fail a shared fetch or interrupt other queries.
+      return null
+    }
+
     const {
       queryKey,
       queryFn,
@@ -206,7 +217,7 @@ export function createQueryObserver<TData, TError = Error>(
       refetchOnWindowFocus,
       refetchOnReconnect,
       enabled,
-    } = untracked(defaultedOptions)
+    } = options
 
     if (enabled === false || hashKey(queryKey) !== q.queryHash) {
       return null
@@ -321,9 +332,12 @@ export function createQueryObserver<TData, TError = Error>(
     // poll due next goes out once the page shows again.
     const poll = (): void => {
       const options = fetchOptionsFor(q)
+
+      if (!options) return
+
       const { refetchIntervalInBackground } = untracked(defaultedOptions)
 
-      if (options && (refetchIntervalInBackground || pageVisible())) {
+      if (refetchIntervalInBackground || pageVisible()) {
         resolve(q.key).fetch(options)
       }
     }
