@@ -187,6 +187,18 @@ export function createQueryObserver<TData, TError = Error>(
     switchTo(untracked(() => resolve(entry.key)))
   })
 
+  // The live options for the library's own reads, made from someone else's
+  // call: null while optionsFn throws. The owner's effects still report that
+  // error to Angular, and a read like this mustn't fail the caller or
+  // interrupt other queries.
+  const liveOptions = (): ReturnType<typeof defaultedOptions> | null => {
+    try {
+      return untracked(defaultedOptions)
+    } catch {
+      return null
+    }
+  }
+
   // How this observer would fetch q right now, and when it wants q
   // refetched, from the live options; null while it is disabled, its options
   // throw, or once the key has moved on. Before the key effect above catches
@@ -197,15 +209,9 @@ export function createQueryObserver<TData, TError = Error>(
   const fetchOptionsFor = (
     q: Query<TData, TError>,
   ): ReturnType<QuerySubscriber<TData, TError>['fetchOptions']> => {
-    let options: ReturnType<typeof defaultedOptions>
+    const options = liveOptions()
 
-    try {
-      options = untracked(defaultedOptions)
-    } catch {
-      // The owner's effects still report this error to Angular. A read on
-      // its behalf mustn't fail a shared fetch or interrupt other queries.
-      return null
-    }
+    if (!options) return null
 
     const {
       queryKey,
@@ -242,7 +248,7 @@ export function createQueryObserver<TData, TError = Error>(
     // This observer as q sees it.
     const subscriber: QuerySubscriber<TData, TError> = {
       fetchOptions: () => fetchOptionsFor(q),
-      structuralSharing: () => untracked(defaultedOptions).structuralSharing,
+      structuralSharing: () => liveOptions()?.structuralSharing,
     }
 
     q.addObserver(subscriber)

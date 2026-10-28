@@ -4447,6 +4447,66 @@ describe('injectQuery', () => {
       fixture.destroy()
     }))
 
+    it('lets setQueryData write its key', () => {
+      const fixture = mountPanel(() => of('item'))
+
+      fixture.componentInstance.item.set(null)
+
+      // Say another component's mutation saves the item meanwhile.
+      expect(() => client.setQueryData(['item', 1], 'saved')).not.toThrow()
+      expect(client.getQueryData(['item', 1])).toBe('saved')
+    })
+
+    it('lets setQueryData merge as the next component showing the key asks', () => {
+      const panelShare = jasmine
+        .createSpy('panelShare')
+        .and.callFake(
+          (_oldData: string | undefined, newData: string) => newData,
+        )
+      const otherShare = jasmine
+        .createSpy('otherShare')
+        .and.callFake(
+          (_oldData: string | undefined, newData: string) => newData,
+        )
+      const fixture = mountPanel(() => of('item'), {
+        structuralSharing: panelShare,
+      })
+
+      // Fresh for it, so it doesn't refetch: the cached data stays the one
+      // the panel fetched.
+      mountHost(() =>
+        injectQuery(() => ({
+          queryKey: ['item', 1],
+          queryFn: () => of('item'),
+          staleTime: Infinity,
+          structuralSharing: otherShare,
+        })),
+      )
+      panelShare.calls.reset()
+      fixture.componentInstance.item.set(null)
+      client.setQueryData(['item', 1], 'saved')
+
+      expect(otherShare).toHaveBeenCalledOnceWith('item', 'saved')
+      expect(panelShare).not.toHaveBeenCalled()
+    })
+
+    it('lets setQueryData merge the way the data was fetched when no other component shows the key', () => {
+      const panelShare = jasmine
+        .createSpy('panelShare')
+        .and.callFake(
+          (_oldData: string | undefined, newData: string) => newData,
+        )
+      const fixture = mountPanel(() => of('item'), {
+        structuralSharing: panelShare,
+      })
+
+      panelShare.calls.reset()
+      fixture.componentInstance.item.set(null)
+      client.setQueryData(['item', 1], 'saved')
+
+      expect(panelShare).toHaveBeenCalledOnceWith('item', 'saved')
+    })
+
     it('still skips disabled and changed-key observers alongside a broken one', fakeAsync(() => {
       const fixture = mountPanel(() => of('item'))
       const disabledRequest = jasmine
@@ -4840,6 +4900,28 @@ describe('injectQuery', () => {
           queryFn: () => of(rows()),
           structuralSharing: false,
         }))
+        const first = result.data()
+
+        client.setQueryData(['rows'], rows())
+        fixture.detectChanges()
+
+        expect(result.data()).not.toBe(first)
+      })
+
+      it('follows the first of two components showing the key', () => {
+        const { fixture, result } = mount(() => ({
+          queryKey: ['rows'],
+          queryFn: () => of(rows()),
+          structuralSharing: false,
+        }))
+
+        // A second one merges by default, and is fresh so it doesn't refetch.
+        mount(() => ({
+          queryKey: ['rows'],
+          queryFn: () => of(rows()),
+          staleTime: Infinity,
+        }))
+
         const first = result.data()
 
         client.setQueryData(['rows'], rows())

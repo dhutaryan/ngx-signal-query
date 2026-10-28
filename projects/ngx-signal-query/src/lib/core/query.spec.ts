@@ -1297,4 +1297,35 @@ describe('Query', () => {
       expect(queryFn).toHaveBeenCalledTimes(1)
     })
   })
+
+  describe('structuralSharing', () => {
+    // An observer that merges data written by hand as `sharing` says, or has
+    // no say: undefined, as while its options throw.
+    function sharingObserver(
+      sharing: ReturnType<QuerySubscriber<number>['structuralSharing']>,
+    ): QuerySubscriber<number> {
+      return { fetchOptions: () => null, structuralSharing: () => sharing }
+    }
+
+    it('is that of the first observer with a say, false included', () => {
+      const { query } = createQuery<number>()
+
+      query.addObserver(sharingObserver(undefined))
+      query.addObserver(sharingObserver(false))
+      query.addObserver(sharingObserver(true))
+
+      expect(query.structuralSharing()).toBe(false)
+    })
+
+    it('is that of the fetch the data came from when no observer has a say', () => {
+      const { query } = createQuery<number>()
+      const merge = (_oldData: number | undefined, newData: number): number =>
+        newData
+
+      query.fetch({ queryFn: () => of(1), structuralSharing: merge })
+      query.addObserver(sharingObserver(undefined))
+
+      expect(query.structuralSharing()).toBe(merge)
+    })
+  })
 })

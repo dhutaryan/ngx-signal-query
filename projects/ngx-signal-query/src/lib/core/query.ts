@@ -51,9 +51,10 @@ export interface QuerySubscriber<TData, TError = Error> {
 
   /**
    * How this observer merges data written into the query by hand, read from
-   * its live options, whether it's enabled or not.
+   * its live options, whether it's enabled or not; `undefined` while its
+   * options throw.
    */
-  structuralSharing(): StructuralSharingValue<TData>
+  structuralSharing(): StructuralSharingValue<TData> | undefined
 }
 
 /**
@@ -200,14 +201,17 @@ export class Query<TData, TError = Error> {
   }
 
   // How data written into the query by hand merges with what it holds: as
-  // its first observer says, enabled or not; with none, the way its data was
-  // fetched; undefined if neither has a say.
+  // its first observer with a say decides, enabled or not; with none, the way
+  // its data was fetched; undefined if neither has a say. An observer whose
+  // options throw has no say.
   structuralSharing(): StructuralSharingValue<TData> | undefined {
-    const [observer] = this.#observers
+    for (const observer of this.#observers) {
+      const sharing = observer.structuralSharing()
 
-    return observer
-      ? observer.structuralSharing()
-      : this.#fetchedStructuralSharing
+      if (sharing !== undefined) return sharing
+    }
+
+    return this.#fetchedStructuralSharing
   }
 
   // Without a structuralSharing setting the response is stored as is: the
