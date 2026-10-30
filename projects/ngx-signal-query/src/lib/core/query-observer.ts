@@ -383,6 +383,11 @@ export function createQueryObserver<TData, TError = Error>(
 
   const result: QueryResult<TData, TError> = {
     data: computed(() => resolved().data),
+    dataUpdatedAt: computed(() => {
+      const state = query().state()
+
+      return state.data === undefined ? 0 : state.updatedAt
+    }),
     status: computed(() => resolved().status),
     error: computed(() => query().state().error as TError | null),
     isFetching: computed(() => query().state().isFetching),
