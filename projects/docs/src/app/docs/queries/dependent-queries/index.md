@@ -53,6 +53,25 @@ Get this wrong and switching users shows the _previous_ user's projects from
 the cache, with no refetch. `enabled` controls _when_ a query runs; the key
 controls _what it is_. You need both.
 
+## Depend on a data update
+
+Sometimes a dependent query must run again after its source data is updated,
+even when the data itself is unchanged. Include the source's
+`dataUpdatedAt()` in the key:
+
+```ts
+protected readonly summary = injectQuery(() => ({
+  queryKey: ['summary', this.todos.dataUpdatedAt()],
+  queryFn: () => this.#queries.fetchSummary(),
+  enabled: this.todos.data() !== undefined,
+}))
+```
+
+The timestamp is reactive, so a successful fetch or cache write with a new
+timestamp switches the dependent query to that key. Failed or cancelled
+refetches keep the previous timestamp. Timestamps have millisecond precision;
+updates in the same millisecond can share a key.
+
 ## `isPending` does not mean "loading"
 
 Here's the sharp edge. A query has three states — `'pending'`, `'success'`,

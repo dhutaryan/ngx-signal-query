@@ -62,6 +62,22 @@ rarely compare strings by hand:
 - `isSuccess()` — `status() === 'success'`
 - `isError()` — `status() === 'error'`
 
+## Data update time
+
+`dataUpdatedAt()` is a signal of the last successful data update, in
+milliseconds since the Unix epoch. It is available on `injectQuery` and on
+each `injectQueries` result. Successful fetches and manual cache writes update
+it even when structural sharing keeps the same data reference. A failed or
+cancelled refetch keeps the previous timestamp.
+
+It is `0` before there is cached data, including while showing placeholder
+data. For `initialData`, it uses `initialDataUpdatedAt` when supplied, or the
+time the seed was cached otherwise. An explicit seed timestamp of `0` stays
+`0`.
+
+You can use it in a [dependent query key](/queries/dependent-queries) or pass
+it to another query's [initialDataUpdatedAt](/queries/initial-data).
+
 ## Rendering a query
 
 The simplest approach is a chain of boolean checks. Note that inside the

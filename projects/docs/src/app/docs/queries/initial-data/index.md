@@ -133,9 +133,19 @@ Now the detail query only refetches if the list data was itself stale. If the
 list was fetched two seconds ago and `staleTime` is a minute, no request is
 made at all.
 
-> There's no `getQueryState()` shorthand yet, so reading another query's
-> `updatedAt` means going through the cache:
-> `client.getQueryCache().get(key)?.state().updatedAt`.
+If the list is already observed with `injectQuery`, its public
+`dataUpdatedAt()` signal exposes that timestamp directly. An `injectQueries`
+entry exposes the same signal:
+
+```ts
+initialData: () =>
+  this.todos.data()?.find((todo) => todo.id === this.todoId()),
+initialDataUpdatedAt: () => this.todos.dataUpdatedAt(),
+```
+
+These callbacks are read when the detail needs a seed; they do not keep
+overwriting an existing detail cache entry when the list changes. Placeholder
+data has a timestamp of `0` because it is not cached data.
 
 ## Only seed if the source is fresh enough
 

@@ -229,6 +229,13 @@ export type QueryResult<TData, TError = Error> = {
    * reference while refetches bring the same data (see `structuralSharing`).
    */
   data: Signal<TData | undefined>
+  /**
+   * Time of the last successful data update in milliseconds since the Unix
+   * epoch, including initialData and manual cache writes. `0` when there is
+   * no cached data, including while showing placeholderData. A failed or
+   * cancelled refetch keeps the previous timestamp.
+   */
+  dataUpdatedAt: Signal<number>
   /** Current {@link QueryStatus}. */
   status: Signal<QueryStatus>
   /**
