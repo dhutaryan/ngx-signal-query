@@ -231,4 +231,6 @@ so aborting it would only skip the cache update and leave the UI showing stale
 data for a write that actually happened. Emptying the cache with the client's
 [`clear()`](/query-client/cancellation-and-removal#clear--empty-the-cache)
 doesn't stop it either: the mutation is forgotten, but it lands and its hooks
+fire. A `mutate()` that comes after the component is gone, say from a timer or
+the next step of a promise chain, runs too: the write is sent and its hooks
 fire.
