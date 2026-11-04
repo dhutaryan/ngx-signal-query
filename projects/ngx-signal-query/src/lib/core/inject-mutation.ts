@@ -34,7 +34,9 @@ import {
  * the effect depend on what it reads, such as the options or the previous
  * run. Bound to the current injection
  * context. Destroying it doesn't cancel a run in flight: the write has most
- * likely reached the server, so the run finishes and fires its hooks.
+ * likely reached the server, so the run finishes and fires its hooks. A
+ * `mutate()` that comes after that, say from a timer, runs and fires its
+ * hooks too.
  *
  * Must run in an injection context, or be given an explicit `injector`.
  *
@@ -89,8 +91,17 @@ export function injectMutation<
     // Detaching is all we do on destroy. A run still in flight keeps going —
     // the write has most likely reached the server already, so cancelling it
     // would only skip onSuccess and leave the cache out of sync. It drops
-    // itself from the cache once it settles with nobody watching.
-    inject(DestroyRef).onDestroy(() => untracked(current)?.removeObserver())
+    // itself from the cache once it settles with nobody watching. A run
+    // started after the destroy isn't watched to begin with (see start()).
+    //
+    // TODO: read DestroyRef.destroyed instead of this flag once the minimum
+    // supported Angular is 20.1, where it became public.
+    let destroyed = false
+
+    inject(DestroyRef).onDestroy(() => {
+      destroyed = true
+      untracked(current)?.removeObserver()
+    })
 
     const state = computed(
       () =>
@@ -116,7 +127,13 @@ export function injectMutation<
         // Options are read per call, so a signal used in them stays live.
         const run = cache.build(client.defaultMutationOptions(optionsFn()))
 
-        run.addObserver()
+        // Once the host is destroyed, nothing will remove an observer added
+        // now, and a run with one never leaves the cache. So a run started
+        // after that isn't observed: it still runs and the signals still show
+        // it, but it drops out of the cache once it settles, as a run in
+        // flight at the destroy does.
+        if (!destroyed) run.addObserver()
+
         current.set(run)
 
         return run.execute(variables)

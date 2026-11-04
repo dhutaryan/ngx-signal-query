@@ -1,8 +1,11 @@
 import {
   Component,
+  DestroyRef,
+  EnvironmentInjector,
   InjectionToken,
   Injector,
   type Signal,
+  createEnvironmentInjector,
   effect,
   inject,
   signal,
@@ -17,6 +20,7 @@ import {
 } from '@angular/core/testing'
 import { EMPTY, of, Subject, throwError } from 'rxjs'
 
+import { mountHost } from '../../spec-helpers/host'
 import { settled } from '../../spec-helpers/promises'
 import { withDefaultOptions } from '../features/with-default-options'
 import { injectMutation } from './inject-mutation'
@@ -850,6 +854,130 @@ describe('injectMutation', () => {
       // …and cleans itself out of the cache once it's done.
       expect(client.getMutationCache().getAll().length).toBe(0)
     }))
+
+    // A mutate() can also come after the host is gone: from a timer, a promise
+    // chain, or a callback that saves on leave. It runs as any other does (the
+    // write goes out and the hooks fire), but the host no longer holds it in
+    // the cache, so it drops out once it settles.
+
+    it('runs a mutation started after the host is destroyed, then drops it from the cache', () => {
+      const sent: Array<[number, string]> = []
+      const onSuccess = jasmine.createSpy('onSuccess')
+      const onSettled = jasmine.createSpy('onSettled')
+      const { fixture } = mountHost((listId: Signal<number>) => {
+        const saveDraft = injectMutation<string, Error, string>(() => ({
+          mutationFn: (draft) => {
+            sent.push([listId(), draft])
+
+            return of('saved')
+          },
+          onSuccess,
+          onSettled,
+        }))
+
+        // Saves the draft on leave. Registered after the mutation, so it runs
+        // once the mutation has already let go of the host.
+        inject(DestroyRef).onDestroy(() => saveDraft.mutate('milk'))
+
+        return saveDraft
+      }, 7)
+
+      fixture.destroy()
+
+      expect(sent).toEqual([[7, 'milk']])
+      expect(onSuccess).toHaveBeenCalledWith('saved', 'milk', undefined)
+      expect(onSettled).toHaveBeenCalled()
+      expect(client.getMutationCache().getAll().length).toBe(0)
+    })
+
+    it('drops a mutation started after the host is destroyed once its request lands', fakeAsync(() => {
+      const created = new Subject<number>()
+      const attached = new Subject<string>()
+      const onSettled = jasmine.createSpy('onSettled')
+
+      @Component({ template: '' })
+      class Host {
+        readonly create = injectMutation<number, Error, string>(() => ({
+          mutationFn: () => created,
+        }))
+
+        readonly attach = injectMutation<string, Error, number>(() => ({
+          mutationFn: () => attached,
+          onSettled,
+        }))
+
+        // Creates the todo, then adds it to the list.
+        add(title: string): void {
+          this.create.mutateAsync(title).then((id) => this.attach.mutate(id))
+        }
+      }
+
+      const fixture = TestBed.createComponent(Host)
+
+      fixture.detectChanges()
+      fixture.componentInstance.add('milk')
+      // The user leaves while the todo is being created.
+      fixture.destroy()
+      created.next(1)
+      created.complete()
+      flushMicrotasks()
+
+      // The second write goes out after the host is gone.
+      expect(client.isMutating()).toBe(1)
+
+      attached.next('attached')
+      attached.complete()
+
+      expect(onSettled).toHaveBeenCalledWith('attached', null, 1, undefined)
+      expect(client.isMutating()).toBe(0)
+      expect(client.getMutationCache().getAll().length).toBe(0)
+    }))
+
+    it('drops a mutation started after its injector is destroyed', () => {
+      const injector = createEnvironmentInjector(
+        [],
+        TestBed.inject(EnvironmentInjector),
+      )
+      const m = injectMutation<number, Error, number>(
+        () => ({ mutationFn: (v) => of(v) }),
+        { injector },
+      )
+
+      injector.destroy()
+      m.mutate(1)
+
+      expect(client.getMutationCache().getAll().length).toBe(0)
+    })
+
+    it('keeps showing a mutation started after the host is destroyed', () => {
+      const response = new Subject<string>()
+
+      @Component({ template: '' })
+      class Host {
+        readonly save = injectMutation<string, Error, string>(() => ({
+          mutationFn: () => response,
+        }))
+      }
+
+      const fixture = TestBed.createComponent(Host)
+      const { save } = fixture.componentInstance
+
+      fixture.detectChanges()
+      fixture.destroy()
+      // e.g. from a timer the host set, firing after it's gone
+      save.mutate('milk')
+
+      // The signals follow the latest call, whether it came before the
+      // destroy or after it.
+      expect(save.isPending()).toBe(true)
+      expect(save.variables()).toBe('milk')
+
+      response.next('saved')
+      response.complete()
+
+      expect(save.isSuccess()).toBe(true)
+      expect(save.data()).toBe('saved')
+    })
 
     it('replaces settled runs in the cache rather than piling them up', () => {
       const m = setup(() => ({ mutationFn: () => of(1) }))
