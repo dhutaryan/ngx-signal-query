@@ -118,7 +118,8 @@ export type QueryOptions<TData, TError = Error> = {
   /** Unique cache key for this query. See {@link QueryKey}. */
   queryKey: QueryKey
   /**
-   * Fetcher returning the data as an `Observable` or `Promise`. Once no
+   * Fetcher returning the data as an `Observable` or `Promise`. Return `null`
+   * for no data: `undefined` fails the fetch, with no retry. Once no
    * component shows the query, an `Observable` fetch in flight is
    * unsubscribed, which aborts an `HttpClient` request; a `Promise` one runs
    * to the end, and its response is kept.

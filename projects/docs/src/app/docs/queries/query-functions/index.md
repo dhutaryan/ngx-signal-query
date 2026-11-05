@@ -55,10 +55,40 @@ Conversely, the `Observable` **must** produce a value. If it completes without
 emitting anything, the query fails with:
 
 ```
-Query function completed without emitting a value
+Query function for ["todos"] completed without emitting a value
 ```
 
 This is the guard against a query silently sitting in `'success'` with no data.
+
+## No data is `null`, not `undefined`
+
+A query holds `undefined` while it has no data yet, so its function can't give
+`undefined` as data, from an `Observable` or a `Promise`. One that does fails
+the query with:
+
+```
+Query function for ["todo",3] produced undefined; return null for no data
+```
+
+As with an `Observable` that completes empty, the fetch isn't retried: the
+request went through, and another one would bring the same.
+
+To say "there's nothing here", return `null`. A lookup that may miss is the
+usual case, since `find()` gives `undefined` for a missing row:
+
+```ts
+injectQuery(() => ({
+  queryKey: ['todo', this.todoId()],
+  queryFn: async () => {
+    const todos = await this.#api.todos()
+
+    return todos.find((todo) => todo.id === this.todoId()) ?? null
+  },
+}))
+```
+
+`HttpClient` itself gives `null` for an empty body, a `204` say, so returning
+its `Observable` as is never runs into this.
 
 ## Errors
 

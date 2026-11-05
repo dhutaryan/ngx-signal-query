@@ -472,6 +472,20 @@ describe('QueryClient', () => {
         expect(result.error).toBe(error)
       }))
 
+      it('rejects when the queryFn produces undefined', fakeAsync(() => {
+        const result = settled(
+          client.fetchQuery(['todo', 3], () => of(undefined)),
+        )
+
+        flushMicrotasks()
+
+        expect(result.error).toEqual(
+          new Error(
+            'Query function for ["todo",3] produced undefined; return null for no data',
+          ),
+        )
+      }))
+
       it('resolves with the cached data when the fetch is cancelled', fakeAsync(() => {
         client.setQueryData(['n'], 1)
 

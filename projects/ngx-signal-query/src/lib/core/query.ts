@@ -337,8 +337,25 @@ export class Query<TData, TError = Error> {
         },
       }),
       throwIfEmpty(
-        () => new Error('Query function completed without emitting a value'),
+        () =>
+          new Error(
+            `Query function for ${this.queryHash} completed without emitting a value`,
+          ),
       ),
+      // undefined is what a query holds while it has no data, so a response
+      // can't be undefined: null says "nothing here". After the retries, as
+      // the check above: the request went through, and another one would
+      // bring the same. Before the merge, so a structuralSharing function
+      // only ever gets data.
+      map((data) => {
+        if (data === undefined) {
+          throw new Error(
+            `Query function for ${this.queryHash} produced undefined; return null for no data`,
+          )
+        }
+
+        return data
+      }),
       // Keeps what didn't change from the data the query holds when the
       // response lands, a write made during the fetch included. After the
       // retries: a structuralSharing function that throws fails the fetch

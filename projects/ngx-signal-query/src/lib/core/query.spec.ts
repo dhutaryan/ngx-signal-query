@@ -149,7 +149,90 @@ describe('Query', () => {
     query.fetch({ queryFn: () => of<number>() })
 
     expect(query.state().status).toBe('error')
-    expect(query.state().error?.message).toContain('without emitting')
+    expect(query.state().error?.message).toBe(
+      'Query function for ["key"] completed without emitting a value',
+    )
+  })
+
+  // undefined is what a query holds while it has no data, so a queryFn that
+  // produces it fails the fetch, as one that produces nothing does. null is
+  // data.
+  describe('a queryFn that produces undefined', () => {
+    const message =
+      'Query function for ["key"] produced undefined; return null for no data'
+
+    it('fails the fetch when its Observable emits undefined', () => {
+      const { query } = createQuery<number | undefined>()
+
+      query.fetch({ queryFn: () => of(undefined) })
+
+      const state = query.state()
+
+      expect(state.status).toBe('error')
+      expect(state.error?.message).toBe(message)
+      expect(state.data).toBeUndefined()
+      expect(state.updatedAt).toBe(0)
+    })
+
+    it('fails the fetch when its Promise resolves undefined', fakeAsync(() => {
+      const { query } = createQuery<number | undefined>()
+
+      query.fetch({ queryFn: () => Promise.resolve(undefined) })
+      flushMicrotasks()
+
+      expect(query.state().status).toBe('error')
+      expect(query.state().error?.message).toBe(message)
+    }))
+
+    // As with one that produces nothing: the request went through, and
+    // another one would bring the same.
+    it('does not retry it', fakeAsync(() => {
+      const { query } = createQuery<number | undefined>()
+      const queryFn = jasmine
+        .createSpy('queryFn')
+        .and.returnValue(of(undefined))
+
+      query.fetch({ queryFn, retry: 3, retryDelay: 10 })
+      tick(100)
+
+      expect(queryFn).toHaveBeenCalledTimes(1)
+      expect(query.state().status).toBe('error')
+    }))
+
+    it('keeps the data the query holds', () => {
+      const { query } = createQuery<number | undefined>()
+
+      query.fetch({ queryFn: () => of(5) })
+      query.fetch({ queryFn: () => of(undefined) })
+
+      const state = query.state()
+
+      expect(state.status).toBe('error')
+      expect(state.error?.message).toBe(message)
+      expect(state.data).toBe(5)
+    })
+
+    it('fails before a structuralSharing function gets undefined', () => {
+      const { query } = createQuery<number[] | undefined>()
+      // Like most merges, it expects new data, and throws on undefined.
+      const structuralSharing = jasmine
+        .createSpy('structuralSharing')
+        .and.callFake((_oldData: unknown, newData: number[]) => newData.slice())
+
+      query.fetch({ queryFn: () => of(undefined), structuralSharing })
+
+      expect(structuralSharing).not.toHaveBeenCalled()
+      expect(query.state().error?.message).toBe(message)
+    })
+
+    it('keeps null as data', () => {
+      const { query } = createQuery<number | null>()
+
+      query.fetch({ queryFn: () => of(null) })
+
+      expect(query.state().status).toBe('success')
+      expect(query.state().data).toBeNull()
+    })
   })
 
   it('retries the configured number of times then succeeds', fakeAsync(() => {
