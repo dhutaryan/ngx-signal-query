@@ -211,7 +211,8 @@ function elapse(
   }
 }
 
-// A row of a cached list, for the specs that seed a detail query from it.
+// A row of a list, for the specs that seed a detail query from a cached list
+// or look the detail up in one.
 type Todo = { id: number; title: string }
 
 describe('injectQuery', () => {
@@ -298,6 +299,40 @@ describe('injectQuery', () => {
     expect(result.failureCount()).toBe(3) // retry: 2 -> 3 attempts
     expect(result.failureReason()).toBe(err)
   }))
+
+  // A detail looked up in a list that lacks it. undefined means "no data",
+  // so a query can't hold it as data, while it can hold null.
+  describe('a lookup that finds nothing', () => {
+    const todos: Todo[] = [{ id: 1, title: 'Buy milk' }]
+
+    it('fails the query when it gives undefined', () => {
+      const { result } = mount(
+        (id) => ({
+          queryKey: ['todo', id()],
+          queryFn: () => of(todos.find((todo) => todo.id === id())),
+        }),
+        3,
+      )
+
+      expect(result.isError()).toBe(true)
+      expect(result.error()?.message).toBe(
+        'Query function for ["todo",3] produced undefined; return null for no data',
+      )
+    })
+
+    it('shows null as data', () => {
+      const { result } = mount(
+        (id) => ({
+          queryKey: ['todo', id()],
+          queryFn: () => of(todos.find((todo) => todo.id === id()) ?? null),
+        }),
+        3,
+      )
+
+      expect(result.isSuccess()).toBe(true)
+      expect(result.data()).toBeNull()
+    })
+  })
 
   describe('enabled', () => {
     it('does not fetch while disabled', () => {

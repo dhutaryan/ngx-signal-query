@@ -179,7 +179,8 @@ export class QueryClient {
    * configured default, or 5 minutes), as any unused query is.
    *
    * @param key - The query key to fetch and cache under.
-   * @param queryFn - Function returning the data as an `Observable` or `Promise`.
+   * @param queryFn - Function returning the data as an `Observable` or
+   *   `Promise`. Return `null` for no data: `undefined` fails the fetch.
    * @param options - Fetch tuning (`staleTime`, `retry`, `retryDelay`,
    *   `structuralSharing`, `cancelRefetch`).
    * @returns A promise of the data.
