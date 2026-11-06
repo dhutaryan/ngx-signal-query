@@ -30,12 +30,14 @@ query result.
 Because `status()` is `'success'`, you need another way to know the data is only
 a stand-in. That's `isPlaceholderData()`:
 
+{% raw %}
+
 ```ts
 @Component({
   template: `
-    @if (todos.data(); as todos) {
+    @if (todos.data(); as list) {
       <ul [class.stale]="todos.isPlaceholderData()">
-        @for (todo of todos; track todo.id) {
+        @for (todo of list; track todo.id) {
           <li>{{ todo.title }}</li>
         }
       </ul>
@@ -43,6 +45,8 @@ a stand-in. That's `isPlaceholderData()`:
   `,
 })
 ```
+
+{% endraw %}
 
 It's `true` while the placeholder is on screen and flips to `false` when the
 real data replaces it. Use it to dim the UI, show a subtle spinner, or disable
