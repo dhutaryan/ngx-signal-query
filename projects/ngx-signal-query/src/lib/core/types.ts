@@ -230,6 +230,14 @@ export type QueryResult<TData, TError = Error> = {
    * reference while refetches bring the same data (see `structuralSharing`).
    */
   data: Signal<TData | undefined>
+  /**
+   * When the data was last updated, as a timestamp in ms: when the last
+   * response landed or `setQueryData` wrote it; for `initialData`, its
+   * `initialDataUpdatedAt`, or when it was seeded. A refetch that brings the
+   * same data moves it too; one that fails or is cancelled doesn't. `0` while
+   * there is no data, placeholder data included.
+   */
+  dataUpdatedAt: Signal<number>
   /** Current {@link QueryStatus}. */
   status: Signal<QueryStatus>
   /**

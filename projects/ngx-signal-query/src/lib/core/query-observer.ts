@@ -383,6 +383,10 @@ export function createQueryObserver<TData, TError = Error>(
 
   const result: QueryResult<TData, TError> = {
     data: computed(() => resolved().data),
+    // Read from the query, unlike data(): a placeholder isn't the query's data
+    // and has no time, so this stays 0 while one shows. The query stamps
+    // updatedAt only along with data, so it's 0 while there's none.
+    dataUpdatedAt: computed(() => query().state().updatedAt),
     status: computed(() => resolved().status),
     error: computed(() => query().state().error as TError | null),
     isFetching: computed(() => query().state().isFetching),

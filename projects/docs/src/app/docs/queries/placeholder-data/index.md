@@ -136,6 +136,7 @@ sit on opposite sides of the cache:
 | Written to the cache? | No | Yes |
 | `status()` while shown | `'success'` | `'success'` |
 | `isPlaceholderData()` | `true` | `false` |
+| `dataUpdatedAt()` | `0` | `initialDataUpdatedAt`, or when it was seeded |
 | Other observers see it? | No | Yes |
 | Good for | temporary stand-ins, previous page | real data you'd keep |
 
