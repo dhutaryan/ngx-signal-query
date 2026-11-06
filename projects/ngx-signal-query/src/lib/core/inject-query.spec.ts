@@ -2812,6 +2812,239 @@ describe('injectQuery', () => {
     })
   })
 
+  describe('dataUpdatedAt', () => {
+    it('is 0 until the first response lands, then the time it landed', fakeAsync(() => {
+      const { queryFn, resolve } = requests<number>()
+      const { result } = mount(() => ({ queryKey: ['a'], queryFn }))
+
+      expect(result.dataUpdatedAt()).toBe(0)
+
+      tick(100)
+
+      const landed = Date.now()
+
+      resolve(1)
+
+      expect(result.dataUpdatedAt()).toBe(landed)
+    }))
+
+    // null is data: the answer that there's nothing, as of that response.
+    it('gives a null response its time too', fakeAsync(() => {
+      const { queryFn, resolve } = requests<string | null>()
+      const { result } = mount(() => ({ queryKey: ['a'], queryFn }))
+
+      tick(100)
+
+      const landed = Date.now()
+
+      resolve(null)
+
+      expect(result.data()).toBeNull()
+      expect(result.dataUpdatedAt()).toBe(landed)
+    }))
+
+    it('moves when a refetch lands, even with the same data', fakeAsync(() => {
+      const { queryFn, resolve } = requests<number[]>()
+      const { result } = mount(() => ({ queryKey: ['a'], queryFn }))
+      const first = Date.now()
+
+      resolve([1, 2])
+
+      const data = result.data()
+
+      tick(100)
+      result.refetch()
+
+      // While the refetch is in flight, the data shown is still the first.
+      expect(result.dataUpdatedAt()).toBe(first)
+
+      resolve([1, 2])
+
+      // The same data keeps its reference, but it's now as of this response.
+      expect(result.data()).toBe(data)
+      expect(result.dataUpdatedAt()).toBe(first + 100)
+    }))
+
+    it('stays put when a refetch fails', fakeAsync(() => {
+      const { queryFn, resolve, fail } = requests<number>()
+      const { result } = mount(() => ({
+        queryKey: ['a'],
+        queryFn,
+        retry: false,
+      }))
+      const landed = Date.now()
+
+      resolve(1)
+      tick(100)
+      result.refetch()
+      fail(new Error('down'))
+
+      // The data shown is still the one that landed first.
+      expect(result.isError()).toBe(true)
+      expect(result.data()).toBe(1)
+      expect(result.dataUpdatedAt()).toBe(landed)
+    }))
+
+    it('stays put when a refetch is cancelled', fakeAsync(() => {
+      const { queryFn, resolve } = requests<number>()
+      const { result } = mount(() => ({ queryKey: ['a'], queryFn }))
+      const landed = Date.now()
+
+      resolve(1)
+      tick(100)
+      result.refetch()
+      client.cancelQueries({ queryKey: ['a'] })
+
+      expect(result.isFetching()).toBe(false)
+      expect(result.dataUpdatedAt()).toBe(landed)
+    }))
+
+    it('is the time setQueryData wrote the data, even the same data', fakeAsync(() => {
+      const { queryFn, resolve } = requests<number[]>()
+      const { result } = mount(() => ({ queryKey: ['a'], queryFn }))
+
+      resolve([1, 2])
+
+      const data = result.data()
+
+      tick(100)
+
+      const written = Date.now()
+
+      // A write that confirms the data keeps its reference, but dates it.
+      client.setQueryData(['a'], [1, 2])
+
+      expect(result.data()).toBe(data)
+      expect(result.dataUpdatedAt()).toBe(written)
+    }))
+
+    it('is the time initialData is from: initialDataUpdatedAt, or when it was seeded', fakeAsync(() => {
+      const seededAt = Date.now()
+      const { created } = mountHost(() => ({
+        seeded: injectQuery(() => ({
+          queryKey: ['seeded'],
+          queryFn: () => new Subject<number>(),
+          initialData: 1,
+        })),
+        dated: injectQuery(() => ({
+          queryKey: ['dated'],
+          queryFn: () => new Subject<number>(),
+          initialData: 1,
+          initialDataUpdatedAt: seededAt - 60_000,
+        })),
+        datedByFunction: injectQuery(() => ({
+          queryKey: ['dated-by-function'],
+          queryFn: () => new Subject<number>(),
+          initialData: 1,
+          initialDataUpdatedAt: () => seededAt - 30_000,
+        })),
+      }))
+
+      expect(created.seeded.dataUpdatedAt()).toBe(seededAt)
+      expect(created.dated.dataUpdatedAt()).toBe(seededAt - 60_000)
+      expect(created.datedByFunction.dataUpdatedAt()).toBe(seededAt - 30_000)
+    }))
+
+    // A seed whose time is unknown, say read with Number() from a setting
+    // that's missing, is as old as data gets: stale for any staleTime.
+    it('keeps an initialDataUpdatedAt of 0', () => {
+      const { result } = mount(() => ({
+        queryKey: ['a'],
+        queryFn: () => new Subject<number>(),
+        initialData: 1,
+        initialDataUpdatedAt: 0,
+      }))
+
+      expect(result.data()).toBe(1)
+      expect(result.dataUpdatedAt()).toBe(0)
+    })
+
+    it('follows the page it shows, and is 0 while the previous page stands in', fakeAsync(() => {
+      const { queryFn, resolve } = requests<string>()
+      const { fixture, result, value } = mount(
+        (page) => ({
+          queryKey: ['todos', page()],
+          queryFn,
+          placeholderData: keepPreviousData,
+        }),
+        1,
+      )
+      const page1At = Date.now()
+
+      resolve('page 1')
+
+      expect(result.dataUpdatedAt()).toBe(page1At)
+
+      tick(100)
+      value.set(2)
+      fixture.detectChanges()
+
+      // Page 1 stands in while page 2 loads, but it isn't page 2's data.
+      expect(result.data()).toBe('page 1')
+      expect(result.isPlaceholderData()).toBe(true)
+      expect(result.dataUpdatedAt()).toBe(0)
+
+      tick(100)
+
+      const page2At = Date.now()
+
+      resolve('page 2')
+
+      expect(result.dataUpdatedAt()).toBe(page2At)
+
+      value.set(1)
+      fixture.detectChanges()
+
+      // Back on page 1, refetching it: its data is from when it landed.
+      expect(result.data()).toBe('page 1')
+      expect(result.dataUpdatedAt()).toBe(page1At)
+    }))
+
+    it('refetches a query keyed on it with each update', fakeAsync(() => {
+      const list = requests<string[]>()
+      const summaryFn = jasmine
+        .createSpy('summaryFn')
+        .and.callFake(() => of('summary'))
+      const { fixture, created } = mountHost((projectId: Signal<number>) => {
+        const todos = injectQuery(() => ({
+          queryKey: ['todos', projectId()],
+          queryFn: list.queryFn,
+        }))
+        // A summary the server makes from the list: it follows each
+        // update of the list, and waits for the first one.
+        const summary = injectQuery(() => ({
+          queryKey: ['todo-summary', projectId(), todos.dataUpdatedAt()],
+          queryFn: summaryFn,
+          enabled: todos.dataUpdatedAt() > 0,
+        }))
+
+        return { todos, summary }
+      }, 7)
+
+      expect(summaryFn).not.toHaveBeenCalled()
+
+      list.resolve(['Buy milk'])
+      fixture.detectChanges()
+
+      expect(summaryFn).toHaveBeenCalledTimes(1)
+
+      // A refetch that brings the same list dates it anew.
+      tick(100)
+      created.todos.refetch()
+      list.resolve(['Buy milk'])
+      fixture.detectChanges()
+
+      expect(summaryFn).toHaveBeenCalledTimes(2)
+
+      // So does a write.
+      tick(100)
+      client.setQueryData<string[]>(['todos', 7], [])
+      fixture.detectChanges()
+
+      expect(summaryFn).toHaveBeenCalledTimes(3)
+    }))
+  })
+
   describe('refetchInterval (polling)', () => {
     it('refetches on the interval and stops on destroy', fakeAsync(() => {
       const queryFn = jasmine.createSpy('queryFn').and.returnValue(of(1))

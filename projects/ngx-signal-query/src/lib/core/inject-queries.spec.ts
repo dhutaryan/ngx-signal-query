@@ -16,7 +16,7 @@ import {
   flush,
   tick,
 } from '@angular/core/testing'
-import { of, Subject, throwError } from 'rxjs'
+import { map, of, Subject, throwError, timer } from 'rxjs'
 
 import { mountHost } from '../../spec-helpers/host'
 import {
@@ -302,6 +302,33 @@ describe('injectQueries', () => {
       expect(results()[2]).toBe(second)
       expect(results().map((todo) => todo.data())).toEqual([3, 1, 2])
     })
+
+    it('gives each query its own dataUpdatedAt, kept across reordering', fakeAsync(() => {
+      const ids = signal([1, 2])
+      const { fixture, results } = mount(() => ({
+        queries: ids().map((id) => ({
+          queryKey: ['todo', id],
+          // Todo 1 lands after 100 ms, todo 2 after 200 ms.
+          queryFn: () => timer(id * 100).pipe(map(() => id)),
+        })),
+      }))
+      const start = Date.now()
+
+      tick(200)
+
+      expect(results().map((todo) => todo.dataUpdatedAt())).toEqual([
+        start + 100,
+        start + 200,
+      ])
+
+      ids.set([2, 1])
+      fixture.detectChanges()
+
+      expect(results().map((todo) => todo.dataUpdatedAt())).toEqual([
+        start + 200,
+        start + 100,
+      ])
+    }))
 
     it('keeps the same array when only options change', () => {
       const version = signal(1)
