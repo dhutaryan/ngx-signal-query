@@ -69,6 +69,8 @@ Returning `of(...)` from `queryFn` resolves **synchronously**, so the query is
 
 **In a host component**, when you're testing how a template reacts:
 
+{% raw %}
+
 ```ts
 @Component({
   template: `@if (todos.data(); as data) { {{ data.length }} }`,
@@ -87,6 +89,8 @@ it('renders the todos', () => {
   expect(fixture.nativeElement.textContent).toContain('1')
 })
 ```
+
+{% endraw %}
 
 ## Asynchronous resolution
 
