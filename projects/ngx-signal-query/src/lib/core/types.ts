@@ -235,9 +235,10 @@ export type QueryResult<TData, TError = Error> = {
   /**
    * When the data was last updated, as a timestamp in ms: when the last
    * response landed or `setQueryData` wrote it; for `initialData`, its
-   * `initialDataUpdatedAt`, or when it was seeded. A refetch that brings the
-   * same data moves it too; one that fails or is cancelled doesn't. `0` while
-   * there is no data, placeholder data included.
+   * `initialDataUpdatedAt`, or when it was seeded; for data a server render
+   * brought over (see {@link withHydration}), when the server fetched it. A
+   * refetch that brings the same data moves it too; one that fails or is
+   * cancelled doesn't. `0` while there is no data, placeholder data included.
    */
   dataUpdatedAt: Signal<number>
   /** Current {@link QueryStatus}. */

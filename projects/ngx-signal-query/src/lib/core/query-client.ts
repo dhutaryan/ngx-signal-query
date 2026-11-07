@@ -9,6 +9,7 @@ import {
 import type { Observable } from 'rxjs'
 
 import { onReconnect, onWindowFocus } from './browser-events'
+import { transferCache } from './hydration'
 import { inBrowser } from './platform'
 import { QueryCache } from './query-cache'
 import { MutationCache } from './mutation-cache'
@@ -26,7 +27,7 @@ import type {
   StructuralSharingValue,
   Updater,
 } from './types'
-import { QUERY_CLIENT_CONFIG } from './injection-tokens'
+import { QUERY_CLIENT_CONFIG, QUERY_CLIENT_HYDRATION } from './injection-tokens'
 
 const DEFAULT_GC_TIME = 5 * 60 * 1000
 
@@ -69,6 +70,13 @@ export class QueryClient {
   /** @internal */
   constructor() {
     inject(DestroyRef).onDestroy(() => (this.#destroyed = true))
+
+    // With withHydration(), the cache carries over from the server render.
+    // Here, before anything can read the cache: whatever reads it first, a
+    // component or an app initializer, finds the server's data in it.
+    if (inject(QUERY_CLIENT_HYDRATION, { optional: true })) {
+      transferCache(this.#cache, this.#gcTime())
+    }
 
     // When the user comes back to the page, or the network comes back, each
     // query refetches if one of its observers wants that. Untracked like the

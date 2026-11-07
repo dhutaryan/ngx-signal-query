@@ -29,11 +29,12 @@ know from it carries over.
 - 🔁 Retries, polling, and refetch on window focus and reconnect
 - ✏️ Mutations with async lifecycle hooks and optimistic updates
 - 🌍 App-wide defaults and global indicators (`injectIsFetching()`, `injectIsMutating()`)
+- 🖥️ Server rendering: the server waits for every fetch, and `withHydration()` brings the data over to the browser
 
 ## Not here (yet)
 
-Infinite queries, SSR cache hydration, devtools and persistence. If you need
-them today, TanStack Query has them.
+Infinite queries, devtools and persistence. If you need them today, TanStack
+Query has them.
 
 ## Installation
 

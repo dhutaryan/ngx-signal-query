@@ -77,8 +77,9 @@ rather than a bolt-on.
 - 🔁 Retries, polling, and refetch on window focus and reconnect
 - ✏️ Mutations with async lifecycle hooks and optimistic updates
 - 🌍 App-wide defaults and global indicators (`injectIsFetching()`, `injectIsMutating()`)
+- 🖥️ Server rendering: the server waits for every fetch, and `withHydration()` brings the data over to the browser
 
-Not here yet: infinite queries, SSR cache hydration, devtools and persistence.
+Not here yet: infinite queries, devtools and persistence.
 
 ## A quick taste
 

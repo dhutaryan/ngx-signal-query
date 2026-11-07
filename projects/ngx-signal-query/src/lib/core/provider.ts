@@ -18,11 +18,12 @@ import {
  * `bootstrapApplication`). A client provided by another environment injector
  * goes with it: once that injector is destroyed, its queries stop, and none
  * of their fetches keeps the app busy. Pass features such as
- * {@link withDefaultOptions} to configure defaults. Registering the same
- * feature twice throws.
+ * {@link withDefaultOptions} to configure defaults, or {@link withHydration}
+ * to bring the data of a server render over to the browser. Registering the
+ * same feature twice throws.
  *
  * @param features - Optional {@link QueryClientFeature}s (e.g.
- *   {@link withDefaultOptions}).
+ *   {@link withDefaultOptions}, {@link withHydration}).
  * @returns Environment providers to add to the app's provider list.
  *
  * @example
