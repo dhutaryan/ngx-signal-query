@@ -45,13 +45,14 @@ already default to no retries, so they don't need this.)
 
 ## Testing a query
 
-The library has no effects to schedule — its result is pure signals — so you
-don't need a rendered component. Two ways to exercise a query:
+A query fetches from an effect, and effects run with change detection, so a
+test lets change detection run before it checks the result. It needs no
+rendered component for that. Two ways to exercise a query:
 
 **In an injection context**, when you're testing the query itself:
 
 ```ts
-it('exposes the fetched data', () => {
+it('exposes the fetched data', async () => {
   const todos = TestBed.runInInjectionContext(() =>
     injectQuery(() => ({
       queryKey: ['todos'],
@@ -59,13 +60,15 @@ it('exposes the fetched data', () => {
     })),
   )
 
+  await TestBed.inject(ApplicationRef).whenStable()
+
   expect(todos.status()).toBe('success')
   expect(todos.data()).toEqual([{ id: 1, title: 'Test' }])
 })
 ```
 
-Returning `of(...)` from `queryFn` resolves **synchronously**, so the query is
-`'success'` immediately — no waiting.
+`whenStable()` lets change detection run the effect that fetches, and `of(...)`
+resolves **synchronously**, so the query is `'success'` by then.
 
 **In a host component**, when you're testing how a template reacts:
 
@@ -107,20 +110,20 @@ it('goes pending, then success', fakeAsync(() => {
       queryFn: () => subject,
     })),
   )
+  tick() // runs the effect that fetches: it subscribes to the subject
 
   expect(todos.isPending()).toBe(true)
 
   subject.next([{ id: 1, title: 'Test' }])
   subject.complete()
-  tick()
 
   expect(todos.isSuccess()).toBe(true)
 }))
 ```
 
 Testing the error path is the same shape — `subject.error(new Error('nope'))`,
-then assert `todos.isError()`. (This is where **retries off** matters — otherwise
-`tick()` wouldn't be enough.)
+then assert `todos.isError()`. (This is where **retries off** matters —
+otherwise the error shows only after the retries, seconds of fake time later.)
 
 ## Window focus and reconnect
 
