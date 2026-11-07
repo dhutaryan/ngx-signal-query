@@ -111,6 +111,10 @@ the browser:
 The page itself waits for every fetch and mutation in flight, with zone.js or
 without, so a request that hangs holds it up: give a slow API a timeout.
 
+The browser then starts with an empty cache and fetches every query again,
+unless the page brings the data along: see
+[Server Rendering](/server-rendering).
+
 ## Not automatic
 
 One thing doesn't happen on its own:

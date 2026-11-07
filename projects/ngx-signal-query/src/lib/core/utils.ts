@@ -185,6 +185,59 @@ export function replaceData<TData>(
   return structuralSharing ? replaceEqualDeep(prevData, data) : data
 }
 
+// Past this many levels survivesJson gives up: a value that references
+// itself never ends, and real data is never this deep.
+const MAX_JSON_DEPTH = 500
+
+// Whether JSON carries the value over as it is: JSON.parse gives back a value
+// equal to it, of the same kind. Strings, finite numbers, booleans, null,
+// plain objects and arrays without holes do. A Date, a Map, a class instance,
+// a BigInt, NaN, undefined in an array, or a value that references itself
+// don't. An object property that's undefined counts as carried: JSON drops
+// it, and reading it gives undefined all the same. Symbol keys and extra
+// properties on an array aren't checked, and don't make it over.
+/** @internal */
+export function survivesJson(value: unknown, depth = 0): boolean {
+  if (value === null) return true
+
+  if (typeof value === 'string' || typeof value === 'boolean') return true
+
+  // NaN and Infinity come back as null.
+  if (typeof value === 'number') return Number.isFinite(value)
+
+  // undefined, a function or a symbol is dropped, or comes back as null; a
+  // BigInt can't be written at all.
+  if (typeof value !== 'object') return false
+
+  if (depth > MAX_JSON_DEPTH) return false
+
+  if (Array.isArray(value)) {
+    for (let i = 0; i < value.length; i++) {
+      // An item that's undefined, a hole included, comes back as null.
+      if (!survivesJson(value[i], depth + 1)) return false
+    }
+
+    return true
+  }
+
+  // JSON.parse makes objects whose prototype is Object.prototype. Whatever
+  // has another one, a Date, a Map, a class instance, comes back as something
+  // else. One with none comes back as an ordinary object, which reads the
+  // same.
+  const prototype = Object.getPrototypeOf(value)
+
+  if (prototype !== Object.prototype && prototype !== null) return false
+
+  // for...in rather than Object.keys(): no array to allocate per object.
+  for (const key in value) {
+    const item = (value as Record<string, unknown>)[key]
+
+    if (item !== undefined && !survivesJson(item, depth + 1)) return false
+  }
+
+  return true
+}
+
 // The longest delay a browser timer holds, in ms. A longer one overflows and
 // the timer fires at once.
 const MAX_TIMEOUT = 2 ** 31 - 1

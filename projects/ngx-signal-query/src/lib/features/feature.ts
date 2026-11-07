@@ -7,6 +7,7 @@ import type { Provider } from '@angular/core'
  */
 export enum QueryClientFeatureKind {
   DefaultOptions,
+  Hydration,
 }
 
 /**

@@ -8,6 +8,7 @@ import {
   partialMatchKey,
   replaceData,
   replaceEqualDeep,
+  survivesJson,
 } from './utils'
 
 describe('hashKey', () => {
@@ -216,6 +217,85 @@ describe('replaceData', () => {
 
     expect(replaceData(prev, next, merge)).toBe(merged)
     expect(merge).toHaveBeenCalledOnceWith(prev, next)
+  })
+})
+
+describe('survivesJson', () => {
+  it('passes what JSON carries as is: strings, finite numbers, booleans, null, plain objects and arrays', () => {
+    expect(survivesJson('a')).toBe(true)
+    expect(survivesJson(1.5)).toBe(true)
+    expect(survivesJson(-0)).toBe(true)
+    expect(survivesJson(false)).toBe(true)
+    expect(survivesJson(null)).toBe(true)
+    expect(
+      survivesJson({ todos: [{ id: 1, tags: ['a'], owner: { name: 'Ann' } }] }),
+    ).toBe(true)
+    expect(survivesJson(JSON.parse('{"constructor":null}'))).toBe(true)
+  })
+
+  it('passes an object with no prototype, which comes back as an ordinary one', () => {
+    expect(survivesJson(Object.create(null))).toBe(true)
+  })
+
+  it('passes a property that is undefined: JSON drops it, and reading it gives undefined all the same', () => {
+    expect(survivesJson({ id: 1, note: undefined })).toBe(true)
+  })
+
+  it('passes data nested deep', () => {
+    let deep: unknown = 'leaf'
+
+    for (let i = 0; i < 100; i++) deep = [{ next: deep }]
+
+    expect(survivesJson(deep)).toBe(true)
+  })
+
+  it('stops at a value JSON brings back as something else', () => {
+    class Point {
+      readonly x = 1
+    }
+
+    expect(survivesJson(new Date(0))).toBe(false)
+    expect(survivesJson(new Map([['a', 1]]))).toBe(false)
+    expect(survivesJson(new Set([1]))).toBe(false)
+    // Even with data only: instanceof would no longer hold.
+    expect(survivesJson(new Point())).toBe(false)
+    expect(survivesJson(Object.create({ inherited: 1 }))).toBe(false)
+    expect(survivesJson(new Number(1))).toBe(false)
+  })
+
+  it('stops at a value JSON drops or brings back as null', () => {
+    const holey: number[] = []
+
+    holey[1] = 2
+
+    expect(survivesJson(undefined)).toBe(false)
+    expect(survivesJson(NaN)).toBe(false)
+    expect(survivesJson(Infinity)).toBe(false)
+    expect(survivesJson(-Infinity)).toBe(false)
+    expect(survivesJson(() => 1)).toBe(false)
+    expect(survivesJson(Symbol('s'))).toBe(false)
+    expect(survivesJson([1, undefined])).toBe(false)
+    expect(survivesJson(holey)).toBe(false)
+  })
+
+  it("stops at a BigInt, which JSON can't write at all", () => {
+    expect(survivesJson(BigInt(1))).toBe(false)
+  })
+
+  it('looks all the way down', () => {
+    expect(survivesJson({ a: [{ b: { c: [new Date(0)] } }] })).toBe(false)
+    expect(survivesJson([[[{ at: NaN }]]])).toBe(false)
+  })
+
+  it('stops at a value that references itself rather than overflowing the stack', () => {
+    const todo: Record<string, unknown> = { id: 1 }
+    const list: unknown[] = [1]
+
+    todo['self'] = todo
+    list.push(list)
+
+    expect(survivesJson(todo)).toBe(false)
+    expect(survivesJson(list)).toBe(false)
   })
 })
 

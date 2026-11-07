@@ -20,11 +20,13 @@ export class QueryCache extends Cache<Query<unknown, unknown>> {
     inject(DestroyRef).onDestroy(() => this.clear())
   }
 
+  // The hash is the key's, unless the caller brings the one the query had
+  // elsewhere, as a query the server hands over does.
   getOrCreate<TData, TError = Error>(
     key: QueryKey,
     gcTime: number,
+    queryHash = hashKey(key),
   ): Query<TData, TError> {
-    const queryHash = hashKey(key)
     const exist = this.getEntry(queryHash)
 
     if (exist) return exist as Query<TData, TError>
