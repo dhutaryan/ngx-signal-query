@@ -1,4 +1,11 @@
-import { Component, PLATFORM_ID, effect, signal } from '@angular/core'
+import {
+  Component,
+  EnvironmentInjector,
+  PLATFORM_ID,
+  createEnvironmentInjector,
+  effect,
+  signal,
+} from '@angular/core'
 import {
   type ComponentFixture,
   fakeAsync,
@@ -10,6 +17,7 @@ import {
 import { of, Subject, throwError } from 'rxjs'
 
 import { settled } from '../../spec-helpers/promises'
+import { appIsStable } from '../../spec-helpers/stability'
 import { withDefaultOptions } from '../features/with-default-options'
 import { CancelledError } from './cancelled-error'
 import { injectMutation } from './inject-mutation'
@@ -372,6 +380,21 @@ describe('QueryClient', () => {
 
       expect(client.getQueryData(['n'])).toBe(cached)
     })
+
+    // A server render and whenStable() wait for it as for a component's
+    // query, so the data is in the cache by then.
+    it('keeps the app busy until the fetch lands, though no component shows the key', fakeAsync(() => {
+      const response = new Subject<string>()
+
+      client.fetchQuery(['todos'], () => response)
+      expect(appIsStable()).toBe(false)
+
+      response.next('v1')
+      response.complete()
+
+      expect(appIsStable()).toBe(true)
+      expect(client.getQueryData(['todos'])).toBe('v1')
+    }))
 
     // The promise it returns: the data as the cache holds it.
     describe('promise', () => {
@@ -768,6 +791,45 @@ describe('QueryClient', () => {
       // Nothing is left to run, so flush() has no time to move on.
       expect(flush()).toBe(0)
       expect(queryFn).toHaveBeenCalledTimes(1)
+    }))
+  })
+
+  // A client provided by an injector of its own goes with that injector: its
+  // queries stop, so nothing of theirs keeps the app busy or runs on.
+  describe('when the injector that provides it is destroyed', () => {
+    function provideInChild(): {
+      injector: EnvironmentInjector
+      child: QueryClient
+    } {
+      const injector = createEnvironmentInjector(
+        [provideQueryClient()],
+        TestBed.inject(EnvironmentInjector),
+      )
+
+      return { injector, child: injector.get(QueryClient) }
+    }
+
+    it('stops the fetches in flight, which no longer keep the app busy', fakeAsync(() => {
+      const { injector, child } = provideInChild()
+      const response = new Subject<string>()
+
+      child.fetchQuery(['todos'], () => response)
+      expect(appIsStable()).toBe(false)
+
+      injector.destroy()
+
+      expect(response.observed).toBe(false)
+      expect(appIsStable()).toBe(true)
+    }))
+
+    it('leaves no timer of its queries behind', fakeAsync(() => {
+      const { injector, child } = provideInChild()
+
+      child.setQueryData(['todos'], ['a'])
+      injector.destroy()
+
+      // Nothing is left to run, so flush() has no time to move on.
+      expect(flush()).toBe(0)
     }))
   })
 

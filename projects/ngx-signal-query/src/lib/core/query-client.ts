@@ -169,7 +169,9 @@ export class QueryClient {
    * if the fetch fails. A cancelled fetch resolves with the data the cache
    * holds, or rejects with a {@link CancelledError} if it holds none; a
    * removed query always rejects with one. Nothing has to wait for the
-   * promise: a prefetch that fails only leaves the query in `'error'`.
+   * promise: a prefetch that fails only leaves the query in `'error'`. A
+   * server render and `whenStable()` wait for the fetch all the same, as for
+   * a component's query, so its data is in the cache by then.
    *
    * Unlike a component's query in the browser, it doesn't retry a failure
    * unless `retry` is set here or in {@link withDefaultOptions}, so whoever
@@ -391,7 +393,8 @@ export class QueryClient {
    * `refetch()`. A mutation in flight isn't stopped: its write
    * has most likely reached the server, so it finishes and runs its hooks, as
    * when its component goes away, and a component showing it sees how it
-   * went. A hook that writes into the cache puts that key back.
+   * went. The app counts as busy until it's done. A hook that writes into the
+   * cache puts that key back.
    *
    * @example
    * ```ts

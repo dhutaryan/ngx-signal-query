@@ -1,4 +1,4 @@
-import { signal } from '@angular/core'
+import { type PendingTasks, signal } from '@angular/core'
 import {
   defer,
   from,
@@ -59,7 +59,8 @@ export interface QuerySubscriber<TData, TError = Error> {
 
 /**
  * What a query is created with: its key and the key's hash, the cache it
- * lives in, and how long it stays there once nothing uses it.
+ * lives in, how long it stays there once nothing uses it, and the app's
+ * pending tasks, one of which each of its fetches holds while in flight.
  *
  * @internal
  */
@@ -68,6 +69,7 @@ export interface QueryConfig {
   queryHash: string
   cache: QueryCache
   gcTime: number
+  pendingTasks: Pick<PendingTasks, 'add'>
 }
 
 // The fetch in flight, from its first attempt until it lands, fails or is
@@ -95,6 +97,11 @@ interface InFlightFetch<TData, TError> {
   // lands as usual, but a failure isn't tried again. Whoever joins the fetch
   // wants its data, so joining clears it.
   retriesStopped: boolean
+  // Removes the app's pending task the fetch holds. While it's held, Angular
+  // counts the app as busy: a server render and whenStable() wait for the
+  // fetch, whatever its queryFn gets the data with. Removed once the outcome
+  // is in the state, or when the fetch stops.
+  readonly removeTask: () => void
 }
 
 /** @internal */
@@ -126,11 +133,13 @@ export class Query<TData, TError = Error> {
   #gcTime = 0
   #gcTimer: ReturnType<typeof setTimeout> | null = null
   readonly #cache: QueryCache
+  readonly #pendingTasks: Pick<PendingTasks, 'add'>
 
-  constructor({ key, queryHash, cache, gcTime }: QueryConfig) {
+  constructor({ key, queryHash, cache, gcTime, pendingTasks }: QueryConfig) {
     this.key = key
     this.queryHash = queryHash
     this.#cache = cache
+    this.#pendingTasks = pendingTasks
     this.updateGcTime(gcTime)
     // A new query has nothing using it yet: its creator is about to, and if
     // nothing ever does, gc removes it.
@@ -268,9 +277,13 @@ export class Query<TData, TError = Error> {
       queryFn,
       abortable: false,
       retriesStopped: false,
+      removeTask: this.#pendingTasks.add(),
     }
 
     this.#inFlight = inFlight
+    // Only now that this fetch holds its task: the app mustn't count as
+    // stable in between.
+    running?.removeTask()
 
     // A query with no data reads like a first load while it fetches, even
     // after a failure: 'pending' with no error, so a loading state and
@@ -380,6 +393,8 @@ export class Query<TData, TError = Error> {
           })
           outcome.resolve(data)
           this.#scheduleGc()
+          // Last: whatever waits for the app to settle finds the data in.
+          inFlight.removeTask()
         },
         error: (err) => {
           this.#inFlight = null
@@ -391,6 +406,7 @@ export class Query<TData, TError = Error> {
           }))
           outcome.reject(err)
           this.#scheduleGc()
+          inFlight.removeTask()
         },
       }),
     )
@@ -500,6 +516,7 @@ export class Query<TData, TError = Error> {
       failureReason: before.failureReason,
       isFetching: false,
     }))
+    inFlight.removeTask()
   }
 
   // A fetch in flight is kept, as in TanStack, and the observers aren't even

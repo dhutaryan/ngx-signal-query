@@ -1,4 +1,4 @@
-import { Injectable } from '@angular/core'
+import { DestroyRef, Injectable, PendingTasks, inject } from '@angular/core'
 
 import { Cache } from './cache'
 import { hashKey, partialMatchKey } from './utils'
@@ -8,6 +8,18 @@ import type { QueryFilters, QueryKey } from './types'
 /** @internal */
 @Injectable()
 export class QueryCache extends Cache<Query<unknown, unknown>> {
+  // Handed to each query it creates, which has no injector of its own.
+  readonly #pendingTasks = inject(PendingTasks)
+
+  constructor() {
+    super()
+
+    // The cache goes with the injector that provides it. Its queries stop
+    // with it: once nothing can reach them, no fetch of theirs may keep the
+    // app busy, and no timer of theirs may run on.
+    inject(DestroyRef).onDestroy(() => this.clear())
+  }
+
   getOrCreate<TData, TError = Error>(
     key: QueryKey,
     gcTime: number,
@@ -19,7 +31,13 @@ export class QueryCache extends Cache<Query<unknown, unknown>> {
 
     return this.addEntry(
       queryHash,
-      new Query({ key, queryHash, cache: this, gcTime }),
+      new Query({
+        key,
+        queryHash,
+        cache: this,
+        gcTime,
+        pendingTasks: this.#pendingTasks,
+      }),
     ) as Query<TData, TError>
   }
 

@@ -136,9 +136,10 @@ destroyed, or its reactive key moves on), a fetch still running stops only if
 it's an `Observable`. A `Promise` fetch runs on, and its response is cached as
 usual: come back before the query is [removed](/query-client/caching), and the
 data shows at once. Until then it still counts as fetching, in
-`injectIsFetching()` too. Nobody is left to want a failure tried again, though,
-so a failed attempt isn't retried, unless a component shows the key again
-before the fetch ends.
+`injectIsFetching()` too, and keeps the app busy: a server render and
+`whenStable()` wait for it. Nobody is left to want a failure tried again,
+though, so a failed attempt isn't retried, unless a component shows the key
+again before the fetch ends.
 
 `refetch()` and `invalidateQueries()` cancel a fetch in flight to start a fresh
 one, and `cancelQueries()` and `removeQueries()` cancel it outright, whatever

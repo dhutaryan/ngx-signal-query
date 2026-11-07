@@ -1,4 +1,5 @@
 import { computed } from '@angular/core'
+import { TestBed } from '@angular/core/testing'
 
 import { QueryCache } from './query-cache'
 
@@ -9,7 +10,8 @@ describe('QueryCache', () => {
   let cache: QueryCache
 
   beforeEach(() => {
-    cache = new QueryCache()
+    // It injects the app's pending tasks for its queries.
+    cache = TestBed.runInInjectionContext(() => new QueryCache())
   })
 
   describe('getOrCreate', () => {

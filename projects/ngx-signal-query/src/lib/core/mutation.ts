@@ -1,4 +1,4 @@
-import { type Signal, signal } from '@angular/core'
+import { type PendingTasks, type Signal, signal } from '@angular/core'
 import {
   catchError,
   concat,
@@ -196,14 +196,17 @@ export class Mutation<
   #observers = 0
   readonly #options: MutationOptions<TData, TError, TVariables, TContext>
   readonly #cache: MutationCache
+  readonly #pendingTasks: Pick<PendingTasks, 'add'>
 
   constructor(
     readonly mutationId: number,
     options: MutationOptions<TData, TError, TVariables, TContext>,
     cache: MutationCache,
+    pendingTasks: Pick<PendingTasks, 'add'>,
   ) {
     this.#options = options
     this.#cache = cache
+    this.#pendingTasks = pendingTasks
   }
 
   get observerCount(): number {
@@ -235,6 +238,11 @@ export class Mutation<
    */
   execute(variables: TVariables): Promise<TData> {
     const run = deferred<TData>()
+    // One of the app's pending tasks, held until the last hook is done:
+    // Angular counts the app as busy meanwhile, so a server render and
+    // whenStable() wait for the run, whatever its mutationFn sends the write
+    // with. A run that outlives its component holds it all the same.
+    const removeTask = this.#pendingTasks.add()
 
     this.#state.set({
       status: 'pending',
@@ -288,6 +296,9 @@ export class Mutation<
         } else {
           run.reject(outcome.error)
         }
+
+        // Last: whatever waits for the app to settle finds the outcome in.
+        removeTask()
       })
 
     return run.promise

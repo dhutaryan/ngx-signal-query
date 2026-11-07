@@ -11,6 +11,7 @@ import {
   type WritableSignal,
   effect,
   input,
+  provideZonelessChangeDetection,
   signal,
   viewChild,
   viewChildren,
@@ -34,6 +35,7 @@ import {
   setVisibility,
 } from '../../spec-helpers/page-events'
 import { settled } from '../../spec-helpers/promises'
+import { appIsStable } from '../../spec-helpers/stability'
 import { withDefaultOptions } from '../features/with-default-options'
 import { injectQuery } from './inject-query'
 import { keepPreviousData } from './keep-previous-data'
@@ -5539,6 +5541,249 @@ describe('injectQuery', () => {
         expect(TestBed.inject(NgZone).hasPendingMacrotasks).toBe(false)
       })
     })
+  })
+
+  // Angular waits for the app to be stable, with nothing pending, before it
+  // sends a server render and before whenStable() resolves in a test. A query
+  // keeps the app busy while it fetches, whatever its queryFn gets the data
+  // with: from the moment the fetch starts until its outcome is in the query.
+  // Without zone.js here, unless a spec says otherwise: zone.js also holds the
+  // app for a timer set in the Angular zone, which is another matter.
+  describe('app stability', () => {
+    beforeEach(() =>
+      reprovide(provideZonelessChangeDetection(), provideQueryClient()),
+    )
+
+    it('keeps the app busy while the first fetch is in flight, and lets it settle once the data is in', fakeAsync(() => {
+      const { queryFn, resolve } = requests<string>()
+      const { result } = mount(() => ({ queryKey: ['todos'], queryFn }))
+
+      expect(appIsStable()).toBe(false)
+
+      resolve('v1')
+
+      expect(appIsStable()).toBe(true)
+      expect(result.data()).toBe('v1')
+    }))
+
+    it('lets whenStable() resolve once the data is on screen', async () => {
+      const response = deferred<string>()
+
+      @Component({
+        template: `
+          {{ todos.data() ?? 'Loading…' }}
+        `,
+      })
+      class TodoList {
+        readonly todos = injectQuery(() => ({
+          queryKey: ['todos'],
+          queryFn: () => response.promise,
+        }))
+      }
+
+      const fixture = TestBed.createComponent(TodoList)
+
+      setTimeout(() => response.resolve('Buy milk'), 20)
+      await fixture.whenStable()
+
+      expect(fixture.nativeElement.textContent.trim()).toBe('Buy milk')
+    })
+
+    it('lets the app settle once a failed fetch shows its error', fakeAsync(() => {
+      const error = new Error('down')
+      const { queryFn, fail } = requests<string>()
+      const { result } = mount<string>(() => ({
+        queryKey: ['todos'],
+        queryFn,
+        retry: false,
+      }))
+
+      expect(appIsStable()).toBe(false)
+
+      fail(error)
+
+      expect(appIsStable()).toBe(true)
+      expect(result.error()).toBe(error)
+    }))
+
+    it('keeps the app busy through the retries, the waits between them included', fakeAsync(() => {
+      const { queryFn, fail } = requests<string>()
+      const { result } = mount<string>(() => ({
+        queryKey: ['todos'],
+        queryFn,
+        retry: 2,
+        retryDelay: 100,
+      }))
+
+      fail(new Error('down'))
+      tick(99)
+      expect(appIsStable()).toBe(false)
+
+      tick(1)
+      fail(new Error('down'))
+      tick(99)
+      expect(appIsStable()).toBe(false)
+
+      tick(1)
+      fail(new Error('down'))
+
+      expect(appIsStable()).toBe(true)
+      expect(result.isError()).toBe(true)
+      expect(queryFn).toHaveBeenCalledTimes(3)
+    }))
+
+    it('lets the app settle when the fetch is cancelled', fakeAsync(() => {
+      const { queryFn } = requests<string>()
+
+      mount(() => ({ queryKey: ['todos'], queryFn }))
+      expect(appIsStable()).toBe(false)
+
+      client.cancelQueries({ queryKey: ['todos'] })
+
+      expect(appIsStable()).toBe(true)
+    }))
+
+    it('lets the app settle when the query is removed mid-fetch', fakeAsync(() => {
+      const { queryFn } = requests<string>()
+
+      mount(() => ({ queryKey: ['todos'], queryFn }))
+      expect(appIsStable()).toBe(false)
+
+      client.removeQueries({ queryKey: ['todos'] })
+
+      expect(appIsStable()).toBe(true)
+    }))
+
+    it('keeps the app busy until a refetch that replaced the fetch in flight lands', fakeAsync(() => {
+      const { queryFn, resolve } = requests<string>()
+
+      mount(() => ({ queryKey: ['todos'], queryFn }))
+      // The first request is dropped for a new one, and never answered.
+      client.invalidateQueries({ queryKey: ['todos'] })
+
+      expect(queryFn).toHaveBeenCalledTimes(2)
+      expect(appIsStable()).toBe(false)
+
+      resolve('v2')
+
+      expect(appIsStable()).toBe(true)
+    }))
+
+    // A refetch of data already on screen, as an invalidation, the user
+    // coming back to the tab or a poll makes one.
+    it('keeps the app busy while data on screen is refetched, and lets it settle once the new data is in', fakeAsync(() => {
+      const { queryFn, resolve } = requests<string>()
+      const { result } = mount(() => ({ queryKey: ['todos'], queryFn }))
+
+      resolve('v1')
+      expect(appIsStable()).toBe(true)
+
+      result.refetch()
+      expect(appIsStable()).toBe(false)
+
+      resolve('v2')
+
+      expect(appIsStable()).toBe(true)
+      expect(result.data()).toBe('v2')
+    }))
+
+    it('lets the app settle once a failed refetch shows its error, the data kept', fakeAsync(() => {
+      const error = new Error('down')
+      const { queryFn, resolve, fail } = requests<string>()
+      const { result } = mount<string>(() => ({
+        queryKey: ['todos'],
+        queryFn,
+        retry: false,
+      }))
+
+      resolve('v1')
+      result.refetch()
+      expect(appIsStable()).toBe(false)
+
+      fail(error)
+
+      expect(appIsStable()).toBe(true)
+      expect(result.error()).toBe(error)
+      expect(result.data()).toBe('v1')
+    }))
+
+    it('lets the app settle when a refetch of data on screen is cancelled', fakeAsync(() => {
+      const { queryFn, resolve } = requests<string>()
+      const { result } = mount(() => ({ queryKey: ['todos'], queryFn }))
+
+      resolve('v1')
+      result.refetch()
+      expect(appIsStable()).toBe(false)
+
+      client.cancelQueries({ queryKey: ['todos'] })
+
+      expect(appIsStable()).toBe(true)
+      expect(result.data()).toBe('v1')
+    }))
+
+    it('keeps the app busy once for several components on one key, until their shared fetch lands', fakeAsync(() => {
+      const { queryFn, resolve } = requests<string>()
+      const { results } = mountMany(3, () => ({ queryKey: ['todos'], queryFn }))
+
+      expect(queryFn).toHaveBeenCalledTimes(1)
+      expect(appIsStable()).toBe(false)
+
+      resolve('v1')
+
+      expect(appIsStable()).toBe(true)
+      expect(results.map((result) => result.data())).toEqual(['v1', 'v1', 'v1'])
+    }))
+
+    it('keeps the app busy until a request its component left lands', fakeAsync(() => {
+      const { queryFn, requests: sent } = promiseRequests<string>()
+      const { fixture } = mount(() => ({ queryKey: ['todos'], queryFn }))
+
+      // A promise can't be stopped: the request runs on, and its response
+      // goes into the cache.
+      fixture.destroy()
+
+      expect(appIsStable()).toBe(false)
+
+      sent[0].resolve('v1')
+
+      expect(appIsStable()).toBe(true)
+      expect(client.getQueryData(['todos'])).toBe('v1')
+    }))
+
+    it('keeps the app busy with zone.js too, while the response comes from outside the Angular zone', fakeAsync(() => {
+      reprovide(provideQueryClient())
+
+      const { queryFn, resolve } = requests<string>()
+
+      mount(() => ({ queryKey: ['todos'], queryFn }))
+
+      // zone.js waits only for what runs in the Angular zone. A response
+      // that comes from outside it, from a socket opened outside the zone or
+      // from a test that answers the request itself, leaves the zone nothing
+      // to wait for.
+      expect(appIsStable()).toBe(false)
+
+      resolve('v1')
+
+      expect(appIsStable()).toBe(true)
+    }))
+
+    it('keeps a server render waiting until the data is in', fakeAsync(() => {
+      reprovide(provideZonelessChangeDetection(), provideQueryClient(), {
+        provide: PLATFORM_ID,
+        useValue: 'server',
+      })
+
+      const { queryFn, resolve } = requests<string>()
+      const { result } = mount(() => ({ queryKey: ['todos'], queryFn }))
+
+      expect(appIsStable()).toBe(false)
+
+      resolve('v1')
+
+      expect(appIsStable()).toBe(true)
+      expect(result.data()).toBe('v1')
+    }))
   })
 
   // What a query does when it sets none of these options. The Important

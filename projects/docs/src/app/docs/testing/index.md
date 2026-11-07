@@ -95,6 +95,29 @@ it('renders the todos', () => {
 
 {% endraw %}
 
+## Waiting with `whenStable()`
+
+Angular counts the app as busy while a query fetches or a mutation runs, so
+`whenStable()` waits until the data or the error is in, whatever `queryFn`
+returns:
+
+```ts
+it('shows the todos once they load', async () => {
+  // TodoList loads its todos from a fake API that answers a moment later.
+  const fixture = TestBed.createComponent(TodoList)
+
+  fixture.autoDetectChanges()
+  await fixture.whenStable()
+
+  expect(fixture.nativeElement.textContent).toContain('Buy milk')
+})
+```
+
+It waits through the retries too, the waits between them included: one more
+reason to turn them off. And it waits for a fetch that never ends: a `queryFn`
+that returns a `Subject` nobody answers keeps it waiting until the test times
+out. To test a loading state, answer the request yourself, as below.
+
 ## Asynchronous resolution
 
 To test the loading state, resolve the data on your terms with a `Subject` and

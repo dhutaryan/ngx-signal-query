@@ -1,3 +1,4 @@
+import { TestBed } from '@angular/core/testing'
 import { of, Subject } from 'rxjs'
 
 import { MutationCache } from './mutation-cache'
@@ -6,7 +7,8 @@ describe('MutationCache', () => {
   let cache: MutationCache
 
   beforeEach(() => {
-    cache = new MutationCache()
+    // It injects the app's pending tasks for its mutations.
+    cache = TestBed.runInInjectionContext(() => new MutationCache())
   })
 
   describe('build', () => {

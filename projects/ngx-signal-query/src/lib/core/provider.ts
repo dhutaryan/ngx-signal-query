@@ -15,8 +15,11 @@ import {
  * Registers the {@link QueryClient} and its caches for the application.
  *
  * Call once at the app root (in `ApplicationConfig.providers` or a root
- * `bootstrapApplication`). Pass features such as {@link withDefaultOptions} to
- * configure defaults. Registering the same feature twice throws.
+ * `bootstrapApplication`). A client provided by another environment injector
+ * goes with it: once that injector is destroyed, its queries stop, and none
+ * of their fetches keeps the app busy. Pass features such as
+ * {@link withDefaultOptions} to configure defaults. Registering the same
+ * feature twice throws.
  *
  * @param features - Optional {@link QueryClientFeature}s (e.g.
  *   {@link withDefaultOptions}).

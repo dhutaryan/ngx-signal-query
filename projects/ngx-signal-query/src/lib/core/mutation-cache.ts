@@ -1,4 +1,4 @@
-import { Injectable } from '@angular/core'
+import { Injectable, PendingTasks, inject } from '@angular/core'
 
 import { Cache } from './cache'
 import {
@@ -13,11 +13,18 @@ export class MutationCache extends Cache<
   Mutation<unknown, unknown, unknown, unknown>
 > {
   #lastId = 0
+  // Handed to each mutation it builds, which has no injector of its own.
+  readonly #pendingTasks = inject(PendingTasks)
 
   build<TData, TError, TVariables, TContext>(
     options: MutationOptions<TData, TError, TVariables, TContext>,
   ): Mutation<TData, TError, TVariables, TContext> {
-    const mutation = new Mutation(++this.#lastId, options, this)
+    const mutation = new Mutation(
+      ++this.#lastId,
+      options,
+      this,
+      this.#pendingTasks,
+    )
 
     this.addEntry(
       String(mutation.mutationId),

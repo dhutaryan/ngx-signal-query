@@ -78,6 +78,19 @@ A query polls only when you set `refetchInterval`, and polling ignores
 is hidden, unless you set `refetchIntervalInBackground`. See
 [Polling](/queries/polling).
 
+## Angular waits for fetches and mutations
+
+While a query fetches or a mutation runs, Angular counts the app as busy, so a
+server render waits before it sends the page, and `whenStable()` waits in a
+test. It doesn't matter what `queryFn` or `mutationFn` sends the request with:
+`HttpClient`, `fetch()` or anything that returns a promise. A fetch keeps the
+app busy until its data or error is in the query, the waits between retries
+included; a mutation, until its last hook is done.
+
+That goes for work no component shows too: a prefetch with `fetchQuery`, a
+promise fetch that runs on after its component is gone, a mutation whose
+component is gone. For tests, see [Testing](/testing#waiting-with-whenstable).
+
 ## On the server
 
 When a page is rendered on the server, a query skips what only makes sense in
@@ -94,6 +107,9 @@ the browser:
   as long as the app that renders the request.
 - **It doesn't refetch on focus or reconnect.** There's no tab to come back to
   and no network to lose.
+
+The page itself waits for every fetch and mutation in flight, with zone.js or
+without, so a request that hangs holds it up: give a slow API a timeout.
 
 ## Not automatic
 
