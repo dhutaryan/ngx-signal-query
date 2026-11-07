@@ -1,9 +1,11 @@
 import {
+  ApplicationRef,
   Component,
   DestroyRef,
   EnvironmentInjector,
   InjectionToken,
   Injector,
+  PLATFORM_ID,
   type Signal,
   createEnvironmentInjector,
   effect,
@@ -22,6 +24,7 @@ import { EMPTY, of, Subject, throwError } from 'rxjs'
 
 import { mountHost } from '../../spec-helpers/host'
 import { settled } from '../../spec-helpers/promises'
+import { appIsStable } from '../../spec-helpers/stability'
 import { withDefaultOptions } from '../features/with-default-options'
 import { injectMutation } from './inject-mutation'
 import { injectQuery } from './inject-query'
@@ -1069,6 +1072,165 @@ describe('injectMutation', () => {
       expect(m.isSuccess()).toBe(true)
       expect(m.data()).toBe('milk')
     })
+  })
+
+  // Angular waits for the app to be stable, with nothing pending, before it
+  // sends a server render and before whenStable() resolves in a test. A run
+  // keeps the app busy from mutate() until its last hook is done, whatever
+  // its mutationFn sends the write with.
+  describe('app stability', () => {
+    it('keeps the app busy from mutate() until its last hook is done', fakeAsync(() => {
+      const response = new Subject<string>()
+      const audit = deferred<void>()
+      const m = setup<string, Error, string>(() => ({
+        mutationFn: () => response,
+        onSuccess: () => audit.promise,
+      }))
+
+      m.mutate('milk')
+      expect(appIsStable()).toBe(false)
+
+      response.next('saved')
+      response.complete()
+      expect(appIsStable()).toBe(false)
+
+      audit.resolve()
+
+      expect(appIsStable()).toBe(true)
+      expect(m.isSuccess()).toBe(true)
+    }))
+
+    it('lets the app settle once a failed run is through its hooks', fakeAsync(() => {
+      const response = new Subject<string>()
+      const cleanup = deferred<void>()
+      const m = setup<string, Error, string>(() => ({
+        mutationFn: () => response,
+        onSettled: () => cleanup.promise,
+      }))
+
+      m.mutate('milk')
+      response.error(new Error('down'))
+      expect(appIsStable()).toBe(false)
+
+      cleanup.resolve()
+
+      expect(appIsStable()).toBe(true)
+      expect(m.isError()).toBe(true)
+    }))
+
+    it('keeps the app busy while an async onMutate runs, before the write is sent', fakeAsync(() => {
+      const prepared = deferred<void>()
+      const response = new Subject<string>()
+      const mutationFn = jasmine
+        .createSpy('mutationFn')
+        .and.returnValue(response)
+      const m = setup<string, Error, string>(() => ({
+        mutationFn,
+        onMutate: () => prepared.promise,
+      }))
+
+      m.mutate('milk')
+
+      expect(mutationFn).not.toHaveBeenCalled()
+      expect(appIsStable()).toBe(false)
+
+      prepared.resolve()
+      flushMicrotasks()
+      response.next('saved')
+      response.complete()
+
+      expect(appIsStable()).toBe(true)
+      expect(m.isSuccess()).toBe(true)
+    }))
+
+    it('keeps the app busy through the retries of a write, the waits between them included', fakeAsync(() => {
+      const responses: Array<Subject<string>> = []
+      const m = setup<string, Error, string>(() => ({
+        mutationFn: () => {
+          const response = new Subject<string>()
+
+          responses.push(response)
+
+          return response
+        },
+        retry: 1,
+        retryDelay: 100,
+      }))
+
+      m.mutate('milk')
+      responses[0].error(new Error('down'))
+      tick(99)
+      expect(appIsStable()).toBe(false)
+
+      tick(1)
+      responses[1].next('saved')
+      responses[1].complete()
+
+      expect(appIsStable()).toBe(true)
+      expect(m.isSuccess()).toBe(true)
+    }))
+
+    it('keeps the app busy until a run its component left is done', fakeAsync(() => {
+      const response = new Subject<string>()
+
+      @Component({ template: '' })
+      class Host {
+        readonly save = injectMutation<string, Error, string>(() => ({
+          mutationFn: () => response,
+        }))
+      }
+
+      const fixture = TestBed.createComponent(Host)
+
+      fixture.detectChanges()
+      fixture.componentInstance.save.mutate('milk')
+      // The write has most likely reached the server: the run goes on.
+      fixture.destroy()
+
+      expect(appIsStable()).toBe(false)
+
+      response.next('saved')
+      response.complete()
+
+      expect(appIsStable()).toBe(true)
+    }))
+
+    it('lets whenStable() resolve once the run is done', async () => {
+      const m = setup<string, Error, string>(() => ({
+        mutationFn: (title) =>
+          new Promise((resolve) => setTimeout(() => resolve(title), 20)),
+      }))
+
+      m.mutate('milk')
+      await TestBed.inject(ApplicationRef).whenStable()
+
+      expect(m.isSuccess()).toBe(true)
+      expect(m.data()).toBe('milk')
+    })
+
+    it('keeps a server render waiting until the run is done', fakeAsync(() => {
+      TestBed.resetTestingModule()
+      TestBed.configureTestingModule({
+        providers: [
+          provideQueryClient(),
+          { provide: PLATFORM_ID, useValue: 'server' },
+        ],
+      })
+
+      const response = new Subject<string>()
+      const m = setup<string, Error, string>(() => ({
+        mutationFn: () => response,
+      }))
+
+      m.mutate('milk')
+      expect(appIsStable()).toBe(false)
+
+      response.next('saved')
+      response.complete()
+
+      expect(appIsStable()).toBe(true)
+      expect(m.isSuccess()).toBe(true)
+    }))
   })
 
   describe('concurrent calls', () => {

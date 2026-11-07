@@ -36,7 +36,9 @@ import {
  * context. Destroying it doesn't cancel a run in flight: the write has most
  * likely reached the server, so the run finishes and fires its hooks. A
  * `mutate()` that comes after that, say from a timer, runs and fires its
- * hooks too.
+ * hooks too. From `mutate()` until its last hook is done, a run keeps the app
+ * busy, whether its component is still there or not: a server render and
+ * `whenStable()` wait for it.
  *
  * Must run in an injection context, or be given an explicit `injector`.
  *

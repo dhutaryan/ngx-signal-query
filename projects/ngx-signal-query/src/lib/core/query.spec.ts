@@ -5,19 +5,37 @@ import { settled } from '../../spec-helpers/promises'
 import { CancelledError } from './cancelled-error'
 import { Query, type QuerySubscriber } from './query'
 import type { QueryCache } from './query-cache'
+import type { QueryState } from './types'
 import { deferred } from './utils'
 
 function createQuery<TData, TError = Error>(gcTime = 5 * 60_000) {
   // Query only calls cache.remove(this) on gc; a stub is enough.
   const cache = { remove: jasmine.createSpy('remove') }
-  const query = new Query<TData, TError>({
+  // The app's pending tasks: `held` counts those the query's fetches hold
+  // now. As each is removed, `removals` records the query's state and how
+  // many are still held.
+  const tasks = {
+    held: 0,
+    removals: [] as Array<{ state: QueryState<TData, TError>; held: number }>,
+  }
+  const query: Query<TData, TError> = new Query<TData, TError>({
     key: ['key'],
     queryHash: '["key"]',
     cache: cache as unknown as QueryCache,
     gcTime,
+    pendingTasks: {
+      add: () => {
+        tasks.held++
+
+        return () => {
+          tasks.held--
+          tasks.removals.push({ state: query.state(), held: tasks.held })
+        }
+      },
+    },
   })
 
-  return { query, cache }
+  return { query, cache, tasks }
 }
 
 // An observer that never wants the query fetched, for specs that only count
@@ -770,6 +788,110 @@ describe('Query', () => {
       expect(() => flushMicrotasks()).not.toThrow()
       expect(query.state().status).toBe('error')
     }))
+  })
+
+  // A fetch in flight holds one of the app's pending tasks. Angular counts
+  // the app as busy while any is held, so it's removed only once the state
+  // shows how the fetch ended: whoever waits for the app to settle reads it.
+  describe('pending task', () => {
+    it('holds one while a fetch is in flight, and removes it once the data is in', () => {
+      const { query, tasks } = createQuery<number>()
+      const response = new Subject<number>()
+
+      query.fetch({ queryFn: () => response })
+      expect(tasks.held).toBe(1)
+
+      response.next(1)
+      response.complete()
+
+      expect(tasks.removals).toEqual([
+        {
+          state: jasmine.objectContaining({
+            status: 'success',
+            data: 1,
+            isFetching: false,
+          }),
+          held: 0,
+        },
+      ])
+    })
+
+    it('removes it once the error is in', () => {
+      const { query, tasks } = createQuery<number>()
+      const error = new Error('down')
+
+      query.fetch({ queryFn: () => throwError(() => error) })
+
+      expect(tasks.removals).toEqual([
+        {
+          state: jasmine.objectContaining({
+            status: 'error',
+            error,
+            isFetching: false,
+          }),
+          held: 0,
+        },
+      ])
+    })
+
+    it('removes it once a cancelled fetch has put the state back', () => {
+      const { query, tasks } = createQuery<number>()
+
+      query.fetch({ queryFn: () => new Subject<number>() })
+      query.cancel()
+
+      expect(tasks.removals).toEqual([
+        {
+          state: jasmine.objectContaining({
+            status: 'pending',
+            isFetching: false,
+          }),
+          held: 0,
+        },
+      ])
+    })
+
+    it('removes it when the query is destroyed', () => {
+      const { query, tasks } = createQuery<number>()
+
+      query.fetch({ queryFn: () => new Subject<number>() })
+      query.destroy()
+
+      expect(tasks.held).toBe(0)
+      expect(tasks.removals.length).toBe(1)
+    })
+
+    it('takes none for a fetch that joins the one in flight', () => {
+      const { query, tasks } = createQuery<number>()
+      const response = new Subject<number>()
+
+      query.fetch({ queryFn: () => response })
+      query.fetch({ queryFn: () => new Subject<number>() })
+      expect(tasks.held).toBe(1)
+
+      response.next(1)
+      response.complete()
+
+      expect(tasks.held).toBe(0)
+      expect(tasks.removals.length).toBe(1)
+    })
+
+    it('has a fetch that replaces the one in flight take its own before the old one lets go', () => {
+      const { query, tasks } = createQuery<number>()
+      const response = new Subject<number>()
+
+      query.fetch({ queryFn: () => new Subject<number>() })
+      query.fetch({ queryFn: () => response }, { cancelRefetch: true })
+
+      // The app never counts as stable in between.
+      expect(tasks.removals).toEqual([{ state: jasmine.anything(), held: 1 }])
+
+      response.next(1)
+      response.complete()
+
+      expect(tasks.held).toBe(0)
+      expect(tasks.removals.length).toBe(2)
+    })
   })
 
   describe('setData', () => {

@@ -122,7 +122,9 @@ export type QueryOptions<TData, TError = Error> = {
    * for no data: `undefined` fails the fetch, with no retry. Once no
    * component shows the query, an `Observable` fetch in flight is
    * unsubscribed, which aborts an `HttpClient` request; a `Promise` one runs
-   * to the end, and its response is kept.
+   * to the end, and its response is kept. Either way, Angular counts the app
+   * as busy until the fetch is done: a server render and `whenStable()` wait
+   * for it.
    */
   queryFn: () => Observable<TData> | Promise<TData>
   /** How long fetched data stays fresh before refetching, in ms. Default `0`. */

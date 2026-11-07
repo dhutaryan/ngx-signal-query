@@ -91,8 +91,9 @@ readonly profile = injectQuery(() => ({
 
 A mutation still in flight isn't stopped. Its write has most likely reached the
 server, so it lands and runs its hooks, as when its component goes away, and a
-component showing it sees how it went; `injectIsMutating()` stops counting it at
-once. That's what lets a logout mutation clear the cache from its own hook:
+component showing it sees how it went. `injectIsMutating()` stops counting it at
+once, though the app counts as busy until it's done. That's what lets a logout
+mutation clear the cache from its own hook:
 
 ```ts
 readonly logout = injectMutation(() => ({
