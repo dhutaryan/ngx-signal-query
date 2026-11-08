@@ -1,0 +1,10 @@
+/* Compile-time type tests: type-tests/ holds code that only has to compile, or must fail to (@ts-expect-error). */
+/* It compiles against the built package (`pnpm build:lib` first), as an app's code does, and is never run. */
+{
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "types": []
+  },
+  "include": ["type-tests/**/*.ts"]
+}

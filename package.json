@@ -13,6 +13,7 @@
     "test": "ng test ngx-signal-query",
     "test:ci": "ng test ngx-signal-query --watch=false --browsers=ChromeHeadless",
     "test:coverage": "ng test ngx-signal-query --watch=false --browsers=ChromeHeadless --code-coverage",
+    "test:types": "tsc -p projects/ngx-signal-query/tsconfig.type-tests.json",
     "lint": "ng lint"
   },
   "private": true,
@@ -49,6 +50,7 @@
     "angular-eslint": "20.7.0",
     "conventional-changelog-conventionalcommits": "^9.3.1",
     "eslint": "^9.39.1",
+    "expect-type": "^1.4.0",
     "jasmine-core": "~5.9.0",
     "karma": "~6.4.0",
     "karma-chrome-launcher": "~3.2.0",
