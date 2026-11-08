@@ -2,6 +2,7 @@ import {
   type EffectCleanupRegisterFn,
   type EffectRef,
   type Injector,
+  NgZone,
   computed,
   effect,
   runInInjectionContext,
@@ -301,6 +302,8 @@ export function createQueryObserver<TData, TError = Error>(
 
   // Whether the user can see the page right now; polls wait while they can't.
   const pageVisible = runInInjectionContext(injector, pageVisibility)
+  // Angular's zone, which the polling timer stays out of.
+  const zone = injector.get(NgZone)
 
   // Polling: refetch on an interval, independent of staleTime. The timer
   // restarts when the observed query switches, or when enabled or the interval
@@ -348,7 +351,17 @@ export function createQueryObserver<TData, TError = Error>(
       }
     }
 
-    onCleanup(startPolling(ms, () => q.state().updatedAt, poll))
+    // The timer waits outside Angular's zone: with zone.js, a timer pending
+    // there would keep the app from ever counting as stable. Each poll runs
+    // outside it too, as a refetch asked for from outside the zone does: what
+    // it changes still shows, since Angular renders a signal wherever it
+    // changes. Only an app that turns that off with the deprecated
+    // ignoreChangesOutsideZone doesn't see that a poll is in flight.
+    onCleanup(
+      zone.runOutsideAngular(() =>
+        startPolling(ms, () => q.state().updatedAt, poll),
+      ),
+    )
   })
 
   // Placeholder layer: while the query is pending with no data, present

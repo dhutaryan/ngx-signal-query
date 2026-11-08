@@ -118,6 +118,12 @@ reason to turn them off. And it waits for a fetch that never ends: a `queryFn`
 that returns a `Subject` nobody answers keeps it waiting until the test times
 out. To test a loading state, answer the request yourself, as below.
 
+It doesn't wait for anything else, with zone.js too: a query that polls, or
+one waiting out its `gcTime`, lets it resolve. `waitForAsync()` is different:
+it waits for every timer the test starts, those included. A test under it that
+shows a polling query, prefetches, or destroys a component with a query times
+out; use `whenStable()` or `fakeAsync()` there.
+
 ## Asynchronous resolution
 
 To test the loading state, resolve the data on your terms with a `Subject` and

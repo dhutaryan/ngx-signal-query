@@ -1,5 +1,6 @@
 import {
   Component,
+  type DoCheck,
   type EnvironmentProviders,
   ErrorHandler,
   Injector,
@@ -5548,7 +5549,7 @@ describe('injectQuery', () => {
   // keeps the app busy while it fetches, whatever its queryFn gets the data
   // with: from the moment the fetch starts until its outcome is in the query.
   // Without zone.js here, unless a spec says otherwise: zone.js also holds the
-  // app for a timer set in the Angular zone, which is another matter.
+  // app for a timer set in the Angular zone, which 'with zone.js' covers.
   describe('app stability', () => {
     beforeEach(() =>
       reprovide(provideZonelessChangeDetection(), provideQueryClient()),
@@ -5784,6 +5785,134 @@ describe('injectQuery', () => {
       expect(appIsStable()).toBe(true)
       expect(result.data()).toBe('v1')
     }))
+
+    // zone.js counts the app as busy while a timer set in the Angular zone is
+    // pending, and a component's effects run there. A query's own timers
+    // mustn't hold the app up: while it's busy, whenStable() waits, and
+    // Angular's HTTP transfer cache answers the app's requests with the
+    // server's responses.
+    describe('with zone.js', () => {
+      beforeEach(() => reprovide(provideQueryClient()))
+
+      it('lets the app settle between polls, and still shows the data of each', fakeAsync(() => {
+        let price = 0
+
+        @Component({
+          template: `
+            {{ prices.data() }}
+          `,
+        })
+        class Prices {
+          readonly prices = injectQuery(() => ({
+            queryKey: ['prices'],
+            queryFn: () => of(++price),
+            refetchInterval: 1000,
+          }))
+        }
+
+        const fixture = TestBed.createComponent(Prices)
+
+        fixture.autoDetectChanges()
+
+        expect(appIsStable()).toBe(true)
+        expect(fixture.nativeElement.textContent.trim()).toBe('1')
+
+        tick(1000)
+
+        expect(appIsStable()).toBe(true)
+        expect(fixture.nativeElement.textContent.trim()).toBe('2')
+
+        fixture.destroy()
+      }))
+
+      it('lets the app settle once the last component showing the query is gone, and still removes the query gcTime later', fakeAsync(() => {
+        const { fixture } = mount(() => ({
+          queryKey: ['todos'],
+          queryFn: () => of('v1'),
+        }))
+
+        // As a route change or an @if does it: in the Angular zone.
+        TestBed.inject(NgZone).run(() => fixture.destroy())
+
+        expect(appIsStable()).toBe(true)
+
+        tick(5 * 60_000)
+
+        expect(client.getQueryData(['todos'])).toBeUndefined()
+      }))
+
+      // A request can leave a timer of its own running after the response, as
+      // Node's fetch() does.
+      it('lets the app settle once the data is in, though the request leaves a timer running', fakeAsync(() => {
+        const { result } = mount(() => ({
+          queryKey: ['todos'],
+          queryFn: () => {
+            setTimeout(() => undefined, 10_000)
+
+            return of('v1')
+          },
+        }))
+
+        expect(result.data()).toBe('v1')
+        expect(appIsStable()).toBe(true)
+      }))
+
+      // Angular ticks from outside the zone when a test calls TestBed.tick(),
+      // or an app calls ApplicationRef.tick() there. Entering the zone for an
+      // answer that comes at once would make Angular start another tick in
+      // the middle of that one (NG0101).
+      it('lets Angular tick from outside the zone while a query answers at once', () => {
+        const handleError = spyOn(TestBed.inject(ErrorHandler), 'handleError')
+        const result = injectQuery(
+          () => ({ queryKey: ['todos'], queryFn: () => of('v1') }),
+          { injector: TestBed.inject(Injector) },
+        )
+
+        TestBed.tick()
+
+        expect(result.data()).toBe('v1')
+        expect(handleError).not.toHaveBeenCalled()
+      })
+
+      // The same for a request asked for from inside the zone, answered in
+      // the middle of such a tick, as a test double answering in a lifecycle
+      // hook does. A failure with a retry to come leaves nothing else in the
+      // zone to wait for.
+      it('lets Angular tick from outside the zone while a failure comes in, a retry to follow', () => {
+        const handleError = spyOn(TestBed.inject(ErrorHandler), 'handleError')
+        const response = new Subject<string>()
+        let answer: (() => void) | undefined
+
+        @Component({
+          template: `
+            {{ todos.failureCount() }}
+          `,
+        })
+        class TodoList implements DoCheck {
+          readonly todos = injectQuery(() => ({
+            queryKey: ['todos'],
+            queryFn: () => response,
+            retry: 1,
+            retryDelay: 10,
+          }))
+
+          ngDoCheck(): void {
+            answer?.()
+            answer = undefined
+          }
+        }
+
+        const fixture = TestBed.createComponent(TodoList)
+
+        // Change detection runs in the zone here, and asks for the query.
+        fixture.detectChanges()
+        answer = () => response.error(new Error('down'))
+        TestBed.tick()
+
+        expect(fixture.componentInstance.todos.failureCount()).toBe(1)
+        expect(handleError).not.toHaveBeenCalled()
+      })
+    })
   })
 
   // What a query does when it sets none of these options. The Important

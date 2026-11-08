@@ -2,9 +2,12 @@ import {
   ApplicationRef,
   Component,
   DestroyRef,
+  type DoCheck,
   EnvironmentInjector,
+  ErrorHandler,
   InjectionToken,
   Injector,
+  NgZone,
   PLATFORM_ID,
   type Signal,
   createEnvironmentInjector,
@@ -297,6 +300,66 @@ describe('injectMutation', () => {
       // Optimistically added 'b', then rolled back to the snapshot on error.
       expect(client.getQueryData(['todos'])).toEqual(['a'])
     })
+
+    // With zone.js, change detection follows what runs in the Angular zone.
+    // The hooks run there, so what they start updates the page too: here a
+    // timer, on a plain field rather than a signal.
+    it('runs them in the Angular zone, so a message onSuccess shows can hide itself on a timer', fakeAsync(() => {
+      @Component({
+        template: `
+          <button (click)="save.mutate()">Save</button>
+          <p>{{ message }}</p>
+        `,
+      })
+      class SaveTodo {
+        message = ''
+
+        readonly save = injectMutation(() => ({
+          mutationFn: () =>
+            new Promise<string>((resolve) =>
+              setTimeout(() => resolve('saved'), 100),
+            ),
+          onSuccess: () => {
+            this.message = 'Saved'
+            setTimeout(() => (this.message = ''), 3000)
+          },
+        }))
+      }
+
+      const fixture = TestBed.createComponent(SaveTodo)
+      const message = (): string =>
+        fixture.nativeElement.querySelector('p').textContent.trim()
+
+      fixture.autoDetectChanges()
+      fixture.nativeElement.querySelector('button').click()
+
+      tick(100)
+      expect(message()).toBe('Saved')
+
+      tick(3000)
+      expect(message()).toBe('')
+    }))
+
+    // Only a run asked for from inside the zone comes back into it. One that
+    // a timer or a socket's message set up outside the zone starts gets its
+    // hooks there, as it did before.
+    it('runs them outside the Angular zone for a mutate() called from outside it', fakeAsync(() => {
+      let inZone: boolean | undefined
+      const m = setup(() => ({
+        mutationFn: () =>
+          new Promise<string>((resolve) =>
+            setTimeout(() => resolve('saved'), 10),
+          ),
+        onSuccess: () => {
+          inZone = NgZone.isInAngularZone()
+        },
+      }))
+
+      TestBed.inject(NgZone).runOutsideAngular(() => m.mutate())
+      tick(10)
+
+      expect(inZone).toBe(false)
+    }))
   })
 
   // A hook may return a promise. The run waits for it before moving on, and
@@ -1231,6 +1294,84 @@ describe('injectMutation', () => {
       expect(appIsStable()).toBe(true)
       expect(m.isSuccess()).toBe(true)
     }))
+
+    // zone.js counts the app as busy while a timer set in the Angular zone is
+    // pending. A request can leave a timer of its own running after the
+    // response, as Node's fetch() does.
+    it('lets a zone.js app settle once the run is done, though its request leaves a timer running', fakeAsync(() => {
+      const m = setup(() => ({
+        mutationFn: () => {
+          setTimeout(() => undefined, 10_000)
+
+          return of('saved')
+        },
+      }))
+
+      // As a click handler calls it: in the Angular zone.
+      TestBed.inject(NgZone).run(() => m.mutate())
+
+      expect(m.isSuccess()).toBe(true)
+      expect(appIsStable()).toBe(true)
+    }))
+
+    // Angular ticks from outside the zone when a test calls TestBed.tick(),
+    // or an app calls ApplicationRef.tick() there. A run an effect starts
+    // during such a tick is asked for from outside the zone, so its outcome
+    // stays there: entering the zone for an answer that comes at once would
+    // make Angular start another tick in the middle of that one (NG0101).
+    it('lets Angular tick from outside the zone while a run an effect starts answers at once', () => {
+      const handleError = spyOn(TestBed.inject(ErrorHandler), 'handleError')
+      const save = signal(false)
+      const m = setup(() => ({ mutationFn: () => of('saved') }))
+
+      TestBed.runInInjectionContext(() =>
+        effect(() => {
+          if (save()) m.mutate()
+        }),
+      )
+      save.set(true)
+      TestBed.tick()
+
+      expect(m.isSuccess()).toBe(true)
+      expect(handleError).not.toHaveBeenCalled()
+    })
+
+    // The same for a run asked for from inside the zone, answered in the
+    // middle of such a tick, as a test double answering in a lifecycle hook
+    // does. A run nobody waits for leaves nothing else in the zone to wait
+    // for once it lands.
+    it('lets Angular tick from outside the zone while a run lands that nobody waits for', () => {
+      const handleError = spyOn(TestBed.inject(ErrorHandler), 'handleError')
+      const ack = new Subject<string>()
+      let answer: (() => void) | undefined
+
+      @Component({
+        template: `
+          {{ save.status() }}
+        `,
+      })
+      class SaveTodo implements DoCheck {
+        readonly save = injectMutation(() => ({ mutationFn: () => ack }))
+
+        ngDoCheck(): void {
+          answer?.()
+          answer = undefined
+        }
+      }
+
+      const fixture = TestBed.createComponent(SaveTodo)
+
+      fixture.detectChanges()
+      // A click handler that starts the write and doesn't wait for it.
+      TestBed.inject(NgZone).run(() => {
+        fixture.componentInstance.save.mutateAsync()
+      })
+      answer = () => ack.next('saved')
+      TestBed.tick()
+
+      expect(fixture.componentInstance.save.isSuccess()).toBe(true)
+      expect(handleError).not.toHaveBeenCalled()
+    })
   })
 
   describe('concurrent calls', () => {

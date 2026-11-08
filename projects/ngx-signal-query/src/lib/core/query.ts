@@ -1,7 +1,5 @@
-import { type PendingTasks, signal } from '@angular/core'
+import { type NgZone, type PendingTasks, signal } from '@angular/core'
 import {
-  defer,
-  from,
   isObservable,
   map,
   retry as retryOperator,
@@ -16,6 +14,7 @@ import { CancelledError } from './cancelled-error'
 import type { QueryCache } from './query-cache'
 import { defaultRetryDelay, resolveRetryDelay, shouldRetry } from './retryer'
 import { type Deferred, deferred, isValidTimeout, replaceData } from './utils'
+import { requestOutsideZone } from './zone'
 import type {
   DefaultedQueryOptions,
   QueryKey,
@@ -59,8 +58,9 @@ export interface QuerySubscriber<TData, TError = Error> {
 
 /**
  * What a query is created with: its key and the key's hash, the cache it
- * lives in, how long it stays there once nothing uses it, and the app's
- * pending tasks, one of which each of its fetches holds while in flight.
+ * lives in, how long it stays there once nothing uses it, the app's pending
+ * tasks, one of which each of its fetches holds while in flight, and
+ * Angular's zone, which its requests and its gc timer stay out of.
  *
  * @internal
  */
@@ -70,6 +70,7 @@ export interface QueryConfig {
   cache: QueryCache
   gcTime: number
   pendingTasks: Pick<PendingTasks, 'add'>
+  zone: Pick<NgZone, 'run' | 'runOutsideAngular'>
 }
 
 // The fetch in flight, from its first attempt until it lands, fails or is
@@ -134,12 +135,21 @@ export class Query<TData, TError = Error> {
   #gcTimer: ReturnType<typeof setTimeout> | null = null
   readonly #cache: QueryCache
   readonly #pendingTasks: Pick<PendingTasks, 'add'>
+  readonly #zone: Pick<NgZone, 'run' | 'runOutsideAngular'>
 
-  constructor({ key, queryHash, cache, gcTime, pendingTasks }: QueryConfig) {
+  constructor({
+    key,
+    queryHash,
+    cache,
+    gcTime,
+    pendingTasks,
+    zone,
+  }: QueryConfig) {
     this.key = key
     this.queryHash = queryHash
     this.#cache = cache
     this.#pendingTasks = pendingTasks
+    this.#zone = zone
     this.updateGcTime(gcTime)
     // A new query has nothing using it yet: its creator is about to, and if
     // nothing ever does, gc removes it.
@@ -298,11 +308,15 @@ export class Query<TData, TError = Error> {
     }))
 
     // The first attempt runs the caller's queryFn, each retry the one
-    // #retryQueryFn picks. defer + from: normalize Observable/Promise and
-    // make a fresh request for each attempt (a Promise is one-shot).
+    // #retryQueryFn picks. Each attempt makes a fresh request (a Promise is
+    // one-shot) outside Angular's zone, and its outcome comes back to where
+    // the fetch was asked for from (see requestOutsideZone): with zone.js,
+    // what the request waits on mustn't keep the app from counting as stable.
+    // The task this fetch holds keeps the app busy until the outcome is in
+    // all the same.
     let firstAttempt = true
 
-    const attempts = defer(() => {
+    const attempts = requestOutsideZone(this.#zone, () => {
       const attemptQueryFn = firstAttempt
         ? queryFn
         : this.#retryQueryFn(inFlight)
@@ -313,7 +327,7 @@ export class Query<TData, TError = Error> {
 
       inFlight.abortable = isObservable(request)
 
-      return from(request)
+      return request
     }).pipe(
       take(1),
       retryOperator({
@@ -567,12 +581,17 @@ export class Query<TData, TError = Error> {
     // until something removes it: a browser would run the timer at once.
     if (this.#observers.size > 0 || !isValidTimeout(this.#gcTime)) return
 
-    this.#gcTimer = setTimeout(() => {
-      this.#gcTimer = null
+    // Outside Angular's zone: with zone.js, a timer pending there keeps the
+    // app from counting as stable, this one for gcTime. Nothing on screen
+    // shows a query nobody uses, so its removal needs no change detection.
+    this.#gcTimer = this.#zone.runOutsideAngular(() =>
+      setTimeout(() => {
+        this.#gcTimer = null
 
-      // A fetch still in flight keeps it: the fetch's end calls this again.
-      if (!this.#inFlight) this.#cache.remove(this)
-    }, this.#gcTime)
+        // A fetch still in flight keeps it: the fetch's end calls this again.
+        if (!this.#inFlight) this.#cache.remove(this)
+      }, this.#gcTime),
+    )
   }
 
   #clearGcTimer(): void {

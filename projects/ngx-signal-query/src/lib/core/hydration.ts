@@ -1,4 +1,4 @@
-import { NgZone, TransferState, inject, makeStateKey } from '@angular/core'
+import { TransferState, inject, makeStateKey } from '@angular/core'
 
 import { inBrowser } from './platform'
 import type { QueryCache } from './query-cache'
@@ -54,11 +54,7 @@ export function transferCache(cache: QueryCache, gcTime: number): void {
 
   // Read once: from now on the cache holds the data.
   transferState.remove(TRANSFER_KEY)
-  // Outside Angular's zone: with zone.js, the gc timer of a query no
-  // component shows yet would keep the app from counting as stable, and
-  // Angular's HTTP transfer cache would go on answering its requests with the
-  // server's responses until then.
-  inject(NgZone).runOutsideAngular(() => hydrate(cache, queries, gcTime))
+  hydrate(cache, queries, gcTime)
 }
 
 // The queries the page carries: those that succeeded, with data JSON carries

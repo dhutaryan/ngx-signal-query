@@ -124,7 +124,10 @@ export type QueryOptions<TData, TError = Error> = {
    * unsubscribed, which aborts an `HttpClient` request; a `Promise` one runs
    * to the end, and its response is kept. Either way, Angular counts the app
    * as busy until the fetch is done: a server render and `whenStable()` wait
-   * for it.
+   * for it. With zone.js, it runs outside Angular's zone, as `HttpClient`
+   * sends its requests: what it starts, a timer say, neither keeps the app
+   * busy nor runs change detection. Its data comes back into the zone when
+   * the fetch was asked for from there.
    */
   queryFn: () => Observable<TData> | Promise<TData>
   /** How long fetched data stays fresh before refetching, in ms. Default `0`. */
