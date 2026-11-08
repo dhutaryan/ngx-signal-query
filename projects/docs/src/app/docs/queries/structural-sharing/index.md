@@ -96,6 +96,19 @@ field matches also throws away an optimistic update that leaves the version as
 it was. If it throws, the fetch fails with its error and the query keeps its
 data, and `setQueryData` throws to its caller.
 
+The function merges data of the type `queryFn` gives, so one typed with
+`unknown` doesn't fit a query. To share one between queries and
+[`withDefaultOptions`](/query-client/default-options), where the data has no
+type, make it generic:
+
+```ts
+function shareDates<T>(oldData: T | undefined, newData: T): T {
+  return oldData !== undefined && isDeepEqual(oldData, newData)
+    ? oldData
+    : newData
+}
+```
+
 ## setQueryData
 
 [`setQueryData`](/query-client/manual-cache-updates) merges what it writes the
