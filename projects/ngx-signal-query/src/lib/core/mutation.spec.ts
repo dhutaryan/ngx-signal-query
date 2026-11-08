@@ -85,6 +85,9 @@ describe('Mutation', () => {
             }
           },
         },
+        // Angular's zone as an app without zone.js has it: both run what
+        // they're given as is.
+        { run: (fn) => fn(), runOutsideAngular: (fn) => fn() },
       )
 
       return { mutation, tasks }

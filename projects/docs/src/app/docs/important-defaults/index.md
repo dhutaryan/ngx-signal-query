@@ -91,6 +91,12 @@ That goes for work no component shows too: a prefetch with `fetchQuery`, a
 promise fetch that runs on after its component is gone, a mutation whose
 component is gone. For tests, see [Testing](/testing#waiting-with-whenstable).
 
+Nothing else keeps the app busy, with zone.js or without: a query waiting out
+its `gcTime`, and the time between polls, leave it stable. With zone.js,
+`queryFn` and `mutationFn` run outside Angular's zone, as `HttpClient` sends
+its requests, so a timer they start doesn't hold the app up either. See
+[Query Functions](/queries/query-functions#with-zonejs).
+
 ## On the server
 
 When a page is rendered on the server, a query skips what only makes sense in

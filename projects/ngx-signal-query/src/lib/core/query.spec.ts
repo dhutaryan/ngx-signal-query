@@ -33,6 +33,9 @@ function createQuery<TData, TError = Error>(gcTime = 5 * 60_000) {
         }
       },
     },
+    // Angular's zone as an app without zone.js has it: both run what they're
+    // given as is.
+    zone: { run: (fn) => fn(), runOutsideAngular: (fn) => fn() },
   })
 
   return { query, cache, tasks }

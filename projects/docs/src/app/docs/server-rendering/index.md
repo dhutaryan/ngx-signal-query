@@ -8,9 +8,10 @@ and fetch it all again.
 
 There's nothing to set up: while a query fetches or a mutation runs, Angular
 counts the app as busy, so the server sends the page once the data or the
-error is in. On the server a query doesn't poll, doesn't retry unless you ask,
-and isn't removed from the cache. See
-[Important Defaults](/important-defaults#on-the-server).
+error is in, with zone.js or without. Nothing else holds the page up: a
+`queryFn` built on `fetch()` takes as long as its request. On the server a
+query doesn't poll, doesn't retry unless you ask, and isn't removed from the
+cache. See [Important Defaults](/important-defaults#on-the-server).
 
 ## Bringing the data over
 
@@ -96,9 +97,10 @@ readonly startsAt = computed(() => {
 
 `provideClientHydration()` also turns on Angular's own transfer cache: it puts
 the response of each `HttpClient` GET into the page, and answers the same
-request with it while the app boots. With `withHydration()` too, the page
-carries those responses twice. If every `HttpClient` GET your pages make goes
-through a query, turn Angular's off:
+request with it while the app boots, until the app first counts as stable.
+Refetches and polls after that get fresh responses. With `withHydration()`
+too, the page carries those responses twice. If every `HttpClient` GET your
+pages make goes through a query, turn Angular's off:
 
 ```ts
 provideClientHydration(withNoHttpTransferCache())

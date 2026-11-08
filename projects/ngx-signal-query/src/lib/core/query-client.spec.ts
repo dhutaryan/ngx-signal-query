@@ -1,6 +1,7 @@
 import {
   Component,
   EnvironmentInjector,
+  NgZone,
   PLATFORM_ID,
   createEnvironmentInjector,
   effect,
@@ -391,6 +392,19 @@ describe('QueryClient', () => {
 
       response.next('v1')
       response.complete()
+
+      expect(appIsStable()).toBe(true)
+      expect(client.getQueryData(['todos'])).toBe('v1')
+    }))
+
+    // zone.js counts the app as busy while a timer set in the Angular zone is
+    // pending. The query is kept for gcTime once the fetch lands, and that
+    // wait mustn't hold the app up.
+    it('lets a zone.js app settle once the fetch lands, though no component shows the key', fakeAsync(() => {
+      // As a click handler or a route resolver calls it: in the Angular zone.
+      TestBed.inject(NgZone).run(() =>
+        client.fetchQuery(['todos'], () => of('v1')),
+      )
 
       expect(appIsStable()).toBe(true)
       expect(client.getQueryData(['todos'])).toBe('v1')

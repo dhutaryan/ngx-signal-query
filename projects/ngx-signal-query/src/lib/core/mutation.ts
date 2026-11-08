@@ -1,4 +1,9 @@
-import { type PendingTasks, type Signal, signal } from '@angular/core'
+import {
+  type NgZone,
+  type PendingTasks,
+  type Signal,
+  signal,
+} from '@angular/core'
 import {
   catchError,
   concat,
@@ -22,6 +27,7 @@ import type { MutationCache } from './mutation-cache'
 import { defaultRetryDelay, resolveRetryDelay, shouldRetry } from './retryer'
 import type { RetryDelayValue, RetryValue } from './types'
 import { deferred, isPromiseLike } from './utils'
+import { requestOutsideZone } from './zone'
 
 /** Lifecycle status of a mutation: not yet run, running (hooks included), succeeded, or failed. */
 export type MutationStatus = 'idle' | 'pending' | 'success' | 'error'
@@ -79,7 +85,12 @@ type Outcome<TData, TError> =
  * write is sent.
  */
 export type MutationOptions<TData, TError, TVariables, TContext> = {
-  /** Performs the write; receives `mutate()`'s argument. Returns `Observable`/`Promise`. */
+  /**
+   * Performs the write; receives `mutate()`'s argument. Returns
+   * `Observable`/`Promise`. With zone.js, it runs outside Angular's zone, as
+   * `HttpClient` sends its requests, and the hooks run where `mutate()` was
+   * called from: in the zone for a click handler.
+   */
   mutationFn: (variables: TVariables) => Observable<TData> | Promise<TData>
   /** Retry policy. Defaults to no retry (writes are not idempotent). */
   retry?: RetryValue<TError>
@@ -197,16 +208,19 @@ export class Mutation<
   readonly #options: MutationOptions<TData, TError, TVariables, TContext>
   readonly #cache: MutationCache
   readonly #pendingTasks: Pick<PendingTasks, 'add'>
+  readonly #zone: Pick<NgZone, 'run' | 'runOutsideAngular'>
 
   constructor(
     readonly mutationId: number,
     options: MutationOptions<TData, TError, TVariables, TContext>,
     cache: MutationCache,
     pendingTasks: Pick<PendingTasks, 'add'>,
+    zone: Pick<NgZone, 'run' | 'runOutsideAngular'>,
   ) {
     this.#options = options
     this.#cache = cache
     this.#pendingTasks = pendingTasks
+    this.#zone = zone
   }
 
   get observerCount(): number {
@@ -311,9 +325,15 @@ export class Mutation<
     const retry = this.#options.retry ?? 0
     const retryDelay = this.#options.retryDelay ?? defaultRetryDelay
 
-    // defer + from: normalize Observable/Promise and re-invoke mutationFn on
-    // each retry (a Promise is one-shot, so retry must produce a fresh one).
-    return defer(() => from(this.#options.mutationFn(variables))).pipe(
+    // Each attempt calls mutationFn afresh (a Promise is one-shot, so a retry
+    // needs a new one) outside Angular's zone, and its outcome comes back to
+    // where mutate() was called from (see requestOutsideZone): with zone.js,
+    // what the write waits on mustn't keep the app from counting as stable,
+    // and the hooks run where they would without this. The task the run holds
+    // keeps the app busy until its last hook is done all the same.
+    return requestOutsideZone(this.#zone, () =>
+      this.#options.mutationFn(variables),
+    ).pipe(
       take(1),
       retryOperator({
         delay: (error, retryCount) => {

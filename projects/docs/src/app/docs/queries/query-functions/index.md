@@ -188,3 +188,21 @@ when there is one, rather than always the one the fetch started with. So a
 function that reads a signal when it runs, as the one above does, still
 fetches the key it's retried for, even if its own component has moved on to
 another key by then.
+
+## With zone.js
+
+In an app with zone.js, `queryFn` runs outside Angular's zone, as `HttpClient`
+sends its own requests. Whatever it starts there, a timer, a socket or a
+library's own bookkeeping, doesn't keep the app from counting as stable. The
+query itself keeps the app busy until its data is in, so a server render and
+`whenStable()` still wait for it.
+
+The data comes back into the zone when the fetch was asked for from there, by
+a component or a click handler, and shows as usual. Code that runs as part of
+the request runs outside the zone, though: an `HttpClient` interceptor, an
+operator in the `pipe` of what `queryFn` returns, a `.then` callback. A plain
+field set there doesn't show until something else runs change detection: show
+the query's data instead, or set a signal.
+
+The same goes for `mutationFn`, and a mutation's hooks run where `mutate()`
+was called from: in the zone for a click handler.

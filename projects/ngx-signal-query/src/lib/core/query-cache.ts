@@ -1,4 +1,10 @@
-import { DestroyRef, Injectable, PendingTasks, inject } from '@angular/core'
+import {
+  DestroyRef,
+  Injectable,
+  NgZone,
+  PendingTasks,
+  inject,
+} from '@angular/core'
 
 import { Cache } from './cache'
 import { hashKey, partialMatchKey } from './utils'
@@ -8,8 +14,10 @@ import type { QueryFilters, QueryKey } from './types'
 /** @internal */
 @Injectable()
 export class QueryCache extends Cache<Query<unknown, unknown>> {
-  // Handed to each query it creates, which has no injector of its own.
+  // The app's pending tasks and Angular's zone, handed to each query it
+  // creates, which has no injector of its own.
   readonly #pendingTasks = inject(PendingTasks)
+  readonly #zone = inject(NgZone)
 
   constructor() {
     super()
@@ -39,6 +47,7 @@ export class QueryCache extends Cache<Query<unknown, unknown>> {
         cache: this,
         gcTime,
         pendingTasks: this.#pendingTasks,
+        zone: this.#zone,
       }),
     ) as Query<TData, TError>
   }
