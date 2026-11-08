@@ -27,8 +27,11 @@ query has no data to show — a new query, or one whose fetch failed before it
 got any. A query that already has data in the cache won't call it at all:
 
 ```ts
-initialData: () => JSON.parse(localStorage.getItem('todos') ?? '[]')
+initialData: () => JSON.parse(localStorage.getItem('todos') ?? '[]') as Todo[]
 ```
+
+The cast matters: `JSON.parse` returns `any`, and a seed typed `any` makes
+`data()` `any` too.
 
 ## It refetches immediately (by default)
 

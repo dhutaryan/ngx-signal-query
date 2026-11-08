@@ -193,18 +193,21 @@ export type QueryOptions<TData, TError = Error> = {
    * Data shown while the query is `'pending'` with no data yet, either a value
    * or a function of the previous query's data (see {@link keepPreviousData}).
    * Unlike `initialData` it is never written to the cache: the query stays
-   * `'pending'` underneath, and `isPlaceholderData` is `true` while shown.
+   * `'pending'` underneath, and `isPlaceholderData` is `true` while shown. It
+   * has the data type `queryFn` gives: a placeholder that doesn't fit is an
+   * error, not a wider `data()`.
    */
-  placeholderData?: TData | PlaceholderDataFunction<TData>
+  placeholderData?: NoInfer<TData> | PlaceholderDataFunction<NoInfer<TData>>
   /** Timestamp (ms) for `initialData`; older data is considered stale. */
   initialDataUpdatedAt?: number | (() => number)
   /**
    * Whether new data keeps the parts of the cached data that didn't change,
    * so `data()` keeps its reference when a refetch brings the same data.
-   * Default `true`; turn it off for large responses refetched often. See
+   * Default `true`; turn it off for large responses refetched often. A
+   * function merges data of the type `queryFn` gives. See
    * {@link StructuralSharingValue}.
    */
-  structuralSharing?: StructuralSharingValue<TData>
+  structuralSharing?: StructuralSharingValue<NoInfer<TData>>
   /** Set `false` to disable fetching (e.g. until a dependency is ready). */
   enabled?: boolean
 }

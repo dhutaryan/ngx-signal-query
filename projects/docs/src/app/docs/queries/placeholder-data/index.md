@@ -25,6 +25,17 @@ The cache never sees any of it. Another component reading `['todos']` gets
 `undefined` until the real fetch lands — the placeholder is local to this one
 query result.
 
+The placeholder has the data type `queryFn` gives, here `Todo[]`. One that's
+missing fields is a type error, as code reading `data()` would find them
+missing. One TypeScript quirk: an inline object whose field has a literal type,
+like `status: 'open' | 'done'`, is an error even when it fits, because
+TypeScript widens `'open'` to `string` before it knows the data type. Add
+`satisfies` with the type, or keep the placeholder in a typed constant:
+
+```ts
+placeholderData: { id: 1, status: 'open' } satisfies Ticket,
+```
+
 ## Telling placeholder from real data
 
 Because `status()` is `'success'`, you need another way to know the data is only
@@ -122,9 +133,11 @@ export class TodoDetailComponent {
 }
 ```
 
-The detail view renders instantly from the list row, then the real fetch fills
-in whatever the row didn't have. If the list isn't in the cache, the function
-returns `undefined` and the query starts `'pending'` as usual.
+The detail view renders instantly from the list row, then the real fetch
+replaces it. The list here holds whole todos, so a row has the detail's type.
+If your list rows have fewer fields than the detail, fill in the rest when you
+build the placeholder. If the list isn't in the cache, the function returns
+`undefined` and the query starts `'pending'` as usual.
 
 ## placeholderData or initialData?
 

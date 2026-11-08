@@ -216,7 +216,7 @@ export class QueryClient {
       retry?: RetryValue<any>
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       retryDelay?: RetryDelayValue<any>
-      structuralSharing?: StructuralSharingValue<TData>
+      structuralSharing?: StructuralSharingValue<NoInfer<TData>>
       cancelRefetch?: boolean
     } = {},
   ): Promise<TData> {
