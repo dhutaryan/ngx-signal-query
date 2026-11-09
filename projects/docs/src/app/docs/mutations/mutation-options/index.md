@@ -53,28 +53,26 @@ public add() {
 
     // onMutate returns { previous } …
     onMutate: (title) => {
-      const previous = this.#client.getQueryData<Todo[]>(['todos']) ?? []
+      const previous = this.#client.getQueryData<Todo[]>(['todos'])
 
-      this.#client.setQueryData<Todo[]>(['todos'], (todos = []) => [
-        ...todos,
-        { id: -1, title },
-      ])
+      this.#client.setQueryData<Todo[]>(
+        ['todos'],
+        (todos) => todos && [...todos, { id: -1, title }],
+      )
 
       return { previous }
     },
 
-    // … and `context` here is typed as { previous: Todo[] } | undefined,
-    // not `unknown`.
+    // … and `context` here is typed as
+    // { previous: Todo[] | undefined } | undefined, not `unknown`.
     onError: (_error, _title, context) => {
-      if (context) {
-        this.#client.setQueryData<Todo[]>(['todos'], context.previous)
-      }
+      this.#client.setQueryData<Todo[]>(['todos'], context?.previous)
     },
   })
 }
 ```
 
-Get `context.previous` wrong — a typo, the wrong shape — and it's a compile
+Get `context?.previous` wrong — a typo, the wrong shape — and it's a compile
 error, not a broken rollback at runtime.
 
 ## Overriding per component

@@ -78,23 +78,21 @@ protected readonly addTodo = injectMutation(() => ({
     this.#client.cancelQueries({ queryKey: ['todos'] })
 
     // Snapshot for rollback…
-    const previous = this.#client.getQueryData<Todo[]>(['todos']) ?? []
+    const previous = this.#client.getQueryData<Todo[]>(['todos'])
 
-    // …then write the optimistic todo. A temporary negative id keeps it
-    // distinct until the server assigns a real one.
-    this.#client.setQueryData<Todo[]>(['todos'], (todos = []) => [
-      ...todos,
-      { id: -Date.now(), title },
-    ])
+    // …then add the optimistic todo to the list, if it's loaded. A temporary
+    // negative id keeps it distinct until the server assigns a real one.
+    this.#client.setQueryData<Todo[]>(
+      ['todos'],
+      (todos) => todos && [...todos, { id: -Date.now(), title }],
+    )
 
     return { previous }
   },
 
   onError: (_error, _title, context) => {
-    // Put the snapshot back.
-    if (context) {
-      this.#client.setQueryData<Todo[]>(['todos'], context.previous)
-    }
+    // Put the snapshot back; nothing, if the list wasn't loaded.
+    this.#client.setQueryData<Todo[]>(['todos'], context?.previous)
   },
 
   onSettled: () => {
@@ -112,6 +110,11 @@ reverts if the write fails. The three hooks split the work cleanly:
 - **`onError`** — restore the snapshot from `context`.
 - **`onSettled`** — invalidate, so the optimistic guess is replaced by real
   server data whether it succeeded or failed.
+
+The write goes only into a list that's loaded. A default such as
+`(todos = [])` would give a key nothing has fetched a list of just the new
+row, which a component showing the key later takes as the whole list. See
+[Manual Cache Updates](/query-client/manual-cache-updates).
 
 ### Why `cancelQueries` first
 
@@ -137,7 +140,12 @@ onMutate: (updated) => {
     updated.id,
   ])
 
-  this.#client.setQueryData<Todo>(['todos', 'detail', updated.id], updated)
+  // Only a todo that's cached: a failed save then leaves no unsaved edit
+  // behind.
+  this.#client.setQueryData<Todo>(
+    ['todos', 'detail', updated.id],
+    (todo) => todo && updated,
+  )
 
   return { previous, id: updated.id }
 },

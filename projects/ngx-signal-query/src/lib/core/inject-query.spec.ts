@@ -1980,6 +1980,26 @@ describe('injectQuery', () => {
       expect(queryFn).toHaveBeenCalledTimes(1)
     })
 
+    it('keeps what it shows when setQueryData writes nothing', () => {
+      const { queryFn, resolve } = requests<string>()
+      const { fixture, result } = mount(
+        (id) => ({ queryKey: ['todo', id()], queryFn, staleTime: Infinity }),
+        1,
+      )
+
+      resolve('v1')
+      fixture.detectChanges()
+      client.removeQueries({ queryKey: ['todo', 1] })
+      fixture.detectChanges()
+      // Updates the todo only if it's cached: after the removal, it isn't.
+      client.setQueryData<string>(['todo', 1], (todo) => todo?.toUpperCase())
+      fixture.detectChanges()
+
+      expect(result.data()).toBe('v1')
+      expect(queryFn).toHaveBeenCalledTimes(1)
+      expect(client.getQueryCache().get(['todo', 1])).toBeUndefined()
+    })
+
     it('refetches on invalidateQueries once the key is back', () => {
       const { queryFn, resolve } = requests<string>()
       const { fixture, result } = mount(

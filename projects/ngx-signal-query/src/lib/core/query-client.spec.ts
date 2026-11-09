@@ -271,9 +271,38 @@ describe('QueryClient', () => {
 
     it('is a no-op when the updater returns undefined', () => {
       client.setQueryData<number>(['n'], 5)
-      client.setQueryData<number>(['n'], () => undefined as unknown as number)
+      client.setQueryData<number>(['n'], () => undefined)
 
       expect(client.getQueryData(['n'])).toBe(5)
+    })
+
+    it("doesn't create an entry when the updater returns undefined", () => {
+      client.setQueryData<string[]>(['todos'], (todos) =>
+        todos?.map((todo) => todo.toUpperCase()),
+      )
+
+      expect(client.getQueryCache().get(['todos'])).toBeUndefined()
+    })
+
+    it("doesn't create an entry for an undefined value", () => {
+      // A rollback to what the key held before: nothing.
+      const previous = client.getQueryData<string[]>(['todos'])
+
+      client.setQueryData<string[]>(['todos'], previous)
+
+      expect(client.getQueryCache().get(['todos'])).toBeUndefined()
+    })
+
+    it('writes into a new entry when the updater removes the key', () => {
+      client.setQueryData(['todo'], 'v1')
+      client.setQueryData<string>(['todo'], (todo) => {
+        client.removeQueries({ queryKey: ['todo'] })
+
+        return `${todo}!`
+      })
+
+      // Into the cache as the updater left it, not into the query it removed.
+      expect(client.getQueryData(['todo'])).toBe('v1!')
     })
 
     // JSON data can have a field named `constructor`, e.g. a filter of cars
@@ -1041,6 +1070,23 @@ describe('QueryClient', () => {
 
       expect(runs()).toBe(1)
       expect(client.getQueryData(['count'])).toBe(1)
+    })
+
+    it("setQueryData doesn't make the effect depend on the data it updates", () => {
+      client.setQueryData(['count'], 0)
+
+      const { fixture, runs } = inEffect(() =>
+        client.setQueryData<number>(['count'], (count = 0) => count + 1),
+      )
+
+      expect(runs()).toBe(1)
+      expect(client.getQueryData(['count'])).toBe(1)
+
+      client.setQueryData(['count'], 100)
+      fixture.detectChanges()
+
+      expect(runs()).toBe(1)
+      expect(client.getQueryData(['count'])).toBe(100)
     })
 
     it("getQueryData doesn't re-run the effect when the data changes", () => {

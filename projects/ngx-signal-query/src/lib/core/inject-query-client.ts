@@ -17,7 +17,10 @@ import { QueryClient } from './query-client'
  * @example
  * ```ts
  * const client = injectQueryClient()
- * client.setQueryData<Todo[]>(['todos'], (prev = []) => [...prev, newTodo])
+ * client.setQueryData<Todo[]>(
+ *   ['todos'],
+ *   (todos) => todos && [...todos, newTodo],
+ * )
  * client.invalidateQueries({ queryKey: ['todos'] })
  * ```
  */

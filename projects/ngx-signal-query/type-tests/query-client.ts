@@ -8,6 +8,10 @@ type Todo = { id: number; title: string; done: boolean }
 declare const http: HttpClient
 declare const client: QueryClient
 declare function shareEqual<T>(oldData: T | undefined, newData: T): T
+declare const newTodo: Todo
+declare const saved: Todo
+// What onMutate returns for a rollback: the list as it was, if it was cached.
+declare const context: { previous: Todo[] | undefined } | undefined
 
 // fetchQuery with a generic merge function keeps the data type of queryFn.
 const todos = client.fetchQuery(
@@ -47,3 +51,41 @@ const mistyped = client.fetchQuery(
 )
 
 expectTypeOf(mistyped).resolves.toEqualTypeOf<Todo[]>()
+
+// setQueryData
+
+// An updater gets the data the key holds, undefined while it holds none, and
+// may return undefined to leave the cache as it is: it updates only what's
+// cached.
+client.setQueryData<Todo[]>(['todos'], (todos) => {
+  expectTypeOf(todos).toEqualTypeOf<Todo[] | undefined>()
+
+  return todos?.map((todo) => (todo.id === saved.id ? saved : todo))
+})
+client.setQueryData<Todo[]>(['todos'], (todos) => todos && [...todos, newTodo])
+client.setQueryData<Todo[]>(['todos'], () => undefined)
+
+// So may a value: a rollback with nothing to put back writes nothing.
+client.setQueryData<Todo[]>(['todos'], context?.previous)
+
+// A default still writes, seeding a key that holds nothing.
+client.setQueryData<Todo[]>(['todos'], (todos = []) => [...todos, newTodo])
+
+// Data of another type is an error, from an updater or as a value.
+// @ts-expect-error -- returns a number, not the data
+client.setQueryData<Todo[]>(['todos'], (todos) => todos?.length)
+// @ts-expect-error -- a todo isn't the list
+client.setQueryData<Todo[]>(['todos'], saved)
+
+// So is null: only undefined leaves the cache as it is.
+// @ts-expect-error -- null isn't the data
+client.setQueryData<Todo[]>(['todos'], (todos) => todos ?? null)
+// @ts-expect-error -- null isn't the data
+client.setQueryData<Todo[]>(['todos'], null)
+
+// An updater returns the new data: one that changes the data in place and
+// returns nothing is an error.
+// @ts-expect-error -- returns nothing
+client.setQueryData<Todo[]>(['todos'], (todos) => {
+  todos?.push(newTodo)
+})

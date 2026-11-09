@@ -31,26 +31,33 @@ immediately — no request involved:
 // Replace outright
 this.#client.setQueryData<Todo[]>(['todos'], nextTodos)
 
-// Or update from the previous value
-this.#client.setQueryData<Todo[]>(['todos'], (todos = []) => [
-  ...todos,
-  newTodo,
-])
+// Or update from the previous value, if there is one
+this.#client.setQueryData<Todo[]>(
+  ['todos'],
+  (todos) => todos && [...todos, newTodo],
+)
 ```
 
 A few things worth knowing:
 
-- **It creates the entry if it doesn't exist.** Writing to a key nothing has
-  fetched yet is fine — the entry is created holding your data.
-- **The updater receives the previous value**, which may be `undefined` — hence
-  the `= []` default above.
-- **Returning `undefined` from the updater is a no-op**, not a way to clear the
-  entry. It leaves the cache untouched. To actually drop data, use
-  `removeQueries`.
-- **Writing what's already there changes nothing.** The data is merged with
-  what the cache holds, like a response: if it's equal, `data()` keeps its
-  reference and nothing that reads it runs again. See
-  [Structural Sharing](/queries/structural-sharing).
+- **The updater receives the previous value**, which is `undefined` while the
+  key holds no data.
+- **`undefined` writes nothing**, returned from the updater or passed as the
+  value: the cache stays as it was, and a key with no entry doesn't get one.
+  So the updater above leaves a list nobody has loaded alone, and a rollback
+  with nothing to restore does nothing. It's not a way to clear the entry: to
+  drop data, use `removeQueries`.
+- **Anything else is written**, creating the entry if it doesn't exist, as if
+  just fetched. A default parameter writes too: on a key nothing has fetched,
+  `(todos = []) => [...todos, newTodo]` creates a list holding only `newTodo`,
+  and a component that shows the key later with a `staleTime` takes it as the
+  whole, fresh list and doesn't fetch it. Use a default only when what it
+  builds is all the data the key should hold.
+- **Writing what's already there leaves `data()` as it is.** The data is
+  merged with what the cache holds, like a response: if it's equal, `data()`
+  keeps its reference and nothing that reads it runs again. It still counts as
+  a write: `dataUpdatedAt` moves, and a stale mark from `invalidateQueries()`
+  is cleared. See [Structural Sharing](/queries/structural-sharing).
 - **A key no component shows is kept for `gcTime`** after the last write, 5
   minutes by default, then removed like any other unused query. Each write
   starts the clock over.
@@ -67,9 +74,10 @@ protected readonly updateTodo = injectMutation(() => ({
     this.#http.put<Todo>(`/api/todos/${todo.id}`, todo),
 
   onSuccess: (saved) => {
-    // The server handed back the fresh row — drop it into the list directly.
-    this.#client.setQueryData<Todo[]>(['todos'], (todos = []) =>
-      todos.map((todo) => (todo.id === saved.id ? saved : todo)),
+    // The server handed back the fresh row — drop it into the list directly,
+    // if the list is loaded.
+    this.#client.setQueryData<Todo[]>(['todos'], (todos) =>
+      todos?.map((todo) => (todo.id === saved.id ? saved : todo)),
     )
   },
 }))
