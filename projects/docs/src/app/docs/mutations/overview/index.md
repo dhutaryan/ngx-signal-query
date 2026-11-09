@@ -1,9 +1,6 @@
 Queries **read** server state. Mutations **change** it — create, update, delete.
 
-The difference isn't cosmetic. A query runs on its own, whenever the cache says
-it should. A mutation runs only when **you** say so, exactly once per call, and
-it isn't cached — you don't want a `POST` firing again because something looked
-stale.
+The difference isn't cosmetic. A query runs on its own, whenever the cache says it should. A mutation runs only when **you** say so, exactly once per call, and it isn't cached — you don't want a `POST` firing again because something looked stale.
 
 ## The basics
 
@@ -30,28 +27,22 @@ export class AddTodoComponent {
 }
 ```
 
-`mutationFn` takes whatever you pass to `mutate()` and returns an `Observable`
-or a `Promise`, same as a `queryFn`. There's no key: a mutation isn't stored in
-the cache.
+`mutationFn` takes whatever you pass to `mutate()` and returns an `Observable` or a `Promise`, same as a `queryFn`. There's no key: a mutation isn't stored in the cache.
 
 ## Mutation states
 
-A mutation has **four** states — one more than a query, because it starts out
-having done nothing at all:
+A mutation has **four** states — one more than a query, because it starts out having done nothing at all:
 
-| `status()` | meaning |
-| --- | --- |
-| `'idle'` | not run yet (or `reset()` was called) |
-| `'pending'` | running right now |
+| `status()`  | meaning                                           |
+| ----------- | ------------------------------------------------- |
+| `'idle'`    | not run yet (or `reset()` was called)             |
+| `'pending'` | running right now                                 |
 | `'success'` | the last run succeeded; `data()` holds the result |
-| `'error'` | the last run failed; `error()` holds the failure |
+| `'error'`   | the last run failed; `error()` holds the failure  |
 
-The matching booleans are `isIdle()`, `isPending()`, `isSuccess()` and
-`isError()`.
+The matching booleans are `isIdle()`, `isPending()`, `isSuccess()` and `isError()`.
 
-That `'idle'` state is the important difference from queries. A query with no
-data is `'pending'` — it *will* fetch. A mutation with no data is `'idle'` —
-it's waiting for you.
+That `'idle'` state is the important difference from queries. A query with no data is `'pending'` — it _will_ fetch. A mutation with no data is `'idle'` — it's waiting for you.
 
 {% raw %}
 
@@ -71,13 +62,11 @@ it's waiting for you.
 
 {% endraw %}
 
-`variables()` gives you what was passed to the most recent `mutate()` — handy
-for showing *which* item is being saved.
+`variables()` gives you what was passed to the most recent `mutate()` — handy for showing _which_ item is being saved.
 
 ## Resetting
 
-The result of a mutation sticks around after it finishes. `reset()` puts it
-back to `'idle'`, clearing `data()` and `error()`:
+The result of a mutation sticks around after it finishes. `reset()` puts it back to `'idle'`, clearing `data()` and `error()`:
 
 {% raw %}
 
@@ -90,15 +79,9 @@ back to `'idle'`, clearing `data()` and `error()`:
 
 {% endraw %}
 
-Useful for clearing an error banner, or resetting a form after a successful
-save.
+Useful for clearing an error banner, or resetting a form after a successful save.
 
-`reset()` means *"forget the result"*, not *"stop the request"*. If a mutation
-is still in flight when you call it, the signals go back to `'idle'` but the
-write itself carries on and its hooks still fire. That's deliberate — the
-request has probably reached the server already, and aborting it wouldn't
-un-send the write, it would only stop the cache from finding out that it
-happened.
+`reset()` means _"forget the result"_, not _"stop the request"_. If a mutation is still in flight when you call it, the signals go back to `'idle'` but the write itself carries on and its hooks still fire. That's deliberate — the request has probably reached the server already, and aborting it wouldn't un-send the write, it would only stop the cache from finding out that it happened.
 
 ## Side effects
 
@@ -108,14 +91,10 @@ This is where mutations earn their keep. Four hooks fire in a fixed order:
 onMutate  →  mutationFn  →  onSuccess | onError  →  onSettled
 ```
 
-- **`onMutate(variables)`** — runs *before* the request. Whatever it returns
-  becomes the **context** passed to the later hooks. This is how optimistic
-  updates and rollbacks work. If it returns a promise, the request waits for
-  it, and the context is what it resolves to.
+- **`onMutate(variables)`** — runs _before_ the request. Whatever it returns becomes the **context** passed to the later hooks. This is how optimistic updates and rollbacks work. If it returns a promise, the request waits for it, and the context is what it resolves to.
 - **`onSuccess(data, variables, context)`** — the request succeeded.
 - **`onError(error, variables, context)`** — it failed.
-- **`onSettled(data, error, variables, context)`** — runs either way, for
-  cleanup.
+- **`onSettled(data, error, variables, context)`** — runs either way, for cleanup.
 
 The most common use is telling queries that their data is now out of date:
 
@@ -135,26 +114,15 @@ export class AddTodoComponent {
 }
 ```
 
-This hook starts the refetch and returns nothing, so the mutation finishes as
-the write lands. Return the promise `invalidateQueries` gives instead, and the
-mutation stays `'pending'` until the list is fresh; see
-[Invalidation from Mutations](/mutations/invalidation-from-mutations#waiting-for-the-fresh-data).
+This hook starts the refetch and returns nothing, so the mutation finishes as the write lands. Return the promise `invalidateQueries` gives instead, and the mutation stays `'pending'` until the list is fresh; see [Invalidation from Mutations](/mutations/invalidation-from-mutations#waiting-for-the-fresh-data).
 
-The `context` returned by `onMutate` is what makes rollbacks possible — snapshot
-the old data, restore it if the request fails. That's covered in Optimistic
-Updates.
+The `context` returned by `onMutate` is what makes rollbacks possible — snapshot the old data, restore it if the request fails. That's covered in Optimistic Updates.
 
-A hook every mutation needs, such as reporting failed writes, doesn't have to
-be repeated on each one: set it once in
-[Default Options](/query-client/default-options).
+A hook every mutation needs, such as reporting failed writes, doesn't have to be repeated on each one: set it once in [Default Options](/query-client/default-options).
 
 ## Awaiting a mutation: `mutateAsync`
 
-`mutate()` returns nothing: the outcome shows in the signals and the hooks.
-When the code right after the call needs it, closing a dialog once the save has
-gone through, say, call `mutateAsync()` instead. It runs the mutation the same
-way, and returns a promise that resolves with the data once the last hook is
-done, or rejects with the error:
+`mutate()` returns nothing: the outcome shows in the signals and the hooks. When the code right after the call needs it, closing a dialog once the save has gone through, say, call `mutateAsync()` instead. It runs the mutation the same way, and returns a promise that resolves with the data once the last hook is done, or rejects with the error:
 
 ```ts
 protected async save(title: string): Promise<void> {
@@ -167,15 +135,11 @@ protected async save(title: string): Promise<void> {
 }
 ```
 
-Catch what it rejects with. As with any `async` call, a rejection nobody
-handles surfaces as an unhandled rejection. `mutate()` never throws, which is
-why it's the one to call when nothing waits for the outcome.
+Catch what it rejects with. As with any `async` call, a rejection nobody handles surfaces as an unhandled rejection. `mutate()` never throws, which is why it's the one to call when nothing waits for the outcome.
 
 ## Mutations don't retry
 
-Queries retry three times [by default](/important-defaults). Mutations **don't
-retry at all**, and that's deliberate: a write isn't necessarily idempotent, and
-quietly re-sending a `POST` can create the same record twice.
+Queries retry three times [by default](/important-defaults). Mutations **don't retry at all**, and that's deliberate: a write isn't necessarily idempotent, and quietly re-sending a `POST` can create the same record twice.
 
 Opt in only when you know the operation is safe to repeat:
 
@@ -186,51 +150,22 @@ injectMutation(() => ({
 }))
 ```
 
-To turn retries on for every mutation, set `mutations: { retry }` in
-[Default Options](/query-client/default-options), but only if every write in
-your app is safe to repeat.
+To turn retries on for every mutation, set `mutations: { retry }` in [Default Options](/query-client/default-options), but only if every write in your app is safe to repeat.
 
 ## Things to know
 
 A few sharp edges, especially if you're arriving from TanStack Query.
 
-**No per-call callbacks.** `mutate(variables)` takes only the variables;
-you can't pass `{ onSuccess }` alongside them. All side effects live in the
-options, next to `mutationFn`.
+**No per-call callbacks.** `mutate(variables)` takes only the variables; you can't pass `{ onSuccess }` alongside them. All side effects live in the options, next to `mutationFn`.
 
-**Hooks can be async.** A hook that returns a promise holds up the next one:
-`onSettled` waits for an async `onSuccess`, and the mutation stays `'pending'`
-— and counted by `injectIsMutating` — until its last hook is done. Return a
-promise, not an Observable: an Observable a hook returns isn't subscribed, so
-`onSuccess: () => this.#http.post(…)` sends nothing. Wrap it in
-`firstValueFrom()`.
+**Hooks can be async.** A hook that returns a promise holds up the next one: `onSettled` waits for an async `onSuccess`, and the mutation stays `'pending'` — and counted by `injectIsMutating` — until its last hook is done. Return a promise, not an Observable: an Observable a hook returns isn't subscribed, so `onSuccess: () => this.#http.post(…)` sends nothing. Wrap it in `firstValueFrom()`.
 
-**A failing hook doesn't undo the write.** If `onSuccess` throws, the mutation
-still ends in `'success'`, because the write went through, `onSettled` still
-runs, and `mutateAsync()` resolves with the data; the same goes for `onError`
-and `onSettled`. The error isn't swallowed: it goes to your app's
-`ErrorHandler`, once, with zone.js or without, in the browser and during a
-server render, which still finishes. Only `onMutate` is different: if it
-fails, the request isn't sent and the mutation ends in `'error'`. (In TanStack
-Query, a failing `onSuccess` turns the mutation into an error.)
+**A failing hook doesn't undo the write.** If `onSuccess` throws, the mutation still ends in `'success'`, because the write went through, `onSettled` still runs, and `mutateAsync()` resolves with the data; the same goes for `onError` and `onSettled`. The error isn't swallowed: it goes to your app's `ErrorHandler`, once, with zone.js or without, in the browser and during a server render, which still finishes. Only `onMutate` is different: if it fails, the request isn't sent and the mutation ends in `'error'`. (In TanStack Query, a failing `onSuccess` turns the mutation into an error.)
 
-**Calls aren't serialized.** Each `mutate()` is its own independent run, so two
-of them can be in flight at once and there's no `scope` option to queue them.
-The signals always track the **latest** call — an earlier run landing later
-won't hijack `data()` — but both writes do reach the server, and both fire their
-hooks. If the operation isn't safe to run twice, guard the trigger:
+**Calls aren't serialized.** Each `mutate()` is its own independent run, so two of them can be in flight at once and there's no `scope` option to queue them. The signals always track the **latest** call — an earlier run landing later won't hijack `data()` — but both writes do reach the server, and both fire their hooks. If the operation isn't safe to run twice, guard the trigger:
 
 ```html
 <button (click)="add(title())" [disabled]="addTodo.isPending()">Add</button>
 ```
 
-**Destroying the component doesn't cancel the write.** A mutation that's already
-in flight runs to completion, and its `onSuccess` / `onError` / `onSettled` still
-fire. That's deliberate: the request has most likely reached the server already,
-so aborting it would only skip the cache update and leave the UI showing stale
-data for a write that actually happened. Emptying the cache with the client's
-[`clear()`](/query-client/cancellation-and-removal#clear--empty-the-cache)
-doesn't stop it either: the mutation is forgotten, but it lands and its hooks
-fire. A `mutate()` that comes after the component is gone, say from a timer or
-the next step of a promise chain, runs too: the write is sent and its hooks
-fire.
+**Destroying the component doesn't cancel the write.** A mutation that's already in flight runs to completion, and its `onSuccess` / `onError` / `onSettled` still fire. That's deliberate: the request has most likely reached the server already, so aborting it would only skip the cache update and leave the UI showing stale data for a write that actually happened. Emptying the cache with the client's [`clear()`](/query-client/cancellation-and-removal#clear--empty-the-cache) doesn't stop it either: the mutation is forgotten, but it lands and its hooks fire. A `mutate()` that comes after the component is gone, say from a timer or the next step of a promise chain, runs too: the write is sent and its hooks fire.

@@ -1,71 +1,39 @@
-**ngx-signal-query** is a data fetching, caching and mutation library for
-Angular, built on signals and RxJS. Your `queryFn` and `mutationFn` can return
-an `Observable` (hello, `HttpClient`) or a `Promise`, and the result is exposed
-as plain signals you can compose with everything else Angular gives you. The
-model (query keys, staleness, invalidation) follows
-[TanStack Query](https://tanstack.com/query).
+**ngx-signal-query** is a data fetching, caching and mutation library for Angular, built on signals and RxJS. Your `queryFn` and `mutationFn` can return an `Observable` (hello, `HttpClient`) or a `Promise`, and the result is exposed as plain signals you can compose with everything else Angular gives you. The model (query keys, staleness, invalidation) follows [TanStack Query](https://tanstack.com/query).
 
 ## The problem: server state is not client state
 
-Most state tooling is great at **client state** — the ephemeral, synchronous,
-fully-owned state that lives in your app. **Server state** is a different beast:
-it's remote, asynchronous, shared between components, and it goes stale the
-moment you fetch it.
+Most state tooling is great at **client state** — the ephemeral, synchronous, fully-owned state that lives in your app. **Server state** is a different beast: it's remote, asynchronous, shared between components, and it goes stale the moment you fetch it.
 
 Handling it well means solving a familiar list of hard problems:
 
 - **Caching** — arguably one of the hardest things in programming.
 - **Deduplication** — collapsing identical in-flight requests into one.
-- **Staleness & background updates** — knowing when data is old and refreshing
-  it without the user asking.
-- **Mutations** — updating server state and reconciling the cache, ideally
-  optimistically.
+- **Staleness & background updates** — knowing when data is old and refreshing it without the user asking.
+- **Mutations** — updating server state and reconciling the cache, ideally optimistically.
 - **Retries & polling** — surviving flaky networks and keeping data fresh.
 
-Angular 19.2 shipped [`httpResource`](https://angular.dev/api/common/http/httpResource),
-a signal-based way to fetch data. It's lovely for a single component — but the
-moment two components need the same data, the important pieces are missing:
-no shared cache, no deduplication, no cross-component invalidation, no mutation
-lifecycle, no retries, no `staleTime`. You're left hand-rolling a cache or
-reaching for a full query library.
+Angular 19.2 shipped [`httpResource`](https://angular.dev/api/common/http/httpResource), a signal-based way to fetch data. It's lovely for a single component — but the moment two components need the same data, the important pieces are missing: no shared cache, no deduplication, no cross-component invalidation, no mutation lifecycle, no retries, no `staleTime`. You're left hand-rolling a cache or reaching for a full query library.
 
 ## Why this library
 
-TanStack Query has an Angular adapter, and Angular ships `httpResource`. This
-library takes TanStack Query's model and builds it on Angular's own primitives:
+TanStack Query has an Angular adapter, and Angular ships `httpResource`. This library takes TanStack Query's model and builds it on Angular's own primitives:
 
-1. **Observables end to end.** A `queryFn` or `mutationFn` returns an
-   `Observable` as is, so `HttpClient` works without `lastValueFrom`. For a
-   query, unsubscribing is the cancellation: once nothing observes it (its key
-   changed, its component was destroyed) or you call `cancelQueries()`, the
-   HTTP request is aborted, with no `AbortSignal` plumbing.
+1. **Observables end to end.** A `queryFn` or `mutationFn` returns an `Observable` as is, so `HttpClient` works without `lastValueFrom`. For a query, unsubscribing is the cancellation: once nothing observes it (its key changed, its component was destroyed) or you call `cancelQueries()`, the HTTP request is aborted, with no `AbortSignal` plumbing.
 
-2. **Angular-native.** Signals for state, `provide*` functions and features for
-   configuration, and an injection context for default mutation hooks, so a
-   global `onError` can `inject()` what it needs.
+2. **Angular-native.** Signals for state, `provide*` functions and features for configuration, and an injection context for default mutation hooks, so a global `onError` can `inject()` what it needs.
 
-3. **Small, and kept honest.** [![bundle size][size-badge]][size-page]
-   Tree-shakable, with no runtime dependencies beyond `tslib`. Bug fixes ship
-   with a spec that fails without the fix, and releases follow semver, with a
-   `dev` channel for previews.
+3. **Small, and kept honest.** [![bundle size][size-badge]][size-page] Tree-shakable, with no runtime dependencies beyond `tslib`. Bug fixes ship with a spec that fails without the fix, and releases follow semver, with a `dev` channel for previews.
 
 [size-badge]: https://deno.bundlejs.com/badge?q=ngx-signal-query&config=%7B%22esbuild%22%3A%7B%22external%22%3A%5B%22%40angular/core%22%2C%22%40angular/common%22%2C%22rxjs%22%2C%22rxjs/operators%22%2C%22tslib%22%5D%7D%7D
 [size-page]: https://bundlejs.com/?q=ngx-signal-query&config=%7B%22esbuild%22%3A%7B%22external%22%3A%5B%22%40angular/core%22%2C%22%40angular/common%22%2C%22rxjs%22%2C%22rxjs/operators%22%2C%22tslib%22%5D%7D%7D
 
-It's deliberately focused. If you need infinite queries, devtools or
-persistence today, TanStack Query is the better pick. If you want Observables
-and Angular DI all the way through, with a surface you can read in full, this
-is for you.
+It's deliberately focused. If you need infinite queries, devtools or persistence today, TanStack Query is the better pick. If you want Observables and Angular DI all the way through, with a surface you can read in full, this is for you.
 
 > How it started: [TanStack Query-style caching, the Angular-native way](https://dev.to/dhutaryan/tanstack-query-style-caching-the-angular-native-way-4igc).
 
 ## Philosophy: signal-native by default
 
-Query state is exposed as **signals** — `data()`, `status()`, `isFetching()`,
-and friends. No manual subscriptions, no `async` pipe, no lifecycle plumbing.
-Because everything is a signal, it composes naturally with `computed`,
-`effect`, and `OnPush` change detection — it feels like a part of Angular
-rather than a bolt-on.
+Query state is exposed as **signals** — `data()`, `status()`, `isFetching()`, and friends. No manual subscriptions, no `async` pipe, no lifecycle plumbing. Because everything is a signal, it composes naturally with `computed`, `effect`, and `OnPush` change detection — it feels like a part of Angular rather than a bolt-on.
 
 ## At a glance
 
@@ -96,9 +64,7 @@ export const appConfig: ApplicationConfig = {
 }
 ```
 
-Describe your queries and mutations — note the `queryFn` returning an
-`Observable` straight from `HttpClient`, and the optimistic update in
-`onMutate`:
+Describe your queries and mutations — note the `queryFn` returning an `Observable` straight from `HttpClient`, and the optimistic update in `onMutate`:
 
 ```ts
 import { inject, Injectable } from '@angular/core'

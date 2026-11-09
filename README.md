@@ -1,16 +1,8 @@
 # ngx-signal-query
 
-[![npm version](https://img.shields.io/npm/v/ngx-signal-query.svg)](https://www.npmjs.com/package/ngx-signal-query)
-[![bundle size](https://deno.bundlejs.com/badge?q=ngx-signal-query&config=%7B%22esbuild%22%3A%7B%22external%22%3A%5B%22%40angular/core%22%2C%22%40angular/common%22%2C%22rxjs%22%2C%22rxjs/operators%22%2C%22tslib%22%5D%7D%7D)](https://bundlejs.com/?q=ngx-signal-query&config=%7B%22esbuild%22%3A%7B%22external%22%3A%5B%22%40angular/core%22%2C%22%40angular/common%22%2C%22rxjs%22%2C%22rxjs/operators%22%2C%22tslib%22%5D%7D%7D)
-[![license](https://img.shields.io/npm/l/ngx-signal-query.svg)](./LICENSE)
-[![docs](https://img.shields.io/badge/docs-ngx--signal--query-blue)](https://dhutaryan.github.io/ngx-signal-query/)
+[![npm version](https://img.shields.io/npm/v/ngx-signal-query.svg)](https://www.npmjs.com/package/ngx-signal-query) [![bundle size](https://deno.bundlejs.com/badge?q=ngx-signal-query&config=%7B%22esbuild%22%3A%7B%22external%22%3A%5B%22%40angular/core%22%2C%22%40angular/common%22%2C%22rxjs%22%2C%22rxjs/operators%22%2C%22tslib%22%5D%7D%7D)](https://bundlejs.com/?q=ngx-signal-query&config=%7B%22esbuild%22%3A%7B%22external%22%3A%5B%22%40angular/core%22%2C%22%40angular/common%22%2C%22rxjs%22%2C%22rxjs/operators%22%2C%22tslib%22%5D%7D%7D) [![license](https://img.shields.io/npm/l/ngx-signal-query.svg)](./LICENSE) [![docs](https://img.shields.io/badge/docs-ngx--signal--query-blue)](https://dhutaryan.github.io/ngx-signal-query/)
 
-A data fetching, caching and mutation library for Angular, built on signals and
-RxJS. Queries and mutations take an `Observable` as is, so `HttpClient` works
-without `lastValueFrom`, and when no component needs a query any more, its
-`HttpClient` request is cancelled. The model (query keys, staleness,
-invalidation) follows [TanStack Query](https://tanstack.com/query), so what you
-know from it carries over.
+A data fetching, caching and mutation library for Angular, built on signals and RxJS. Queries and mutations take an `Observable` as is, so `HttpClient` works without `lastValueFrom`, and when no component needs a query any more, its `HttpClient` request is cancelled. The model (query keys, staleness, invalidation) follows [TanStack Query](https://tanstack.com/query), so what you know from it carries over.
 
 ## Why this one
 
@@ -33,8 +25,7 @@ know from it carries over.
 
 ## Not here (yet)
 
-Infinite queries, devtools and persistence. If you need them today, TanStack
-Query has them.
+Infinite queries, devtools and persistence. If you need them today, TanStack Query has them.
 
 ## Installation
 
@@ -42,8 +33,7 @@ Query has them.
 npm install ngx-signal-query
 ```
 
-Requires **Angular 19+** and **RxJS 7.4+** (peer dependencies `@angular/core`,
-`@angular/common` and `rxjs`).
+Requires **Angular 19+** and **RxJS 7.4+** (peer dependencies `@angular/core`, `@angular/common` and `rxjs`).
 
 ## Quick start
 
@@ -97,8 +87,7 @@ export class TodosComponent {
 
 ### 3. Mutate and reconcile the cache
 
-`injectMutation` works the same way: call `mutate()`, read `isPending()` /
-`status()` as signals, and invalidate affected queries once it succeeds.
+`injectMutation` works the same way: call `mutate()`, read `isPending()` / `status()` as signals, and invalidate affected queries once it succeeds.
 
 ```ts
 import { Component, inject } from '@angular/core'

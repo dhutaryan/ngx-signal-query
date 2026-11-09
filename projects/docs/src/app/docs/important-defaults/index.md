@@ -1,134 +1,73 @@
-Out of the box, a query refetches often, keeps its data for a while after it
-leaves the screen, and retries a failure before it shows an error. These
-defaults suit most apps, but each of them surprises someone sooner or later,
-so here they are in one place, with what each means in practice. To change one
-for the whole app, see [Default Options](/query-client/default-options).
+Out of the box, a query refetches often, keeps its data for a while after it leaves the screen, and retries a failure before it shows an error. These defaults suit most apps, but each of them surprises someone sooner or later, so here they are in one place, with what each means in practice. To change one for the whole app, see [Default Options](/query-client/default-options).
 
 ## Cached data is stale at once
 
-`staleTime` is `0`, so data counts as stale as soon as it arrives. A stale
-query refetches in the background whenever:
+`staleTime` is `0`, so data counts as stale as soon as it arrives. A stale query refetches in the background whenever:
 
 - a component starts showing its key, even if another one already does;
 - a reactive key switches to a key that's already in the cache;
 - `enabled` turns `true`;
-- the user comes back to the tab, or the network comes back; see
-  [Refetching on Focus and Reconnect](/queries/focus-and-reconnect).
+- the user comes back to the tab, or the network comes back; see [Refetching on Focus and Reconnect](/queries/focus-and-reconnect).
 
-The cached data stays on screen while it refetches: `isFetching()` is `true`,
-`isLoading()` isn't.
+The cached data stays on screen while it refetches: `isFetching()` is `true`, `isLoading()` isn't.
 
-Going stale doesn't refetch anything by itself: a query that stays on screen
-refetches only when one of the above happens, `refetch()` is called or the
-query is invalidated.
+Going stale doesn't refetch anything by itself: a query that stays on screen refetches only when one of the above happens, `refetch()` is called or the query is invalidated.
 
-`initialData` counts as fetched just now, so a seeded query refetches at once
-too; see [Initial Data](/queries/initial-data).
+`initialData` counts as fetched just now, so a seeded query refetches at once too; see [Initial Data](/queries/initial-data).
 
 To fetch less, raise `staleTime`. See [Caching](/query-client/caching).
 
 ## Unused data is kept for 5 minutes
 
-When the last component showing a query is gone, the query stays in the cache
-for 5 minutes (`gcTime`). Coming back within that time shows its data at once,
-then refetches it if it's stale. Once the 5 minutes are up, the query is
-removed, and the next visit loads it from scratch. The clock only runs while
-nothing uses the query: no component shows it, and no fetch of it is running.
+When the last component showing a query is gone, the query stays in the cache for 5 minutes (`gcTime`). Coming back within that time shows its data at once, then refetches it if it's stale. Once the 5 minutes are up, the query is removed, and the next visit loads it from scratch. The clock only runs while nothing uses the query: no component shows it, and no fetch of it is running.
 
-Data you prefetch with `fetchQuery` or write with `setQueryData` for a key no
-component shows gets the same 5 minutes, counted from the fetch landing or from
-the last write. See [Caching](/query-client/caching).
+Data you prefetch with `fetchQuery` or write with `setQueryData` for a key no component shows gets the same 5 minutes, counted from the fetch landing or from the last write. See [Caching](/query-client/caching).
 
 ## Failed queries retry 3 times
 
-A failed query retries 3 times (`retry`), so `queryFn` runs 4 times in all. It
-waits 1 s, 2 s and 4 s before the retries (`retryDelay`): the wait doubles each
-time, up to 30 s. The error shows only after the last attempt, at least 7 s
-after the first failure. Until then, `failureCount()` and `failureReason()`
-show how it's going. See [Query Retries](/queries/query-retries).
+A failed query retries 3 times (`retry`), so `queryFn` runs 4 times in all. It waits 1 s, 2 s and 4 s before the retries (`retryDelay`): the wait doubles each time, up to 30 s. The error shows only after the last attempt, at least 7 s after the first failure. Until then, `failureCount()` and `failureReason()` show how it's going. See [Query Retries](/queries/query-retries).
 
-`fetchQuery` is the exception: it doesn't retry unless you ask, since whoever
-waits for its promise should hear of a failure at once. See
-[Manual Cache Updates](/query-client/manual-cache-updates#waiting-for-the-data).
+`fetchQuery` is the exception: it doesn't retry unless you ask, since whoever waits for its promise should hear of a failure at once. See [Manual Cache Updates](/query-client/manual-cache-updates#waiting-for-the-data).
 
-In tests, turn retries off, or a test of an error state waits through all of
-them; see [Testing](/testing).
+In tests, turn retries off, or a test of an error state waits through all of them; see [Testing](/testing).
 
 ## Mutations don't retry
 
-A failed mutation goes to `'error'` at once, because a write isn't always safe
-to send twice. Turn retries on only for writes that can be repeated: per
-mutation, or for all of them in
-[Default Options](/query-client/default-options). See
-[Mutations](/mutations/overview).
+A failed mutation goes to `'error'` at once, because a write isn't always safe to send twice. Turn retries on only for writes that can be repeated: per mutation, or for all of them in [Default Options](/query-client/default-options). See [Mutations](/mutations/overview).
 
 ## Unchanged data keeps its reference
 
-`structuralSharing` is on. A refetch that brings the same data leaves `data()`
-as it was, so nothing that reads it runs again, and when only part of the data
-changed, the rest keeps its references. Only plain objects and arrays are
-compared: a `Date`, a `Map` or a class instance counts as changed on every
-response. For a large response refetched often, turn it off. See
-[Structural Sharing](/queries/structural-sharing).
+`structuralSharing` is on. A refetch that brings the same data leaves `data()` as it was, so nothing that reads it runs again, and when only part of the data changed, the rest keeps its references. Only plain objects and arrays are compared: a `Date`, a `Map` or a class instance counts as changed on every response. For a large response refetched often, turn it off. See [Structural Sharing](/queries/structural-sharing).
 
 ## No polling unless you ask
 
-A query polls only when you set `refetchInterval`, and polling ignores
-`staleTime`: fresh data is polled all the same. It doesn't poll while the tab
-is hidden, unless you set `refetchIntervalInBackground`. See
-[Polling](/queries/polling).
+A query polls only when you set `refetchInterval`, and polling ignores `staleTime`: fresh data is polled all the same. It doesn't poll while the tab is hidden, unless you set `refetchIntervalInBackground`. See [Polling](/queries/polling).
 
 ## Angular waits for fetches and mutations
 
-While a query fetches or a mutation runs, Angular counts the app as busy, so a
-server render waits before it sends the page, and `whenStable()` waits in a
-test. It doesn't matter what `queryFn` or `mutationFn` sends the request with:
-`HttpClient`, `fetch()` or anything that returns a promise. A fetch keeps the
-app busy until its data or error is in the query, the waits between retries
-included; a mutation, until its last hook is done.
+While a query fetches or a mutation runs, Angular counts the app as busy, so a server render waits before it sends the page, and `whenStable()` waits in a test. It doesn't matter what `queryFn` or `mutationFn` sends the request with: `HttpClient`, `fetch()` or anything that returns a promise. A fetch keeps the app busy until its data or error is in the query, the waits between retries included; a mutation, until its last hook is done.
 
-That goes for work no component shows too: a prefetch with `fetchQuery`, a
-promise fetch that runs on after its component is gone, a mutation whose
-component is gone. For tests, see [Testing](/testing#waiting-with-whenstable).
+That goes for work no component shows too: a prefetch with `fetchQuery`, a promise fetch that runs on after its component is gone, a mutation whose component is gone. For tests, see [Testing](/testing#waiting-with-whenstable).
 
-Nothing else keeps the app busy, with zone.js or without: a query waiting out
-its `gcTime`, and the time between polls, leave it stable. With zone.js,
-`queryFn` and `mutationFn` run outside Angular's zone, as `HttpClient` sends
-its requests, so a timer they start doesn't hold the app up either. See
-[Query Functions](/queries/query-functions#with-zonejs).
+Nothing else keeps the app busy, with zone.js or without: a query waiting out its `gcTime`, and the time between polls, leave it stable. With zone.js, `queryFn` and `mutationFn` run outside Angular's zone, as `HttpClient` sends its requests, so a timer they start doesn't hold the app up either. See [Query Functions](/queries/query-functions#with-zonejs).
 
 ## On the server
 
-When a page is rendered on the server, a query skips what only makes sense in
-the browser:
+When a page is rendered on the server, a query skips what only makes sense in the browser:
 
-- **It doesn't poll.** `refetchInterval` is ignored: the page shows one fetch,
-  and polling starts once the browser takes over.
-- **It doesn't retry unless you ask.** A failed query shows its error at once
-  rather than holding up the page, and the browser tries again once it takes
-  over. A `retry` you set on the query or in
-  [Default Options](/query-client/default-options) still applies, and the page
-  waits for it.
-- **It isn't removed from the cache**, whatever its `gcTime`: the cache lives
-  as long as the app that renders the request.
-- **It doesn't refetch on focus or reconnect.** There's no tab to come back to
-  and no network to lose.
+- **It doesn't poll.** `refetchInterval` is ignored: the page shows one fetch, and polling starts once the browser takes over.
+- **It doesn't retry unless you ask.** A failed query shows its error at once rather than holding up the page, and the browser tries again once it takes over. A `retry` you set on the query or in [Default Options](/query-client/default-options) still applies, and the page waits for it.
+- **It isn't removed from the cache**, whatever its `gcTime`: the cache lives as long as the app that renders the request.
+- **It doesn't refetch on focus or reconnect.** There's no tab to come back to and no network to lose.
 
-The page itself waits for every fetch and mutation in flight, with zone.js or
-without, so a request that hangs holds it up: give a slow API a timeout.
+The page itself waits for every fetch and mutation in flight, with zone.js or without, so a request that hangs holds it up: give a slow API a timeout.
 
-The browser then starts with an empty cache and fetches every query again,
-unless the page brings the data along: see
-[Server Rendering](/server-rendering).
+The browser then starts with an empty cache and fetches every query again, unless the page brings the data along: see [Server Rendering](/server-rendering).
 
 ## Not automatic
 
 One thing doesn't happen on its own:
 
-- **Pausing a fetch while offline or in a background tab.** A query without a
-  connection fails and goes through its retries, and a failing query goes on
-  retrying while the tab is hidden; see
-  [Disabling Queries](/queries/disabling-queries#there-is-no-pausing).
+- **Pausing a fetch while offline or in a background tab.** A query without a connection fails and goes through its retries, and a failing query goes on retrying while the tab is hidden; see [Disabling Queries](/queries/disabling-queries#there-is-no-pausing).
 
-TanStack Query does this by default, so if you're coming from it, this is the
-one to watch for.
+TanStack Query does this by default, so if you're coming from it, this is the one to watch for.

@@ -1,8 +1,4 @@
-Every response is a new object: JSON parsing makes one each time, even when the
-server sends exactly what it sent before. So a query compares each response
-with the data it already holds and keeps everything that didn't change. When
-nothing did, `data()` keeps its reference, and nothing that reads it runs
-again: no `computed` recomputes, no `effect` re-runs, no template updates.
+Every response is a new object: JSON parsing makes one each time, even when the server sends exactly what it sent before. So a query compares each response with the data it already holds and keeps everything that didn't change. When nothing did, `data()` keeps its reference, and nothing that reads it runs again: no `computed` recomputes, no `effect` re-runs, no template updates.
 
 It's on by default, there's nothing to set up.
 
@@ -35,13 +31,9 @@ export class TodoEditorComponent {
 }
 ```
 
-The user starts typing a new title, and a poll brings the same todo. As a new
-object, it would run the effect again and reset the field while the user
-types. As it is, `data()` doesn't change, so the effect runs only when the todo
-really changes on the server.
+The user starts typing a new title, and a poll brings the same todo. As a new object, it would run the effect again and reset the field while the user types. As it is, `data()` doesn't change, so the effect runs only when the todo really changes on the server.
 
-When only part of the data changes, the rest keeps its references. Refetch a
-list where one row changed, and every other row is the same object as before:
+When only part of the data changes, the rest keeps its references. Refetch a list where one row changed, and every other row is the same object as before:
 
 <!-- prettier-ignore -->
 ```html
@@ -50,23 +42,15 @@ list where one row changed, and every other row is the same object as before:
 }
 ```
 
-Only the row that changed is a new object, so only its `<app-todo-row>` gets a
-new input.
+Only the row that changed is a new object, so only its `<app-todo-row>` gets a new input.
 
 ## What it compares
 
-Plain objects and arrays, the kind JSON parsing makes, value by value. Anything
-else counts as changed on every response: a `Date`, a `Map`, an instance of a
-class, say a `queryFn` that turns each row into `new Todo(...)`. What's around
-such a value is still shared: a row with a `Date` field is a new object every
-time, but the arrays and objects inside it that didn't change keep their
-references.
+Plain objects and arrays, the kind JSON parsing makes, value by value. Anything else counts as changed on every response: a `Date`, a `Map`, an instance of a class, say a `queryFn` that turns each row into `new Todo(...)`. What's around such a value is still shared: a row with a `Date` field is a new object every time, but the arrays and objects inside it that didn't change keep their references.
 
 ## Turning it off, or merging your own way
 
-Comparing walks through the whole response, which takes longer than parsing
-it. Most responses are too small for that to matter. For a large one refetched
-often, turn it off:
+Comparing walks through the whole response, which takes longer than parsing it. Most responses are too small for that to matter. For a large one refetched often, turn it off:
 
 ```ts
 injectQuery(() => ({
@@ -77,29 +61,18 @@ injectQuery(() => ({
 }))
 ```
 
-To turn it off for every query, set it in
-[`withDefaultOptions`](/query-client/default-options).
+To turn it off for every query, set it in [`withDefaultOptions`](/query-client/default-options).
 
-You can also pass a function that merges the data your own way. Say your
-responses carry dates, and you have a deep comparison that understands them:
+You can also pass a function that merges the data your own way. Say your responses carry dates, and you have a deep comparison that understands them:
 
 ```ts
 structuralSharing: (oldData, newData) =>
   oldData !== undefined && isDeepEqual(oldData, newData) ? oldData : newData,
 ```
 
-It gets the data the query holds, `undefined` before the first response, and
-the new data, and returns what to store. It runs for every response and for
-every `setQueryData` write to the key, but not for `initialData`. So it has to
-merge, not pick: a function that returns `oldData` whenever, say, a `version`
-field matches also throws away an optimistic update that leaves the version as
-it was. If it throws, the fetch fails with its error and the query keeps its
-data, and `setQueryData` throws to its caller.
+It gets the data the query holds, `undefined` before the first response, and the new data, and returns what to store. It runs for every response and for every `setQueryData` write to the key, but not for `initialData`. So it has to merge, not pick: a function that returns `oldData` whenever, say, a `version` field matches also throws away an optimistic update that leaves the version as it was. If it throws, the fetch fails with its error and the query keeps its data, and `setQueryData` throws to its caller.
 
-The function merges data of the type `queryFn` gives, so one typed with
-`unknown` doesn't fit a query. To share one between queries and
-[`withDefaultOptions`](/query-client/default-options), where the data has no
-type, make it generic:
+The function merges data of the type `queryFn` gives, so one typed with `unknown` doesn't fit a query. To share one between queries and [`withDefaultOptions`](/query-client/default-options), where the data has no type, make it generic:
 
 ```ts
 function shareDates<T>(oldData: T | undefined, newData: T): T {
@@ -111,16 +84,8 @@ function shareDates<T>(oldData: T | undefined, newData: T): T {
 
 ## setQueryData
 
-[`setQueryData`](/query-client/manual-cache-updates) merges what it writes the
-same way. Writing what the cache already holds, say a save whose response
-repeats the cached todo, changes nothing, and nothing re-runs. A write that
-changes part of the data keeps the rest, so what lands in the cache can be a
-new object built from the one you passed, not that object itself.
+[`setQueryData`](/query-client/manual-cache-updates) merges what it writes the same way. Writing what the cache already holds, say a save whose response repeats the cached todo, changes nothing, and nothing re-runs. A write that changes part of the data keeps the rest, so what lands in the cache can be a new object built from the one you passed, not that object itself.
 
-It has no options of its own. It merges as the component showing the key asks,
-enabled or not. With none showing it, it merges the way the data in the cache
-was fetched, and a key nothing has fetched yet gets the app-wide default.
+It has no options of its own. It merges as the component showing the key asks, enabled or not. With none showing it, it merges the way the data in the cache was fetched, and a key nothing has fetched yet gets the app-wide default.
 
-> This works like structural sharing in TanStack Query: on by default and
-> comparing the same way. Here the function's parameters are typed from
-> `queryFn`.
+> This works like structural sharing in TanStack Query: on by default and comparing the same way. Here the function's parameters are typed from `queryFn`.

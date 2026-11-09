@@ -1,7 +1,4 @@
-Sometimes you already have the data before the query runs — it came from the
-server render, from a parent list, from `localStorage`. `initialData` lets you
-seed the cache with it so the query renders as `'success'` straight away, with
-no loading state.
+Sometimes you already have the data before the query runs — it came from the server render, from a parent list, from `localStorage`. `initialData` lets you seed the cache with it so the query renders as `'success'` straight away, with no loading state.
 
 ## The basics
 
@@ -13,38 +10,27 @@ protected readonly todos = injectQuery(() => ({
 }))
 ```
 
-The query never shows `'pending'`. `data()` is populated from the first render,
-`status()` is `'success'`.
+The query never shows `'pending'`. `data()` is populated from the first render, `status()` is `'success'`.
 
-Crucially, **`initialData` is written into the cache**. It's not a temporary
-placeholder — it becomes the real cached value for that key, and other
-components reading the same key will see it.
+Crucially, **`initialData` is written into the cache**. It's not a temporary placeholder — it becomes the real cached value for that key, and other components reading the same key will see it.
 
 ## A value or a function
 
-If computing the data is expensive, pass a function. It's only called when the
-query has no data to show — a new query, or one whose fetch failed before it
-got any. A query that already has data in the cache won't call it at all:
+If computing the data is expensive, pass a function. It's only called when the query has no data to show — a new query, or one whose fetch failed before it got any. A query that already has data in the cache won't call it at all:
 
 ```ts
 initialData: () => JSON.parse(localStorage.getItem('todos') ?? '[]') as Todo[]
 ```
 
-The cast matters: `JSON.parse` returns `any`, and a seed typed `any` makes
-`data()` `any` too.
+The cast matters: `JSON.parse` returns `any`, and a seed typed `any` makes `data()` `any` too.
 
 ## It refetches immediately (by default)
 
-This surprises people. Seed a query and it *still* fires a request straight
-away.
+This surprises people. Seed a query and it _still_ fires a request straight away.
 
-There's no trick to it: the seed is treated as data fetched **right now**, and
-the [default](/important-defaults) `staleTime` is `0` — meaning "stale
-immediately". So a background refetch kicks off at once, while the seeded data
-is on screen.
+There's no trick to it: the seed is treated as data fetched **right now**, and the [default](/important-defaults) `staleTime` is `0` — meaning "stale immediately". So a background refetch kicks off at once, while the seeded data is on screen.
 
-That's usually what you want: show something instantly, quietly replace it with
-fresh data.
+That's usually what you want: show something instantly, quietly replace it with fresh data.
 
 To stop it, say how long the seed stays good with `staleTime`:
 
@@ -59,9 +45,7 @@ injectQuery(() => ({
 
 ## When the seed isn't new
 
-`staleTime` alone assumes the seed is fresh as of now. Often it isn't — it came
-from a server render a few seconds ago, or from `localStorage` last week. Say so
-with `initialDataUpdatedAt`:
+`staleTime` alone assumes the seed is fresh as of now. Often it isn't — it came from a server render a few seconds ago, or from `localStorage` last week. Say so with `initialDataUpdatedAt`:
 
 ```ts
 initialData: todosFromLocalStorage,
@@ -69,16 +53,13 @@ initialDataUpdatedAt: Number(localStorage.getItem('todos:at')),
 staleTime: 60_000,
 ```
 
-Now the query does the arithmetic properly: if that timestamp is older than a
-minute, it refetches; if not, it doesn't.
+Now the query does the arithmetic properly: if that timestamp is older than a minute, it refetches; if not, it doesn't.
 
-The two options are a pair — `initialDataUpdatedAt` says *when* the data is
-from, `staleTime` says *how long* that stays good.
+The two options are a pair — `initialDataUpdatedAt` says _when_ the data is from, `staleTime` says _how long_ that stays good.
 
 ## Seeding from another query
 
-The classic case: you have a list, the user clicks a row, and the detail page
-starts from scratch — even though you already have most of that todo.
+The classic case: you have a list, the user clicks a row, and the detail page starts from scratch — even though you already have most of that todo.
 
 Pull it out of the cache instead:
 
@@ -100,27 +81,17 @@ export class TodoDetailComponent {
 }
 ```
 
-The detail view renders instantly from the list's data, then refetches in the
-background to fill in whatever the list row didn't have. If the list isn't
-cached, or has no such row, `find` returns `undefined`: nothing is seeded, and
-the query starts `'pending'` as usual.
+The detail view renders instantly from the list's data, then refetches in the background to fill in whatever the list row didn't have. If the list isn't cached, or has no such row, `find` returns `undefined`: nothing is seeded, and the query starts `'pending'` as usual.
 
-This works with a reactive key too: the seed function runs again for each new
-id, so navigating between todos keeps seeding from the list.
+This works with a reactive key too: the seed function runs again for each new id, so navigating between todos keeps seeding from the list.
 
-A detail whose request failed before it had any data is seeded the same way.
-Say the user opened it while offline, before the list loaded: opened again once
-the list has the row, it shows the row right away and tries the request again
-in the background.
+A detail whose request failed before it had any data is seeded the same way. Say the user opened it while offline, before the list loaded: opened again once the list has the row, it shows the row right away and tries the request again in the background.
 
 ## Seeding with the right timestamp
 
-The version above treats the seed as brand new, which isn't true — that row is
-as old as the list it came from. If you add a `staleTime`, the detail query
-would trust the seed for the full duration, even if the list was fetched an hour
-ago.
+The version above treats the seed as brand new, which isn't true — that row is as old as the list it came from. If you add a `staleTime`, the detail query would trust the seed for the full duration, even if the list was fetched an hour ago.
 
-You *know* how old the data is. Use it:
+You _know_ how old the data is. Use it:
 
 ```ts
 initialData: () =>
@@ -132,18 +103,13 @@ initialDataUpdatedAt: () =>
   this.#client.getQueryCache().get(['todos', 'list'])?.state().updatedAt ?? 0,
 ```
 
-Now the detail query only refetches if the list data was itself stale. If the
-list was fetched two seconds ago and `staleTime` is a minute, no request is
-made at all.
+Now the detail query only refetches if the list data was itself stale. If the list was fetched two seconds ago and `staleTime` is a minute, no request is made at all.
 
-> There's no `getQueryState()` shorthand yet, so reading another query's
-> `updatedAt` means going through the cache:
-> `client.getQueryCache().get(key)?.state().updatedAt`.
+> There's no `getQueryState()` shorthand yet, so reading another query's `updatedAt` means going through the cache: `client.getQueryCache().get(key)?.state().updatedAt`.
 
 ## Only seed if the source is fresh enough
 
-Sometimes stale is worse than empty — you'd rather show a spinner than a price
-from an hour ago. Check the age before deciding:
+Sometimes stale is worse than empty — you'd rather show a spinner than a price from an hour ago. Check the age before deciding:
 
 ```ts
 initialData: () => {
@@ -159,22 +125,15 @@ initialData: () => {
 }
 ```
 
-Returning `undefined` means "no initial data" — the query starts `'pending'` as
-normal.
+Returning `undefined` means "no initial data" — the query starts `'pending'` as normal.
 
 ## Don't use it for partial data
 
-Worth repeating, because it's the one real trap here: **`initialData` goes into
-the cache.**
+Worth repeating, because it's the one real trap here: **`initialData` goes into the cache.**
 
-So it must be *real* data — complete, and correct for that key. If you seed a
-detail query with a half-populated row from a list, that half-populated object
-is now the cached value for that key. Anything else reading it gets the partial
-version, and a mutation writing to that key merges into it.
+So it must be _real_ data — complete, and correct for that key. If you seed a detail query with a half-populated row from a list, that half-populated object is now the cached value for that key. Anything else reading it gets the partial version, and a mutation writing to that key merges into it.
 
-For "show this while we load the real thing" there's a separate mechanism —
-[`placeholderData`](/queries/placeholder-data), which shows data **without**
-writing it to the cache:
+For "show this while we load the real thing" there's a separate mechanism — [`placeholderData`](/queries/placeholder-data), which shows data **without** writing it to the cache:
 
 - Data you'd be happy to keep? `initialData`.
 - Data that's just a stand-in? `placeholderData`.

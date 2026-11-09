@@ -10,6 +10,13 @@
       "options": {
         "parser": "angular"
       }
+    },
+    {
+      "files": "*.md",
+      "options": {
+        "proseWrap": "never",
+        "embeddedLanguageFormatting": "off"
+      }
     }
   ]
 }

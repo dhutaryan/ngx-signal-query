@@ -12,9 +12,7 @@ pnpm add ngx-signal-query
 yarn add ngx-signal-query
 ```
 
-Requires **Angular 19+** and **RxJS 7.4+** — `@angular/core`, `@angular/common`
-and `rxjs` are peer dependencies, and an Angular project already has all three.
-There are no other runtime dependencies beyond `tslib`.
+Requires **Angular 19+** and **RxJS 7.4+** — `@angular/core`, `@angular/common` and `rxjs` are peer dependencies, and an Angular project already has all three. There are no other runtime dependencies beyond `tslib`.
 
 ## 1. Provide the query client
 
@@ -33,9 +31,7 @@ export const appConfig: ApplicationConfig = {
 
 ## 2. Fetch data in a component
 
-`injectQuery` returns signals — read them straight from the template, no
-subscriptions required. The `queryFn` can return an `Observable`, so
-`HttpClient` works as-is:
+`injectQuery` returns signals — read them straight from the template, no subscriptions required. The `queryFn` can return an `Observable`, so `HttpClient` works as-is:
 
 {% raw %}
 
@@ -76,9 +72,7 @@ export class TodosComponent {
 
 ## 3. Mutate and reconcile the cache
 
-`injectMutation` works the same way. Call `mutate()` to run it, read
-`isPending()` / `status()` as signals, and use `injectQueryClient()` to
-invalidate affected queries once it succeeds:
+`injectMutation` works the same way. Call `mutate()` to run it, read `isPending()` / `status()` as signals, and use `injectQueryClient()` to invalidate affected queries once it succeeds:
 
 {% raw %}
 
@@ -117,5 +111,4 @@ export class AddTodoComponent {
 
 {% endraw %}
 
-That's it — you're ready to go. Next, [Important Defaults](/important-defaults)
-sums up what queries and mutations do out of the box.
+That's it — you're ready to go. Next, [Important Defaults](/important-defaults) sums up what queries and mutations do out of the box.

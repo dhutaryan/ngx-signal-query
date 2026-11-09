@@ -1,6 +1,4 @@
-`refetchInterval` makes a query refetch on a timer. It's for data that changes
-on the server while the user is looking at it: prices, a job's progress, an
-unread count.
+`refetchInterval` makes a query refetch on a timer. It's for data that changes on the server while the user is looking at it: prices, a job's progress, an unread count.
 
 ```ts
 export class PricesComponent {
@@ -14,52 +12,29 @@ export class PricesComponent {
 }
 ```
 
-Polling ignores `staleTime`: fresh data is polled all the same. It runs as long
-as the query is observed and enabled, and waits while the tab is hidden. It
-stops when the component that injected the query is destroyed, and a
-[disabled query](/queries/disabling-queries) doesn't poll.
+Polling ignores `staleTime`: fresh data is polled all the same. It runs as long as the query is observed and enabled, and waits while the tab is hidden. It stops when the component that injected the query is destroyed, and a [disabled query](/queries/disabling-queries) doesn't poll.
 
-Nor does a query on the server: the page shows one fetch, and polling starts
-once the browser takes over. See
-[Important Defaults](/important-defaults#on-the-server).
+Nor does a query on the server: the page shows one fetch, and polling starts once the browser takes over. See [Important Defaults](/important-defaults#on-the-server).
 
-A poll that brings the same data as before doesn't change `data()`: the query
-keeps what it holds, so nothing that reads it runs again. See
-[Structural Sharing](/queries/structural-sharing).
+A poll that brings the same data as before doesn't change `data()`: the query keeps what it holds, so nothing that reads it runs again. See [Structural Sharing](/queries/structural-sharing).
 
 ## When the next poll comes
 
-Each poll comes `refetchInterval` ms **after the query's last update**: its
-last response, or a write with `setQueryData`. With a 5 s interval and requests
-that take 300 ms, a request goes out every 5.3 s.
+Each poll comes `refetchInterval` ms **after the query's last update**: its last response, or a write with `setQueryData`. With a 5 s interval and requests that take 300 ms, a request goes out every 5.3 s.
 
-So anything else that updates the query pushes the next poll back. If a
-`refetch()`, an invalidation or the user coming back to the tab brings new data
-4 s into the interval, or `setQueryData` writes some, the next poll comes 5 s
-after that, not a second later.
+So anything else that updates the query pushes the next poll back. If a `refetch()`, an invalidation or the user coming back to the tab brings new data 4 s into the interval, or `setQueryData` writes some, the next poll comes 5 s after that, not a second later.
 
-The same goes for several components polling one key. A poll from one of them
-is an update for all of them, so together they fetch the key once per
-interval. If they ask for different intervals, the shortest sets the pace, and
-when that component stops polling, the next shortest takes over.
+The same goes for several components polling one key. A poll from one of them is an update for all of them, so together they fetch the key once per interval. If they ask for different intervals, the shortest sets the pace, and when that component stops polling, the next shortest takes over.
 
-And a poll that comes due while a request is still in flight joins that
-request instead of sending another, so a slow request doesn't pile up
-duplicates behind it.
+And a poll that comes due while a request is still in flight joins that request instead of sending another, so a slow request doesn't pile up duplicates behind it.
 
 ## In a background tab
 
-While the page is hidden, because the user is on another tab or has minimized
-the window, the query doesn't poll: nobody would see the data.
+While the page is hidden, because the user is on another tab or has minimized the window, the query doesn't poll: nobody would see the data.
 
-Coming back brings the data up to date. If it's stale, the query refetches at
-once, as on [any return to the page](/queries/focus-and-reconnect), and the
-next poll comes an interval after that response. If it isn't, or
-`refetchOnWindowFocus` is off, the poll that comes due next goes out, at most
-one interval after the return.
+Coming back brings the data up to date. If it's stale, the query refetches at once, as on [any return to the page](/queries/focus-and-reconnect), and the next poll comes an interval after that response. If it isn't, or `refetchOnWindowFocus` is off, the poll that comes due next goes out, at most one interval after the return.
 
-For data that has to stay current while the user is away, such as an unread
-count in the tab's title, keep polling with `refetchIntervalInBackground`:
+For data that has to stay current while the user is away, such as an unread count in the tab's title, keep polling with `refetchIntervalInBackground`:
 
 ```ts
 export class InboxComponent {
@@ -74,30 +49,23 @@ export class InboxComponent {
 }
 ```
 
-Or for every query, in [Default Options](/query-client/default-options).
-Browsers slow timers down in a background tab, so polls there can come less
-often than the interval says.
+Or for every query, in [Default Options](/query-client/default-options). Browsers slow timers down in a background tab, so polls there can come less often than the interval says.
 
-Only polls wait. A component that starts showing a query in a hidden page still
-loads it, and `refetch()` and invalidation still refetch it.
+Only polls wait. A component that starts showing a query in a hidden page still loads it, and `refetch()` and invalidation still refetch it.
 
 ## What restarts the timer
 
-The options are re-evaluated whenever a signal they read changes. The timer
-restarts only when one of these changes:
+The options are re-evaluated whenever a signal they read changes. The timer restarts only when one of these changes:
 
 - the **query key**: polling moves on to the new key's query;
 - **`enabled`**: disabling stops polling, enabling starts the timer afresh;
 - the **interval** itself.
 
-Everything else can change as often as it likes. Say the key takes one field
-of a filter that a search box rewrites on every keystroke: polling keeps its
-pace while the user types.
+Everything else can change as often as it likes. Say the key takes one field of a filter that a search box rewrites on every keystroke: polling keeps its pace while the user types.
 
 ## Computing the interval
 
-Pass a function instead of a number. It gets the query's current state and
-returns the interval in ms, or `false` to stop polling:
+Pass a function instead of a number. It gets the query's current state and returns the interval in ms, or `false` to stop polling:
 
 ```ts
 export class JobComponent {
@@ -115,9 +83,7 @@ export class JobComponent {
 }
 ```
 
-The function runs again on every update of the query, so polling resumes by
-itself once it returns a number again: say, after a refetch finds the job
-running once more.
+The function runs again on every update of the query, so polling resumes by itself once it returns a number again: say, after a refetch finds the job running once more.
 
 It also tracks the signals it reads, which makes pausing a one-liner:
 
@@ -137,22 +103,10 @@ export class PricesComponent {
 
 ## Values that turn polling off
 
-`false`, `0` and no `refetchInterval` at all mean no polling. So does a value no
-timer can hold: `Infinity`, a negative number, or more than 2³¹−1 ms (about
-24.8 days). A browser would run such a timer at once, over and over, so the
-query doesn't poll instead.
+`false`, `0` and no `refetchInterval` at all mean no polling. So does a value no timer can hold: `Infinity`, a negative number, or more than 2³¹−1 ms (about 24.8 days). A browser would run such a timer at once, over and over, so the query doesn't poll instead.
 
 ## A note if you're coming from TanStack Query
 
-- **Its code, not its docs.** TanStack's
-  [polling guide](https://tanstack.com/query/latest/docs/framework/react/guides/polling)
-  says a query refetches "every N ms" and that each component's timer fires on
-  its own. Its code restarts the timer on every update of the query, which is
-  what this page describes, and this library does the same. One difference:
-  here only new data pushes the next poll back, a failed request doesn't. So
-  while requests fail, polling keeps its schedule, where TanStack waits a full
-  interval after each failure.
-- **The function form** receives `{ state }` rather than the `Query` object, so
-  `query.state.data` reads the same in both.
-- **Out-of-range values.** TanStack skips `Infinity` and negative intervals as
-  well, but not values over 2³¹−1 ms.
+- **Its code, not its docs.** TanStack's [polling guide](https://tanstack.com/query/latest/docs/framework/react/guides/polling) says a query refetches "every N ms" and that each component's timer fires on its own. Its code restarts the timer on every update of the query, which is what this page describes, and this library does the same. One difference: here only new data pushes the next poll back, a failed request doesn't. So while requests fail, polling keeps its schedule, where TanStack waits a full interval after each failure.
+- **The function form** receives `{ state }` rather than the `Query` object, so `query.state.data` reads the same in both.
+- **Out-of-range values.** TanStack skips `Infinity` and negative intervals as well, but not values over 2³¹−1 ms.

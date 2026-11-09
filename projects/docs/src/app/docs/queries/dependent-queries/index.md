@@ -1,16 +1,12 @@
-Sometimes a query can't run until another one has finished — you need the user
-before you can fetch their projects. That's a **dependent query**: it has to
-wait for a value that doesn't exist yet.
+Sometimes a query can't run until another one has finished — you need the user before you can fetch their projects. That's a **dependent query**: it has to wait for a value that doesn't exist yet.
 
 The tool for this is `enabled`.
 
 ## enabled
 
-Set `enabled: false` and the query simply doesn't fetch. It sits there, inert,
-until `enabled` flips to `true`.
+Set `enabled: false` and the query simply doesn't fetch. It sits there, inert, until `enabled` flips to `true`.
 
-Since options are reactive, `enabled` can be derived from the thing you're
-waiting for:
+Since options are reactive, `enabled` can be derived from the thing you're waiting for:
 
 ```ts
 export class ProjectsComponent {
@@ -31,9 +27,7 @@ export class ProjectsComponent {
 }
 ```
 
-The moment `user.data()` resolves, `enabled` becomes `true`, the effect re-runs
-and the projects query fetches. No manual orchestration, no `switchMap`, no
-subscription — the dependency is expressed as data.
+The moment `user.data()` resolves, `enabled` becomes `true`, the effect re-runs and the projects query fetches. No manual orchestration, no `switchMap`, no subscription — the dependency is expressed as data.
 
 ## Put the dependency in the key
 
@@ -49,15 +43,11 @@ queryKey: ['projects', 'byUser', userId]
 queryKey: ['projects']
 ```
 
-Get this wrong and switching users shows the _previous_ user's projects from
-the cache, with no refetch. `enabled` controls _when_ a query runs; the key
-controls _what it is_. You need both.
+Get this wrong and switching users shows the _previous_ user's projects from the cache, with no refetch. `enabled` controls _when_ a query runs; the key controls _what it is_. You need both.
 
 ## `isPending` does not mean "loading"
 
-Here's the sharp edge. A query has three states — `'pending'`, `'success'`,
-`'error'` — and there is no separate "not started" state. So a query waiting on
-`enabled: false` reports:
+Here's the sharp edge. A query has three states — `'pending'`, `'success'`, `'error'` — and there is no separate "not started" state. So a query waiting on `enabled: false` reports:
 
 ```ts
 projects.isPending() // true  — no data yet (correct, but easy to misread)
@@ -65,12 +55,9 @@ projects.isFetching() // false — nothing is in flight
 projects.isLoading() // false — not actually loading
 ```
 
-If you render a spinner on `isPending()`, it will spin **forever** while the
-query is disabled — nothing is happening, and nothing will, until the
-dependency arrives.
+If you render a spinner on `isPending()`, it will spin **forever** while the query is disabled — nothing is happening, and nothing will, until the dependency arrives.
 
-Use **`isLoading()`** for "a request is genuinely in flight, and there's no
-data yet":
+Use **`isLoading()`** for "a request is genuinely in flight, and there's no data yet":
 
 {% raw %}
 
@@ -88,14 +75,11 @@ data yet":
 
 {% endraw %}
 
-Recall from [Overview](/queries/overview) that `isLoading()` is exactly
-`isFetching() && isPending()` — which is why it correctly stays `false` for a
-query that hasn't been allowed to start.
+Recall from [Overview](/queries/overview) that `isLoading()` is exactly `isFetching() && isPending()` — which is why it correctly stays `false` for a query that hasn't been allowed to start.
 
 ## Showing the whole chain
 
-Usually you want one loading state for the pair, not two. Because everything is
-a signal, `computed` does the job:
+Usually you want one loading state for the pair, not two. Because everything is a signal, `computed` does the job:
 
 ```ts
 protected readonly isLoading = computed(
@@ -109,10 +93,7 @@ protected readonly error = computed(
 
 ## Dynamic chains
 
-`enabled` handles a **fixed** chain: query A, then query B. To fan out into a
-_variable_ number of dependent queries — one per id in a list you just fetched,
-say — combine the first query with `injectQueries` from
-[Parallel Queries](/queries/parallel-queries):
+`enabled` handles a **fixed** chain: query A, then query B. To fan out into a _variable_ number of dependent queries — one per id in a list you just fetched, say — combine the first query with `injectQueries` from [Parallel Queries](/queries/parallel-queries):
 
 ```ts
 export class UserProjectsComponent {
@@ -134,7 +115,4 @@ export class UserProjectsComponent {
 }
 ```
 
-No `enabled` is needed this time: while the user is pending the list of ids is
-empty, so there are no queries to run. The moment `user.data()` resolves, the
-array fills and one query per id starts — each with its own cache entry, so a
-project shared between two users is fetched once.
+No `enabled` is needed this time: while the user is pending the list of ids is empty, so there are no queries to run. The moment `user.data()` resolves, the array fills and one query per id starts — each with its own cache entry, so a project shared between two users is fetched once.

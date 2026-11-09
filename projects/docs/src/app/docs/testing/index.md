@@ -1,11 +1,8 @@
-Testing a component that uses `injectQuery` or `injectMutation` comes down to
-three things: provide the client, control when the data resolves, and turn off
-retries so failing-query tests don't crawl.
+Testing a component that uses `injectQuery` or `injectMutation` comes down to three things: provide the client, control when the data resolves, and turn off retries so failing-query tests don't crawl.
 
 ## Setup
 
-Provide the query client in `TestBed`, fresh for each test so the cache doesn't
-leak between them:
+Provide the query client in `TestBed`, fresh for each test so the cache doesn't leak between them:
 
 ```ts
 import { TestBed } from '@angular/core/testing'
@@ -18,15 +15,11 @@ beforeEach(() => {
 })
 ```
 
-A new `TestBed` per test means a new client and an empty cache every time — no
-special teardown needed.
+A new `TestBed` per test means a new client and an empty cache every time — no special teardown needed.
 
 ## Turn retries off
 
-This is the one that bites. [By default](/important-defaults) a failed query
-retries **three times with exponential backoff** — so a test for an error state
-would sit through seconds of retries before the query ever reaches `'error'`,
-and likely time out.
+This is the one that bites. [By default](/important-defaults) a failed query retries **three times with exponential backoff** — so a test for an error state would sit through seconds of retries before the query ever reaches `'error'`, and likely time out.
 
 Disable retries for the whole test client:
 
@@ -40,14 +33,11 @@ TestBed.configureTestingModule({
 })
 ```
 
-Now a failing query goes straight to `'error'`, synchronously. (Mutations
-already default to no retries, so they don't need this.)
+Now a failing query goes straight to `'error'`, synchronously. (Mutations already default to no retries, so they don't need this.)
 
 ## Testing a query
 
-A query fetches from an effect, and effects run with change detection, so a
-test lets change detection run before it checks the result. It needs no
-rendered component for that. Two ways to exercise a query:
+A query fetches from an effect, and effects run with change detection, so a test lets change detection run before it checks the result. It needs no rendered component for that. Two ways to exercise a query:
 
 **In an injection context**, when you're testing the query itself:
 
@@ -67,8 +57,7 @@ it('exposes the fetched data', async () => {
 })
 ```
 
-`whenStable()` lets change detection run the effect that fetches, and `of(...)`
-resolves **synchronously**, so the query is `'success'` by then.
+`whenStable()` lets change detection run the effect that fetches, and `of(...)` resolves **synchronously**, so the query is `'success'` by then.
 
 **In a host component**, when you're testing how a template reacts:
 
@@ -97,9 +86,7 @@ it('renders the todos', () => {
 
 ## Waiting with `whenStable()`
 
-Angular counts the app as busy while a query fetches or a mutation runs, so
-`whenStable()` waits until the data or the error is in, whatever `queryFn`
-returns:
+Angular counts the app as busy while a query fetches or a mutation runs, so `whenStable()` waits until the data or the error is in, whatever `queryFn` returns:
 
 ```ts
 it('shows the todos once they load', async () => {
@@ -113,21 +100,13 @@ it('shows the todos once they load', async () => {
 })
 ```
 
-It waits through the retries too, the waits between them included: one more
-reason to turn them off. And it waits for a fetch that never ends: a `queryFn`
-that returns a `Subject` nobody answers keeps it waiting until the test times
-out. To test a loading state, answer the request yourself, as below.
+It waits through the retries too, the waits between them included: one more reason to turn them off. And it waits for a fetch that never ends: a `queryFn` that returns a `Subject` nobody answers keeps it waiting until the test times out. To test a loading state, answer the request yourself, as below.
 
-It doesn't wait for anything else, with zone.js too: a query that polls, or
-one waiting out its `gcTime`, lets it resolve. `waitForAsync()` is different:
-it waits for every timer the test starts, those included. A test under it that
-shows a polling query, prefetches, or destroys a component with a query times
-out; use `whenStable()` or `fakeAsync()` there.
+It doesn't wait for anything else, with zone.js too: a query that polls, or one waiting out its `gcTime`, lets it resolve. `waitForAsync()` is different: it waits for every timer the test starts, those included. A test under it that shows a polling query, prefetches, or destroys a component with a query times out; use `whenStable()` or `fakeAsync()` there.
 
 ## Asynchronous resolution
 
-To test the loading state, resolve the data on your terms with a `Subject` and
-`fakeAsync`:
+To test the loading state, resolve the data on your terms with a `Subject` and `fakeAsync`:
 
 ```ts
 it('goes pending, then success', fakeAsync(() => {
@@ -150,15 +129,11 @@ it('goes pending, then success', fakeAsync(() => {
 }))
 ```
 
-Testing the error path is the same shape — `subject.error(new Error('nope'))`,
-then assert `todos.isError()`. (This is where **retries off** matters —
-otherwise the error shows only after the retries, seconds of fake time later.)
+Testing the error path is the same shape — `subject.error(new Error('nope'))`, then assert `todos.isError()`. (This is where **retries off** matters — otherwise the error shows only after the retries, seconds of fake time later.)
 
 ## Window focus and reconnect
 
-A test doesn't leave the page or lose the network, so
-[these refetches](/queries/focus-and-reconnect) don't happen in it on their own.
-To test one, fire the event the browser would:
+A test doesn't leave the page or lose the network, so [these refetches](/queries/focus-and-reconnect) don't happen in it on their own. To test one, fire the event the browser would:
 
 ```ts
 // The user comes back to the tab.
@@ -175,17 +150,11 @@ window.dispatchEvent(new Event('online'))
 
 The refetch starts at once, so you can assert right after.
 
-If your tests run in a browser window you can see, leaving it and coming back
-while they run is a real return, and can slip a refetch into the test that's
-running. If that gets in the way, turn the refetches off in the test client:
-`withDefaultOptions({ queries: { refetchOnWindowFocus: false } })`.
+If your tests run in a browser window you can see, leaving it and coming back while they run is a real return, and can slip a refetch into the test that's running. If that gets in the way, turn the refetches off in the test client: `withDefaultOptions({ queries: { refetchOnWindowFocus: false } })`.
 
 ## Polling
 
-[Polling waits while the page is hidden](/queries/polling#in-a-background-tab),
-and in a real browser the page your tests run in is hidden while its window is
-minimized or another tab is in front. A test that waits for a poll then sees
-none. Keep polling going in the test client:
+[Polling waits while the page is hidden](/queries/polling#in-a-background-tab), and in a real browser the page your tests run in is hidden while its window is minimized or another tab is in front. A test that waits for a poll then sees none. Keep polling going in the test client:
 
 ```ts
 provideQueryClient(
@@ -193,9 +162,7 @@ provideQueryClient(
 )
 ```
 
-A simulated DOM, such as jsdom, has no window to hide: the page there always
-counts as visible. To test the pause itself, define `visibilityState` as
-`'hidden'` the same way as above, and delete it once the test is done.
+A simulated DOM, such as jsdom, has no window to hide: the page there always counts as visible. To test the pause itself, define `visibilityState` as `'hidden'` the same way as above, and delete it once the test is done.
 
 ## Testing a mutation
 
@@ -221,13 +188,9 @@ it('adds a todo and invalidates the list', () => {
 })
 ```
 
-If a hook returns a promise, the mutation settles only after it — run the test
-in `fakeAsync` and call `flushMicrotasks()` before asserting. That includes a
-hook that returns `invalidateQueries()` itself rather than a spy: the mutation
-then waits for the refetch.
+If a hook returns a promise, the mutation settles only after it — run the test in `fakeAsync` and call `flushMicrotasks()` before asserting. That includes a hook that returns `invalidateQueries()` itself rather than a spy: the mutation then waits for the refetch.
 
-A hook that throws doesn't fail the test by itself: its error goes to the
-`ErrorHandler`, which in a test only logs it. Spy on it to check:
+A hook that throws doesn't fail the test by itself: its error goes to the `ErrorHandler`, which in a test only logs it. Spy on it to check:
 
 ```ts
 const handleError = spyOn(TestBed.inject(ErrorHandler), 'handleError')
@@ -237,8 +200,7 @@ addTodo.mutate('Buy milk')
 expect(handleError).not.toHaveBeenCalled()
 ```
 
-In `fakeAsync`, an `ErrorHandler` that throws the error again fails the test:
-the error then surfaces as an unhandled rejection, which `fakeAsync` rethrows.
+In `fakeAsync`, an `ErrorHandler` that throws the error again fails the test: the error then surfaces as an unhandled rejection, which `fakeAsync` rethrows.
 
 To check the outcome without ticking, await `mutateAsync()`:
 
@@ -257,14 +219,11 @@ it('adds a todo', async () => {
 })
 ```
 
-A query's `refetch()` and the client's `fetchQuery()` and `invalidateQueries()`
-return promises too, for a test to await the same way.
+A query's `refetch()` and the client's `fetchQuery()` and `invalidateQueries()` return promises too, for a test to await the same way.
 
 ## Test the definitions directly
 
-If you keep queries and mutations in a service with `queryOptions` /
-`mutationOptions`, the definitions are plain objects — you can assert on them
-with no `TestBed` at all:
+If you keep queries and mutations in a service with `queryOptions` / `mutationOptions`, the definitions are plain objects — you can assert on them with no `TestBed` at all:
 
 ```ts
 it('builds the right key', () => {
@@ -282,13 +241,8 @@ it('invalidates on success', () => {
 })
 ```
 
-This is the cheapest way to cover your cache logic — the hooks are just
-functions.
+This is the cheapest way to cover your cache logic — the hooks are just functions.
 
 ## Mocking the data layer
 
-The examples above hand `queryFn` an `of(...)` directly, which is usually the
-simplest thing: mock the service the `queryFn` calls and have it return an
-`Observable`. If you'd rather exercise the real `HttpClient`, provide Angular's
-`provideHttpClientTesting()` and drive requests with `HttpTestingController` as
-you would for any Angular service — the query library doesn't change that.
+The examples above hand `queryFn` an `of(...)` directly, which is usually the simplest thing: mock the service the `queryFn` calls and have it return an `Observable`. If you'd rather exercise the real `HttpClient`, provide Angular's `provideHttpClientTesting()` and drive requests with `HttpTestingController` as you would for any Angular service — the query library doesn't change that.

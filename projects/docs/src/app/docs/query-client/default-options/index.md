@@ -1,6 +1,4 @@
-If most of your queries want the same `staleTime`, or every failed save should
-reach your error handler, don't repeat it on every query and mutation — set it
-once, when you provide the client.
+If most of your queries want the same `staleTime`, or every failed save should reach your error handler, don't repeat it on every query and mutation — set it once, when you provide the client.
 
 ## `withDefaultOptions`
 
@@ -30,17 +28,9 @@ export const appConfig: ApplicationConfig = {
 }
 ```
 
-From then on, every query and mutation starts from those values. Anything you
-don't set keeps the built-in default: [`staleTime: 0`, `gcTime: 5 min`,
-`retry: 3`](/important-defaults),
-[structural sharing](/queries/structural-sharing),
-[refetching on focus and reconnect](/queries/focus-and-reconnect) and
-[no polling in a background tab](/queries/polling#in-a-background-tab) for
-queries, no retries and no hooks for mutations.
+From then on, every query and mutation starts from those values. Anything you don't set keeps the built-in default: [`staleTime: 0`, `gcTime: 5 min`, `retry: 3`](/important-defaults), [structural sharing](/queries/structural-sharing), [refetching on focus and reconnect](/queries/focus-and-reconnect) and [no polling in a background tab](/queries/polling#in-a-background-tab) for queries, no retries and no hooks for mutations.
 
-On the server a query never polls, retries only if `retry` is set here or on
-the query, and stays in the cache whatever its `gcTime`; see
-[Important Defaults](/important-defaults#on-the-server).
+On the server a query never polls, retries only if `retry` is set here or on the query, and stays in the cache whatever its `gcTime`; see [Important Defaults](/important-defaults#on-the-server).
 
 ## What you can default
 
@@ -71,22 +61,15 @@ type DefaultMutationOptions = {
 }
 ```
 
-Their arguments are typed `unknown`: one default serves every mutation,
-whatever its data and error types, so narrow them before use.
+Their arguments are typed `unknown`: one default serves every mutation, whatever its data and error types, so narrow them before use.
 
-The rest is inherently per-query or per-mutation, so there's nothing to default
-there: a query's `queryKey`, `queryFn`, `enabled` and `initialData`; a
-mutation's `mutationFn`, and its `onMutate`, which builds the `context` for
-that mutation's own hooks.
+The rest is inherently per-query or per-mutation, so there's nothing to default there: a query's `queryKey`, `queryFn`, `enabled` and `initialData`; a mutation's `mutationFn`, and its `onMutate`, which builds the `context` for that mutation's own hooks.
 
-Mutations don't retry by default, because a write isn't necessarily safe to
-send twice. `mutations: { retry }` turns retries on for all of them, so set it
-only if every write in your app can be repeated.
+Mutations don't retry by default, because a write isn't necessarily safe to send twice. `mutations: { retry }` turns retries on for all of them, so set it only if every write in your app can be repeated.
 
 ## Your own options always win
 
-Defaults are a starting point, not a lock. A query or a mutation that sets its
-own value overrides the default for that field only:
+Defaults are a starting point, not a lock. A query or a mutation that sets its own value overrides the default for that field only:
 
 ```ts
 provideQueryClient(withDefaultOptions({ queries: { staleTime: 60_000 } }))
@@ -99,9 +82,7 @@ injectQuery(() => ({
 }))
 ```
 
-Hooks follow the same rule, one by one. A mutation with its own `onError`
-handles the error itself, so the default `onError` doesn't run for it, while
-the default `onSuccess` and `onSettled` still do:
+Hooks follow the same rule, one by one. A mutation with its own `onError` handles the error itself, so the default `onError` doesn't run for it, while the default `onSuccess` and `onSettled` still do:
 
 ```ts
 // The default onError reports every failed write…
@@ -120,21 +101,13 @@ injectMutation(() => ({
 }))
 ```
 
-A field left `undefined` keeps the default, so a shared definition that passes
-an optional hook on doesn't drop it. To turn a default hook off for one
-mutation, pass a function that does nothing: `onError: () => {}`. (In TanStack
-Query, a hook set to `undefined` turns the default off.)
+A field left `undefined` keeps the default, so a shared definition that passes an optional hook on doesn't drop it. To turn a default hook off for one mutation, pass a function that does nothing: `onError: () => {}`. (In TanStack Query, a hook set to `undefined` turns the default off.)
 
 ## Default hooks can use `inject()`
 
-The default hooks run in the injection context of the injector that provides
-the client, so they can call `inject()`, as in the examples above. That's your
-app's injector, not the component that started the mutation: a service
-provided in a component isn't visible to them, and they still work after that
-component is destroyed.
+The default hooks run in the injection context of the injector that provides the client, so they can call `inject()`, as in the examples above. That's your app's injector, not the component that started the mutation: a service provided in a component isn't visible to them, and they still work after that component is destroyed.
 
-As anywhere in Angular, `inject()` works only before the first `await`, so an
-async hook injects what it needs first:
+As anywhere in Angular, `inject()` works only before the first `await`, so an async hook injects what it needs first:
 
 ```ts
 mutations: {
@@ -147,6 +120,4 @@ mutations: {
 },
 ```
 
-Once that injector is destroyed, because the app was torn down or its test has
-ended, a mutation that lands afterwards skips the default hooks: the app they
-belong to is gone.
+Once that injector is destroyed, because the app was torn down or its test has ended, a mutation that lands afterwards skips the default hooks: the app they belong to is gone.

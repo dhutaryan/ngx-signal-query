@@ -1,8 +1,4 @@
-`placeholderData` lets a query show *something* while it loads its first data —
-a preview, a stand-in, the previous page — instead of a spinner. Unlike
-[Initial Data](/queries/initial-data), it is **never written to the cache**: the
-query stays `'pending'` underneath, and the placeholder vanishes the moment real
-data arrives.
+`placeholderData` lets a query show _something_ while it loads its first data — a preview, a stand-in, the previous page — instead of a spinner. Unlike [Initial Data](/queries/initial-data), it is **never written to the cache**: the query stays `'pending'` underneath, and the placeholder vanishes the moment real data arrives.
 
 ## The basics
 
@@ -14,23 +10,13 @@ protected readonly todos = injectQuery(() => ({
 }))
 ```
 
-While the request is in flight, `data()` returns the placeholder and `status()`
-reads `'success'` — so your template renders content, not a loading state. When
-the fetch resolves, the placeholder is replaced by the real data.
+While the request is in flight, `data()` returns the placeholder and `status()` reads `'success'` — so your template renders content, not a loading state. When the fetch resolves, the placeholder is replaced by the real data.
 
-It shows again while a query that failed before it had any data is tried again:
-the query is back in `'pending'` for the new attempt.
+It shows again while a query that failed before it had any data is tried again: the query is back in `'pending'` for the new attempt.
 
-The cache never sees any of it. Another component reading `['todos']` gets
-`undefined` until the real fetch lands — the placeholder is local to this one
-query result.
+The cache never sees any of it. Another component reading `['todos']` gets `undefined` until the real fetch lands — the placeholder is local to this one query result.
 
-The placeholder has the data type `queryFn` gives, here `Todo[]`. One that's
-missing fields is a type error, as code reading `data()` would find them
-missing. One TypeScript quirk: an inline object whose field has a literal type,
-like `status: 'open' | 'done'`, is an error even when it fits, because
-TypeScript widens `'open'` to `string` before it knows the data type. Add
-`satisfies` with the type, or keep the placeholder in a typed constant:
+The placeholder has the data type `queryFn` gives, here `Todo[]`. One that's missing fields is a type error, as code reading `data()` would find them missing. One TypeScript quirk: an inline object whose field has a literal type, like `status: 'open' | 'done'`, is an error even when it fits, because TypeScript widens `'open'` to `string` before it knows the data type. Add `satisfies` with the type, or keep the placeholder in a typed constant:
 
 ```ts
 placeholderData: { id: 1, status: 'open' } satisfies Ticket,
@@ -38,8 +24,7 @@ placeholderData: { id: 1, status: 'open' } satisfies Ticket,
 
 ## Telling placeholder from real data
 
-Because `status()` is `'success'`, you need another way to know the data is only
-a stand-in. That's `isPlaceholderData()`:
+Because `status()` is `'success'`, you need another way to know the data is only a stand-in. That's `isPlaceholderData()`:
 
 {% raw %}
 
@@ -59,19 +44,13 @@ a stand-in. That's `isPlaceholderData()`:
 
 {% endraw %}
 
-It's `true` while the placeholder is on screen and flips to `false` when the
-real data replaces it. Use it to dim the UI, show a subtle spinner, or disable
-actions that shouldn't run against fake data.
+It's `true` while the placeholder is on screen and flips to `false` when the real data replaces it. Use it to dim the UI, show a subtle spinner, or disable actions that shouldn't run against fake data.
 
-> `isFetching()` stays `true` the whole time the real request is running — the
-> placeholder only masks the *loading* state (`isLoading()` is `false`), not the
-> fact that a fetch is happening.
+> `isFetching()` stays `true` the whole time the real request is running — the placeholder only masks the _loading_ state (`isLoading()` is `false`), not the fact that a fetch is happening.
 
 ## A value or a function
 
-Pass a function to compute the placeholder from the **previous** query's data.
-This is what makes paginated and filtered lists stop flickering: when the key
-changes, the function receives the data that was on screen a moment ago.
+Pass a function to compute the placeholder from the **previous** query's data. This is what makes paginated and filtered lists stop flickering: when the key changes, the function receives the data that was on screen a moment ago.
 
 ```ts
 protected readonly page = signal(1)
@@ -83,9 +62,7 @@ protected readonly todos = injectQuery(() => ({
 }))
 ```
 
-Now clicking to page 2 keeps page 1's rows visible (with
-`isPlaceholderData() === true`) instead of collapsing to a spinner, until page 2
-arrives.
+Now clicking to page 2 keeps page 1's rows visible (with `isPlaceholderData() === true`) instead of collapsing to a spinner, until page 2 arrives.
 
 ## keepPreviousData
 
@@ -101,19 +78,13 @@ protected readonly todos = injectQuery(() => ({
 }))
 ```
 
-`keepPreviousData` *is* `(previousData) => previousData` — nothing more. Reach
-for it whenever the last successful result is a good-enough stand-in for the
-next one.
+`keepPreviousData` _is_ `(previousData) => previousData` — nothing more. Reach for it whenever the last successful result is a good-enough stand-in for the next one.
 
-The "previous data" is the last result that actually had data. If a key change
-lands on a query that never resolves and you move on again, the placeholder
-still falls back to the last real data you saw — not to `undefined`.
+The "previous data" is the last result that actually had data. If a key change lands on a query that never resolves and you move on again, the placeholder still falls back to the last real data you saw — not to `undefined`.
 
 ## Seeding from another query
 
-Like `initialData`, the placeholder can come from data you already have in the
-cache — a list row standing in for a detail view. The difference is that here it
-stays a stand-in and never pollutes the detail cache entry:
+Like `initialData`, the placeholder can come from data you already have in the cache — a list row standing in for a detail view. The difference is that here it stays a stand-in and never pollutes the detail cache entry:
 
 ```ts
 export class TodoDetailComponent {
@@ -133,18 +104,13 @@ export class TodoDetailComponent {
 }
 ```
 
-The detail view renders instantly from the list row, then the real fetch
-replaces it. The list here holds whole todos, so a row has the detail's type.
-If your list rows have fewer fields than the detail, fill in the rest when you
-build the placeholder. If the list isn't in the cache, the function returns
-`undefined` and the query starts `'pending'` as usual.
+The detail view renders instantly from the list row, then the real fetch replaces it. The list here holds whole todos, so a row has the detail's type. If your list rows have fewer fields than the detail, fill in the rest when you build the placeholder. If the list isn't in the cache, the function returns `undefined` and the query starts `'pending'` as usual.
 
 ## placeholderData or initialData?
 
-They look similar — both render something before the fetch finishes — but they
-sit on opposite sides of the cache:
+They look similar — both render something before the fetch finishes — but they sit on opposite sides of the cache:
 
-| | `placeholderData` | `initialData` |
+|  | `placeholderData` | `initialData` |
 | --- | --- | --- |
 | Written to the cache? | No | Yes |
 | `status()` while shown | `'success'` | `'success'` |
@@ -153,13 +119,9 @@ sit on opposite sides of the cache:
 | Other observers see it? | No | Yes |
 | Good for | temporary stand-ins, previous page | real data you'd keep |
 
-The rule of thumb from the [Initial Data](/queries/initial-data) guide still
-holds:
+The rule of thumb from the [Initial Data](/queries/initial-data) guide still holds:
 
 - Data you'd be happy to keep and share across the app? `initialData`.
 - Data that's just a stand-in until the real thing loads? `placeholderData`.
 
-If the two are set together, `initialData` wins whenever it seeds the cache: the
-query has real data, so the placeholder is never consulted. An `initialData`
-function that returns `undefined` seeds nothing, and the placeholder shows while
-the query loads.
+If the two are set together, `initialData` wins whenever it seeds the cache: the query has real data, so the placeholder is never consulted. An `initialData` function that returns `undefined` seeds nothing, and the placeholder shows while the query loads.

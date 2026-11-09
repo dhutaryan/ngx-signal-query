@@ -1,8 +1,4 @@
-`mutationOptions()` is to mutations what
-[`queryOptions()`](/queries/query-options) is to queries: an **identity
-function** that returns its argument untouched at runtime, and exists purely to
-anchor type inference. It lets you define a mutation once, in a service, and
-reuse it.
+`mutationOptions()` is to mutations what [`queryOptions()`](/queries/query-options) is to queries: an **identity function** that returns its argument untouched at runtime, and exists purely to anchor type inference. It lets you define a mutation once, in a service, and reuse it.
 
 ```ts
 import { inject, Injectable } from '@angular/core'
@@ -36,14 +32,9 @@ export class AddTodoComponent {
 
 ## Why it earns its keep
 
-For queries, the win from `queryOptions` is mostly not repeating the key. For
-mutations there's no key — so what does `mutationOptions` actually buy you?
+For queries, the win from `queryOptions` is mostly not repeating the key. For mutations there's no key — so what does `mutationOptions` actually buy you?
 
-**It links the hooks' types together.** The value `onMutate` returns becomes
-the `context` argument of `onSuccess` / `onError` / `onSettled`. Writing that
-inline, TypeScript infers the chain but it's easy to drift. `mutationOptions`
-pins all four generics in one place, so an optimistic rollback type-checks
-end to end:
+**It links the hooks' types together.** The value `onMutate` returns becomes the `context` argument of `onSuccess` / `onError` / `onSettled`. Writing that inline, TypeScript infers the chain but it's easy to drift. `mutationOptions` pins all four generics in one place, so an optimistic rollback type-checks end to end:
 
 ```ts
 public add() {
@@ -72,8 +63,7 @@ public add() {
 }
 ```
 
-Get `context?.previous` wrong — a typo, the wrong shape — and it's a compile
-error, not a broken rollback at runtime.
+Get `context?.previous` wrong — a typo, the wrong shape — and it's a compile error, not a broken rollback at runtime.
 
 ## Overriding per component
 
@@ -86,14 +76,11 @@ protected readonly addTodo = injectMutation(() => ({
 }))
 ```
 
-Note a spread **replaces** a hook, it doesn't stack — the override's `onSuccess`
-runs instead of the definition's, not after it. If you want both behaviours, call
-the original from inside the override.
+Note a spread **replaces** a hook, it doesn't stack — the override's `onSuccess` runs instead of the definition's, not after it. If you want both behaviours, call the original from inside the override.
 
 ## Testing
 
-Same payoff as `queryOptions`: a mutation definition is a plain object you can
-build and assert without a component or `TestBed`:
+Same payoff as `queryOptions`: a mutation definition is a plain object you can build and assert without a component or `TestBed`:
 
 ```ts
 it('invalidates todos on success', () => {
@@ -107,7 +94,4 @@ it('invalidates todos on success', () => {
 
 ## No `mutationKey`
 
-If you're coming from TanStack Query: there's no `mutationKey` here. Mutations
-aren't looked up by key, so there's nothing to name them with, and the mutation
-cache can only be filtered by `status` (which is what `injectIsMutating` uses).
-`mutationOptions` is purely about typing and reuse, not identity.
+If you're coming from TanStack Query: there's no `mutationKey` here. Mutations aren't looked up by key, so there's nothing to name them with, and the mutation cache can only be filtered by `status` (which is what `injectIsMutating` uses). `mutationOptions` is purely about typing and reuse, not identity.
