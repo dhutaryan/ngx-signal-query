@@ -226,6 +226,20 @@ in `fakeAsync` and call `flushMicrotasks()` before asserting. That includes a
 hook that returns `invalidateQueries()` itself rather than a spy: the mutation
 then waits for the refetch.
 
+A hook that throws doesn't fail the test by itself: its error goes to the
+`ErrorHandler`, which in a test only logs it. Spy on it to check:
+
+```ts
+const handleError = spyOn(TestBed.inject(ErrorHandler), 'handleError')
+
+addTodo.mutate('Buy milk')
+
+expect(handleError).not.toHaveBeenCalled()
+```
+
+In `fakeAsync`, an `ErrorHandler` that throws the error again fails the test:
+the error then surfaces as an unhandled rejection, which `fakeAsync` rethrows.
+
 To check the outcome without ticking, await `mutateAsync()`:
 
 ```ts

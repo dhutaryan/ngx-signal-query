@@ -208,11 +208,11 @@ promise, not an Observable: an Observable a hook returns isn't subscribed, so
 **A failing hook doesn't undo the write.** If `onSuccess` throws, the mutation
 still ends in `'success'`, because the write went through, `onSettled` still
 runs, and `mutateAsync()` resolves with the data; the same goes for `onError`
-and `onSettled`. The error isn't swallowed: it's rethrown as an unhandled
-rejection, like any other error your app doesn't catch. Only `onMutate` is
-different: if it fails, the request isn't sent and the mutation ends in
-`'error'`. (In TanStack Query, a failing `onSuccess` turns the mutation into an
-error.)
+and `onSettled`. The error isn't swallowed: it goes to your app's
+`ErrorHandler`, once, with zone.js or without, in the browser and during a
+server render, which still finishes. Only `onMutate` is different: if it
+fails, the request isn't sent and the mutation ends in `'error'`. (In TanStack
+Query, a failing `onSuccess` turns the mutation into an error.)
 
 **Calls aren't serialized.** Each `mutate()` is its own independent run, so two
 of them can be in flight at once and there's no `scope` option to queue them.

@@ -2,7 +2,10 @@ import { ErrorHandler, Injectable, inject } from '@angular/core'
 
 import { Log } from './log'
 
-/** Mirrors every uncaught error into the log, so a failing demo shows up on the page. */
+/**
+ * Mirrors every error reported to the ErrorHandler into the log, a failing
+ * mutation hook's included, so a failing demo shows up on the page.
+ */
 @Injectable()
 export class LogErrorHandler extends ErrorHandler {
   readonly #log = inject(Log)
