@@ -1,7 +1,7 @@
 /**
  * `hook` — fired by a mutation lifecycle hook. `query` — a queryFn was called,
- * one line per request. `ui` — something you clicked. `error` — an uncaught
- * error, reported by the ErrorHandler.
+ * one line per request. `ui` — something you clicked. `error` — an error
+ * reported to the ErrorHandler.
  */
 export type LogKind = 'hook' | 'query' | 'ui' | 'error'
 

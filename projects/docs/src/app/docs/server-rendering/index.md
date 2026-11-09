@@ -11,7 +11,9 @@ counts the app as busy, so the server sends the page once the data or the
 error is in, with zone.js or without. Nothing else holds the page up: a
 `queryFn` built on `fetch()` takes as long as its request. On the server a
 query doesn't poll, doesn't retry unless you ask, and isn't removed from the
-cache. See [Important Defaults](/important-defaults#on-the-server).
+cache. A mutation hook that fails there, one that reaches for `localStorage`
+say, goes to the `ErrorHandler`, and the page is still sent. See
+[Important Defaults](/important-defaults#on-the-server).
 
 ## Bringing the data over
 

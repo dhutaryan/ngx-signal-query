@@ -80,9 +80,9 @@ type Outcome<TData, TError> =
  *
  * A hook may return a promise: the next step waits for it, and the mutation
  * stays pending until the last hook is done. A hook that fails doesn't change
- * the outcome: its error is rethrown as an unhandled rejection, and the hooks
- * after it still run. Only a failing `onMutate` fails the mutation, before the
- * write is sent.
+ * the outcome: its error goes to the app's `ErrorHandler`, once, and the
+ * hooks after it still run. Only a failing `onMutate` fails the mutation,
+ * before the write is sent.
  */
 export type MutationOptions<TData, TError, TVariables, TContext> = {
   /**
@@ -209,6 +209,7 @@ export class Mutation<
   readonly #cache: MutationCache
   readonly #pendingTasks: Pick<PendingTasks, 'add'>
   readonly #zone: Pick<NgZone, 'run' | 'runOutsideAngular'>
+  readonly #reportError: (error: unknown) => void
 
   constructor(
     readonly mutationId: number,
@@ -216,11 +217,13 @@ export class Mutation<
     cache: MutationCache,
     pendingTasks: Pick<PendingTasks, 'add'>,
     zone: Pick<NgZone, 'run' | 'runOutsideAngular'>,
+    reportError: (error: unknown) => void,
   ) {
     this.#options = options
     this.#cache = cache
     this.#pendingTasks = pendingTasks
     this.#zone = zone
+    this.#reportError = reportError
   }
 
   get observerCount(): number {
@@ -370,12 +373,12 @@ export class Mutation<
     const { context } = this.state()
 
     return concat(
-      runHook(() =>
+      runHook(this.#reportError, () =>
         outcome.status === 'success'
           ? this.#options.onSuccess?.(outcome.data, variables, context)
           : this.#options.onError?.(outcome.error, variables, context),
       ),
-      runHook(() =>
+      runHook(this.#reportError, () =>
         this.#options.onSettled?.(
           outcome.data,
           outcome.error,
@@ -412,13 +415,16 @@ function awaitHook<T>(hook: () => T | PromiseLike<T>): Observable<T> {
 }
 
 // Runs a hook that reports an outcome. Only its end matters: what it
-// returns is dropped, and an error it throws is rethrown as an unhandled
-// rejection, so the app's error handling sees it while the run carries on.
-function runHook(hook: () => unknown): Observable<never> {
+// returns is dropped, and an error it throws goes to reportError, which
+// hands it to the app's ErrorHandler and never throws: the run carries on.
+function runHook(
+  reportError: (error: unknown) => void,
+  hook: () => unknown,
+): Observable<never> {
   return awaitHook(hook).pipe(
     ignoreElements(),
     catchError((error: unknown) => {
-      void Promise.reject(error)
+      reportError(error)
 
       return EMPTY
     }),

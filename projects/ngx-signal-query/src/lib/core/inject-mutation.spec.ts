@@ -1,3 +1,4 @@
+import { HttpErrorResponse } from '@angular/common/http'
 import {
   ApplicationRef,
   Component,
@@ -5,6 +6,7 @@ import {
   type DoCheck,
   EnvironmentInjector,
   ErrorHandler,
+  Injectable,
   InjectionToken,
   Injector,
   NgZone,
@@ -13,6 +15,7 @@ import {
   createEnvironmentInjector,
   effect,
   inject,
+  provideZonelessChangeDetection,
   signal,
 } from '@angular/core'
 import {
@@ -23,7 +26,7 @@ import {
   flushMicrotasks,
   tick,
 } from '@angular/core/testing'
-import { EMPTY, of, Subject, throwError } from 'rxjs'
+import { EMPTY, firstValueFrom, of, Subject, throwError } from 'rxjs'
 
 import { mountHost } from '../../spec-helpers/host'
 import { settled } from '../../spec-helpers/promises'
@@ -679,7 +682,9 @@ describe('injectMutation', () => {
 
   // A hook that fails doesn't change what happened to the write, and the
   // hooks after it still run. A failing onMutate stops the run before the
-  // write is sent.
+  // write is sent. Any other hook's error goes to the app's ErrorHandler,
+  // once: nothing is rethrown on top of that, so flush() has nothing to
+  // throw.
   describe('failing hooks', () => {
     it('fails the run without sending the write when onMutate throws', () => {
       const error = new Error('onMutate failed')
@@ -739,11 +744,13 @@ describe('injectMutation', () => {
     }))
 
     it('keeps the success when onSuccess throws, still runs onSettled and reports the error', fakeAsync(() => {
+      const handleError = spyOn(TestBed.inject(ErrorHandler), 'handleError')
+      const error = new Error('onSuccess failed')
       const onSettled = jasmine.createSpy('onSettled')
       const m = setup<string, Error, void>(() => ({
         mutationFn: () => of('saved'),
         onSuccess: () => {
-          throw new Error('onSuccess failed')
+          throw error
         },
         onSettled,
       }))
@@ -759,17 +766,20 @@ describe('injectMutation', () => {
         undefined,
         undefined,
       )
-      // The error isn't swallowed: the app's error handling still sees it.
-      expect(() => flush()).toThrowError(/onSuccess failed/)
+      // The error isn't swallowed: the app's ErrorHandler gets it.
+      expect(() => flush()).not.toThrow()
+      expect(handleError).toHaveBeenCalledOnceWith(error)
     }))
 
     it('keeps the error when onError throws, still runs onSettled and reports the error', fakeAsync(() => {
+      const handleError = spyOn(TestBed.inject(ErrorHandler), 'handleError')
       const error = new Error('write failed')
+      const rollbackError = new Error('rollback failed')
       const onSettled = jasmine.createSpy('onSettled')
       const m = setup<string, Error, void>(() => ({
         mutationFn: () => throwError(() => error),
         onError: () => {
-          throw new Error('rollback failed')
+          throw rollbackError
         },
         onSettled,
       }))
@@ -784,10 +794,13 @@ describe('injectMutation', () => {
         undefined,
         undefined,
       )
-      expect(() => flush()).toThrowError(/rollback failed/)
+      expect(() => flush()).not.toThrow()
+      expect(handleError).toHaveBeenCalledOnceWith(rollbackError)
     }))
 
     it('keeps the success when an async onSuccess rejects, and reports the error', fakeAsync(() => {
+      const handleError = spyOn(TestBed.inject(ErrorHandler), 'handleError')
+      const error = new Error('audit failed')
       const audit = deferred()
       const onSettled = jasmine.createSpy('onSettled')
       const m = setup<string, Error, void>(() => ({
@@ -797,9 +810,10 @@ describe('injectMutation', () => {
       }))
 
       m.mutate()
-      audit.reject(new Error('audit failed'))
+      audit.reject(error)
 
-      expect(() => flush()).toThrowError(/audit failed/)
+      expect(() => flush()).not.toThrow()
+      expect(handleError).toHaveBeenCalledOnceWith(error)
       expect(m.isSuccess()).toBe(true)
       expect(m.data()).toBe('saved')
       expect(onSettled).toHaveBeenCalledOnceWith(
@@ -811,10 +825,12 @@ describe('injectMutation', () => {
     }))
 
     it('keeps the outcome when onSettled throws, and reports the error', fakeAsync(() => {
+      const handleError = spyOn(TestBed.inject(ErrorHandler), 'handleError')
+      const error = new Error('onSettled failed')
       const m = setup(() => ({
         mutationFn: () => of('saved'),
         onSettled: () => {
-          throw new Error('onSettled failed')
+          throw error
         },
       }))
 
@@ -822,10 +838,12 @@ describe('injectMutation', () => {
 
       expect(m.isSuccess()).toBe(true)
       expect(m.data()).toBe('saved')
-      expect(() => flush()).toThrowError(/onSettled failed/)
+      expect(() => flush()).not.toThrow()
+      expect(handleError).toHaveBeenCalledOnceWith(error)
     }))
 
     it('drops a forgotten run from the cache even when its hook throws', fakeAsync(() => {
+      const handleError = spyOn(TestBed.inject(ErrorHandler), 'handleError')
       const response = new Subject<string>()
       const m = setup(() => ({
         mutationFn: () => response,
@@ -839,9 +857,335 @@ describe('injectMutation', () => {
       response.next('saved')
       response.complete()
 
-      expect(() => flush()).toThrowError(/onSuccess failed/)
+      expect(() => flush()).not.toThrow()
+      expect(handleError).toHaveBeenCalledTimes(1)
       expect(client.getMutationCache().getAll().length).toBe(0)
       expect(client.isMutating()).toBe(0)
+    }))
+
+    it('reports each hook that fails, in order', fakeAsync(() => {
+      const handleError = spyOn(TestBed.inject(ErrorHandler), 'handleError')
+      const auditError = new Error('audit failed')
+      const cleanupError = new Error('cleanup failed')
+      const m = setup(() => ({
+        mutationFn: () => of('saved'),
+        onSuccess: () => {
+          throw auditError
+        },
+        onSettled: () => {
+          throw cleanupError
+        },
+      }))
+
+      m.mutate()
+
+      expect(() => flush()).not.toThrow()
+      expect(handleError.calls.allArgs()).toEqual([
+        [auditError],
+        [cleanupError],
+      ])
+    }))
+
+    // A hook may fail with something that isn't an Error: HttpClient fails
+    // with an HttpErrorResponse, say. The ErrorHandler gets it as it is.
+    it('reports what a hook fails with as it is, an HttpErrorResponse say', fakeAsync(() => {
+      const handleError = spyOn(TestBed.inject(ErrorHandler), 'handleError')
+      const response = new HttpErrorResponse({ status: 503, url: '/api/audit' })
+      const m = setup(() => ({
+        mutationFn: () => of('saved'),
+        // Records the write in an audit log, which is down.
+        onSuccess: () => firstValueFrom(throwError(() => response)),
+      }))
+
+      m.mutate()
+
+      expect(() => flush()).not.toThrow()
+      expect(handleError).toHaveBeenCalledOnceWith(response)
+      expect(m.isSuccess()).toBe(true)
+    }))
+
+    // zone.js catches an error thrown in Angular's zone, but not one thrown
+    // outside it. A hook runs where mutate() was called from (see
+    // 'side-effect callbacks'), and its error reaches the ErrorHandler either
+    // way.
+    it('reports the error of a hook from a mutate() called in the Angular zone, as a click handler does', fakeAsync(() => {
+      const handleError = spyOn(TestBed.inject(ErrorHandler), 'handleError')
+      const error = new Error('onSuccess failed')
+      const m = setup(() => ({
+        mutationFn: () => of('saved'),
+        onSuccess: () => {
+          throw error
+        },
+      }))
+
+      TestBed.inject(NgZone).run(() => m.mutate())
+
+      expect(() => flush()).not.toThrow()
+      expect(handleError).toHaveBeenCalledOnceWith(error)
+    }))
+
+    it('reports the error of a hook from a mutate() called outside the Angular zone', fakeAsync(() => {
+      const handleError = spyOn(TestBed.inject(ErrorHandler), 'handleError')
+      const error = new Error('onSuccess failed')
+      const m = setup(() => ({
+        mutationFn: () => of('saved'),
+        onSuccess: () => {
+          throw error
+        },
+      }))
+
+      TestBed.inject(NgZone).runOutsideAngular(() => m.mutate())
+
+      expect(() => flush()).not.toThrow()
+      expect(handleError).toHaveBeenCalledOnceWith(error)
+    }))
+
+    // Without zone.js nothing on the server catches an error left to surface
+    // on its own: Node ends the process before the page is written out. A
+    // hook that reaches for an API only the browser has is enough.
+    it('reports the error of a hook during a server render without zone.js, and lets the render finish', fakeAsync(() => {
+      TestBed.resetTestingModule()
+      TestBed.configureTestingModule({
+        providers: [
+          provideZonelessChangeDetection(),
+          provideQueryClient(),
+          { provide: PLATFORM_ID, useValue: 'server' },
+        ],
+      })
+
+      const handleError = spyOn(TestBed.inject(ErrorHandler), 'handleError')
+      const error = new ReferenceError('localStorage is not defined')
+
+      @Component({
+        template: `
+          {{ save.status() }}
+        `,
+      })
+      class SaveDraft {
+        readonly save = injectMutation(() => ({
+          mutationFn: () => of('saved'),
+          // Keeps a copy in localStorage, which the server doesn't have.
+          onSuccess: () => {
+            throw error
+          },
+        }))
+
+        constructor() {
+          this.save.mutate()
+        }
+      }
+
+      const fixture = TestBed.createComponent(SaveDraft)
+
+      expect(appIsStable()).toBe(true)
+      expect(fixture.nativeElement.textContent.trim()).toBe('success')
+      expect(handleError).toHaveBeenCalledOnceWith(error)
+    }))
+
+    // An app's ErrorHandler may use the client itself, to clear the cache
+    // when the session ends, say. The client mustn't need the ErrorHandler
+    // while it's being created, or neither could be.
+    it('reports to an ErrorHandler that uses the QueryClient itself', fakeAsync(() => {
+      @Injectable()
+      class AppErrorHandler implements ErrorHandler {
+        readonly client = inject(QueryClient)
+        readonly errors: unknown[] = []
+
+        handleError(error: unknown): void {
+          this.errors.push(error)
+        }
+      }
+
+      TestBed.resetTestingModule()
+      TestBed.configureTestingModule({
+        providers: [
+          provideQueryClient(),
+          { provide: ErrorHandler, useClass: AppErrorHandler },
+        ],
+      })
+
+      const handler = TestBed.inject(ErrorHandler) as AppErrorHandler
+      const error = new Error('onSuccess failed')
+      const m = setup(() => ({
+        mutationFn: () => of('saved'),
+        onSuccess: () => {
+          throw error
+        },
+      }))
+
+      m.mutate()
+
+      expect(() => flush()).not.toThrow()
+      expect(handler.errors).toEqual([error])
+    }))
+
+    // A client provided by another environment injector, a lazy route's say,
+    // reports to the ErrorHandler that injector has, as its default hooks
+    // get theirs from it with inject().
+    it('reports to the ErrorHandler of the injector that provides the client', fakeAsync(() => {
+      const appHandleError = spyOn(TestBed.inject(ErrorHandler), 'handleError')
+      const routeHandler = { handleError: jasmine.createSpy('handleError') }
+      const injector = createEnvironmentInjector(
+        [
+          provideQueryClient(),
+          { provide: ErrorHandler, useValue: routeHandler },
+        ],
+        TestBed.inject(EnvironmentInjector),
+      )
+      const error = new Error('onSuccess failed')
+      const m = injectMutation(
+        () => ({
+          mutationFn: () => of('saved'),
+          onSuccess: () => {
+            throw error
+          },
+        }),
+        { injector },
+      )
+
+      m.mutate()
+
+      expect(() => flush()).not.toThrow()
+      expect(routeHandler.handleError).toHaveBeenCalledOnceWith(error)
+      expect(appHandleError).not.toHaveBeenCalled()
+
+      injector.destroy()
+    }))
+
+    // Angular calls the ErrorHandler outside its zone, and so does a failing
+    // hook's report, from a hook that ran in the zone too. A timer the
+    // handler sets, to hide the message it shows say, doesn't keep a zone.js
+    // app busy, or hold up a server render.
+    it('lets a zone.js app settle while its ErrorHandler hides a message on a timer', fakeAsync(() => {
+      const handleError = spyOn(
+        TestBed.inject(ErrorHandler),
+        'handleError',
+      ).and.callFake(() => {
+        // Shows the error, and hides it 3 seconds later.
+        setTimeout(() => undefined, 3000)
+      })
+      const m = setup(() => ({
+        mutationFn: () => of('saved'),
+        onSuccess: () => {
+          throw new Error('onSuccess failed')
+        },
+      }))
+
+      TestBed.inject(NgZone).run(() => m.mutate())
+
+      expect(appIsStable()).toBe(true)
+      expect(handleError).toHaveBeenCalledTimes(1)
+
+      flush()
+    }))
+
+    // An ErrorHandler that throws, as one a test provides to fail on any
+    // error does, mustn't leave the run hanging: it settles, and the hook's
+    // error surfaces as an unhandled rejection, as with no ErrorHandler.
+    it('settles the run when the ErrorHandler throws too, and lets the error surface as an unhandled rejection', fakeAsync(() => {
+      spyOn(TestBed.inject(ErrorHandler), 'handleError').and.callFake(
+        (error: unknown) => {
+          throw error
+        },
+      )
+
+      const onSettled = jasmine.createSpy('onSettled')
+      const m = setup<string, Error, void>(() => ({
+        mutationFn: () => of('saved'),
+        onSuccess: () => {
+          throw new Error('onSuccess failed')
+        },
+        onSettled,
+      }))
+
+      m.mutate()
+
+      expect(m.isSuccess()).toBe(true)
+      expect(onSettled).toHaveBeenCalledTimes(1)
+      expect(client.isMutating()).toBe(0)
+      // fakeAsync rethrows an unhandled rejection when microtasks run.
+      expect(() => flush()).toThrowError(
+        /Uncaught \(in promise\): Error: onSuccess failed/,
+      )
+    }))
+
+    // A bootstrapped app hands an error that surfaces in Angular's zone to its
+    // ErrorHandler (TestBed doesn't, so the spec listens itself). An error
+    // the ErrorHandler threw back surfaces outside the zone, or it would reach
+    // that ErrorHandler a second time.
+    it("lets the error surface outside the Angular zone when the ErrorHandler throws, so it isn't handed back to it", async () => {
+      spyOn(TestBed.inject(ErrorHandler), 'handleError').and.callFake(
+        (error: unknown) => {
+          throw error
+        },
+      )
+      // zone.js logs the rejection that surfaces outside the zone.
+      spyOn(console, 'error')
+
+      const zone = TestBed.inject(NgZone)
+      const handedBack: unknown[] = []
+
+      zone.onError.subscribe((error: unknown) => handedBack.push(error))
+
+      const m = setup(() => ({
+        mutationFn: () => of('saved'),
+        onSuccess: () => {
+          throw new Error('onSuccess failed')
+        },
+      }))
+
+      zone.run(() => m.mutate())
+      await new Promise((resolve) => setTimeout(resolve))
+
+      expect(m.isSuccess()).toBe(true)
+      expect(handedBack).toEqual([])
+    })
+
+    // The injector that provides the client can go first, with the app or
+    // the test, while a run is in flight. A hook that fails after that can't
+    // reach the app's ErrorHandler through it, whatever was reported before:
+    // its error surfaces as an unhandled rejection, and the run settles all
+    // the same.
+    it('settles a run whose hook fails once the client is gone, and lets the error surface as an unhandled rejection', fakeAsync(() => {
+      const injector = createEnvironmentInjector(
+        [provideQueryClient()],
+        TestBed.inject(EnvironmentInjector),
+      )
+      const handleError = spyOn(injector.get(ErrorHandler), 'handleError')
+      const responses: Array<Subject<string>> = []
+      const m = injectMutation(
+        () => ({
+          mutationFn: () => {
+            const response = new Subject<string>()
+
+            responses.push(response)
+
+            return response
+          },
+          onSuccess: () => {
+            throw new Error('onSuccess failed')
+          },
+        }),
+        { injector },
+      )
+
+      // A run whose hook fails while the client is still there.
+      m.mutate()
+      responses[0].next('saved')
+      responses[0].complete()
+
+      expect(handleError).toHaveBeenCalledTimes(1)
+
+      m.mutate()
+      injector.destroy()
+      responses[1].next('saved')
+      responses[1].complete()
+
+      expect(m.isSuccess()).toBe(true)
+      expect(handleError).toHaveBeenCalledTimes(1)
+      expect(() => flush()).toThrowError(
+        /Uncaught \(in promise\): Error: onSuccess failed/,
+      )
     }))
   })
 
@@ -1497,16 +1841,19 @@ describe('injectMutation', () => {
     }))
 
     it('resolves when onSuccess fails, as the write went through', fakeAsync(() => {
+      const handleError = spyOn(TestBed.inject(ErrorHandler), 'handleError')
+      const error = new Error('audit down')
       const m = setup(() => ({
         mutationFn: (title: string) => of(title),
         onSuccess: () => {
-          throw new Error('audit down')
+          throw error
         },
       }))
       const result = settled(m.mutateAsync('milk'))
 
-      // The hook's error is reported on its own, as with mutate().
-      expect(() => flush()).toThrowError(/audit down/)
+      // The hook's error goes to the ErrorHandler, as with mutate().
+      expect(() => flush()).not.toThrow()
+      expect(handleError).toHaveBeenCalledOnceWith(error)
       expect(result.value).toBe('milk')
     }))
 
@@ -1734,6 +2081,27 @@ describe('injectMutation', () => {
       report.resolve()
       flushMicrotasks()
 
+      expect(m.isSuccess()).toBe(true)
+    }))
+
+    it("reports a failing default hook's error to the app's ErrorHandler", fakeAsync(() => {
+      const error = new Error('report failed')
+
+      provideDefaults({
+        mutations: {
+          onSettled: () => {
+            throw error
+          },
+        },
+      })
+
+      const handleError = spyOn(TestBed.inject(ErrorHandler), 'handleError')
+      const m = setup(() => ({ mutationFn: () => of('saved') }))
+
+      m.mutate()
+
+      expect(() => flush()).not.toThrow()
+      expect(handleError).toHaveBeenCalledOnceWith(error)
       expect(m.isSuccess()).toBe(true)
     }))
 
