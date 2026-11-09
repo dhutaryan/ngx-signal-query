@@ -1,10 +1,13 @@
 import {
   Component,
+  DestroyRef,
   EnvironmentInjector,
   NgZone,
   PLATFORM_ID,
   createEnvironmentInjector,
   effect,
+  inject,
+  provideZonelessChangeDetection,
   signal,
 } from '@angular/core'
 import {
@@ -15,6 +18,7 @@ import {
   TestBed,
   tick,
 } from '@angular/core/testing'
+import { createApplication } from '@angular/platform-browser'
 import { of, Subject, throwError } from 'rxjs'
 
 import { settled } from '../../spec-helpers/promises'
@@ -838,7 +842,9 @@ describe('QueryClient', () => {
   })
 
   // A client provided by an injector of its own goes with that injector: its
-  // queries stop, so nothing of theirs keeps the app busy or runs on.
+  // queries stop, so nothing of theirs keeps the app busy or runs on. A fetch
+  // started on the client afterwards still runs, but doesn't keep the app
+  // busy either.
   describe('when the injector that provides it is destroyed', () => {
     function provideInChild(): {
       injector: EnvironmentInjector
@@ -874,6 +880,59 @@ describe('QueryClient', () => {
       // Nothing is left to run, so flush() has no time to move on.
       expect(flush()).toBe(0)
     }))
+
+    it("doesn't let a fetch started afterwards keep the app busy, and still runs it", fakeAsync(() => {
+      const { injector, child } = provideInChild()
+      const response = new Subject<string>()
+      let data: string | undefined
+
+      // One while its injector was there, answered at once.
+      child.fetchQuery(['todos'], () => of('a'))
+      injector.destroy()
+      child
+        .fetchQuery(['todo', 1], () => response)
+        .then((value) => (data = value))
+
+      expect(appIsStable()).toBe(true)
+
+      response.next('milk')
+      response.complete()
+      flushMicrotasks()
+
+      expect(data).toBe('milk')
+    }))
+
+    // On the server, Angular tears the app down after each render: it marks
+    // the app's injector destroyed first, then destroys the components, so a
+    // component's DestroyRef callback runs with the client's injector gone.
+    it('runs a fetch a component starts as the whole app is torn down', async () => {
+      const queryFn = jasmine.createSpy('queryFn').and.returnValue(of('draft'))
+
+      @Component({ selector: 'nsq-draft', template: '' })
+      class Draft {
+        constructor() {
+          const client = inject(QueryClient)
+
+          inject(DestroyRef).onDestroy(() => {
+            client.fetchQuery(['draft'], queryFn)
+          })
+        }
+      }
+
+      const host = document.body.appendChild(
+        document.createElement('nsq-draft'),
+      )
+      const app = await createApplication({
+        providers: [provideZonelessChangeDetection(), provideQueryClient()],
+      })
+
+      app.bootstrap(Draft, host)
+
+      expect(() => app.destroy()).not.toThrow()
+      expect(queryFn).toHaveBeenCalledTimes(1)
+
+      host.remove()
+    })
   })
 
   // A query nobody shows, from a prefetch or written by hand, is removed once

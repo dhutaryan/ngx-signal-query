@@ -3,7 +3,6 @@ import {
   ErrorHandler,
   Injectable,
   NgZone,
-  PendingTasks,
   inject,
 } from '@angular/core'
 
@@ -13,6 +12,7 @@ import {
   type MutationOptions,
   Mutation,
 } from './mutation'
+import { lazyPendingTasks } from './pending-tasks'
 
 /** @internal */
 @Injectable()
@@ -20,11 +20,12 @@ export class MutationCache extends Cache<
   Mutation<unknown, unknown, unknown, unknown>
 > {
   #lastId = 0
-  // The app's pending tasks and Angular's zone, handed to each mutation it
-  // builds, which has no injector of its own, along with #reportError.
-  readonly #pendingTasks = inject(PendingTasks)
-  readonly #zone = inject(NgZone)
   readonly #injector = inject(EnvironmentInjector)
+  // The app's pending tasks, looked up for each task (see lazyPendingTasks),
+  // and Angular's zone, handed to each mutation it builds, which has no
+  // injector of its own, along with #reportError.
+  readonly #pendingTasks = lazyPendingTasks(this.#injector)
+  readonly #zone = inject(NgZone)
 
   build<TData, TError, TVariables, TContext>(
     options: MutationOptions<TData, TError, TVariables, TContext>,
