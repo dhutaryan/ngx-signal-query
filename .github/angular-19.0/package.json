@@ -1,0 +1,14 @@
+{
+  "name": "ngx-signal-query",
+  "description": "Angular 19.0.0's typings, the oldest the library supports, for CI's type check of the library. The job copies this file and pnpm-lock.yaml over the repo's own; see .github/workflows/ci.yml.",
+  "private": true,
+  "dependencies": {
+    "@angular/common": "19.0.0",
+    "@angular/core": "19.0.0",
+    "rxjs": "~7.8.0",
+    "tslib": "^2.3.0"
+  },
+  "devDependencies": {
+    "typescript": "~5.6.3"
+  }
+}

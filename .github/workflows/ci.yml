@@ -79,3 +79,69 @@ jobs:
       # This catches broken markdown/pages before they reach main and deploy.
       - name: Build docs
         run: pnpm docs:build
+
+  # The library supports Angular 19 and later, while the repo is developed on
+  # a later one. The next two jobs put the package.json and pnpm-lock.yaml of
+  # a .github/angular-19.x/ folder in place of the repo's own (update such a
+  # lockfile with `pnpm install --lockfile-only` in its folder), and run on
+  # Node.js 22, the LTS current when Angular 19 came out. To run one locally,
+  # do the same in a copy of the repo, such as a git worktree: the swap
+  # replaces package.json, pnpm-lock.yaml and node_modules.
+  angular-19-specs:
+    name: Specs on Angular 19.2
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: .github/angular-19.2/pnpm-lock.yaml
+
+      # Angular 19.2, the 19 most apps run.
+      - name: Use Angular 19.2
+        run: cp .github/angular-19.2/package.json .github/angular-19.2/pnpm-lock.yaml .
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # Angular 19 has neither TestBed.tick() nor
+      # provideZonelessChangeDetection(): the specs tick with
+      # ApplicationRef.tick() and take the zoneless provider from
+      # spec-helpers/zoneless.ts.
+      - name: Test
+        run: pnpm test:ci
+
+  angular-19-types:
+    name: Types on Angular 19.0
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: .github/angular-19.0/pnpm-lock.yaml
+
+      # The typings of Angular 19.0.0, the oldest the library supports: code
+      # that uses an API only a later Angular has doesn't compile against them.
+      - name: Use Angular 19.0
+        run: cp .github/angular-19.0/package.json .github/angular-19.0/pnpm-lock.yaml .
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Type check
+        run: pnpm exec tsc -p projects/ngx-signal-query/tsconfig.lib.json --noEmit

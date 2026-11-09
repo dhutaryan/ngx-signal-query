@@ -5,11 +5,11 @@ import {
   Injectable,
   PendingTasks,
   inject,
-  provideZonelessChangeDetection,
 } from '@angular/core'
 import { TestBed } from '@angular/core/testing'
 import { of } from 'rxjs'
 
+import { provideZonelessChangeDetection } from '../../spec-helpers/zoneless'
 import { withDefaultOptions } from '../features/with-default-options'
 import { injectMutation } from './inject-mutation'
 import { injectQuery } from './inject-query'

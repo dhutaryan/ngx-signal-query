@@ -7,7 +7,6 @@ import {
   createEnvironmentInjector,
   effect,
   inject,
-  provideZonelessChangeDetection,
   signal,
 } from '@angular/core'
 import {
@@ -23,6 +22,7 @@ import { of, Subject, throwError } from 'rxjs'
 
 import { settled } from '../../spec-helpers/promises'
 import { appIsStable } from '../../spec-helpers/stability'
+import { provideZonelessChangeDetection } from '../../spec-helpers/zoneless'
 import { withDefaultOptions } from '../features/with-default-options'
 import { CancelledError } from './cancelled-error'
 import { injectMutation } from './inject-mutation'
