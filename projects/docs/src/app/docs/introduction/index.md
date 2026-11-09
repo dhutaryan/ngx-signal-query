@@ -128,14 +128,15 @@ export class TodoQueries {
     return mutationOptions({
       mutationFn: (title: string) =>
         this.#http.post<Todo>('/api/todos', { title }),
-      // Optimistically add the row, remember the previous state for rollback.
+      // Optimistically add the row to the list, if it's loaded; remember the
+      // previous state for rollback.
       onMutate: (title) => {
-        const previous = this.#client.getQueryData<Todo[]>(['todos']) ?? []
+        const previous = this.#client.getQueryData<Todo[]>(['todos'])
 
-        this.#client.setQueryData<Todo[]>(['todos'], (prev = []) => [
-          ...prev,
-          { id: -1, title },
-        ])
+        this.#client.setQueryData<Todo[]>(
+          ['todos'],
+          (todos) => todos && [...todos, { id: -1, title }],
+        )
 
         return { previous }
       },

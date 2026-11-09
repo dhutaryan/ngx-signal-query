@@ -262,35 +262,55 @@ export class QueryClient {
 
   /**
    * Writes data into the cache for a query key, creating the entry if needed.
-   * The `updater` may be a value or a function of the previous data; returning
-   * `undefined` from the function is a no-op. Useful for optimistic updates.
+   * The `updater` may be a value or a function of the previous data, which is
+   * `undefined` while the key holds none. Useful for optimistic updates.
+   *
+   * `undefined`, as the value or returned from the function, writes nothing:
+   * the cache stays as it was, and a key with no entry gets none. So
+   * `(todos) => todos?.map(…)` updates only data that's cached. A default
+   * such as `(todos = []) =>` does write: on a key with no data it creates an
+   * entry that counts as just fetched, which a query's `staleTime` takes as
+   * fresh.
    *
    * The data is merged like a response (see `structuralSharing`): what didn't
-   * change keeps its reference, so writing what the cache holds changes
-   * nothing. It merges as the query showing the key asks; with none showing
-   * it, the way the cached data was fetched; otherwise by the default.
+   * change keeps its reference, so writing what the cache holds leaves
+   * `data()` as it is. It still counts as a write: `dataUpdatedAt` moves, and
+   * a stale mark from `invalidateQueries()` is cleared. It merges as the query
+   * showing the key asks; with none showing it, the way the cached data was
+   * fetched; otherwise by the default.
    *
    * A key no component shows is kept for `gcTime` after the last write, then
    * removed.
    *
    * @param key - The query key to write.
-   * @param updater - The new data, or a function `(prev) => next`.
+   * @param updater - The new data, or a function `(prev) => next`;
+   *   `undefined` writes nothing.
    *
    * @example
    * ```ts
-   * client.setQueryData<Todo[]>(['todos'], (prev = []) => [...prev, newTodo])
+   * client.setQueryData<Todo[]>(
+   *   ['todos'],
+   *   (todos) => todos && [...todos, newTodo],
+   * )
    * ```
    */
   setQueryData<TData>(
     key: QueryKey,
-    updater: Updater<TData | undefined, TData>,
+    updater: Updater<TData | undefined, TData | undefined>,
   ): void {
     untracked(() => {
-      const query = this.#cache.getOrCreate<TData>(key, this.#gcTime())
-      const data = functionalUpdate(updater, query.state().data)
+      // undefined, from the updater or as the value, writes nothing, as in
+      // TanStack. The entry is only read until there's data to write: an
+      // empty one would bring a removed key back, and a component still
+      // showing the key would drop its data for it and load it again.
+      const data = functionalUpdate(
+        updater,
+        this.#cache.get<TData>(key)?.state().data,
+      )
 
-      // Matches TanStack: an updater returning undefined is a no-op.
       if (data === undefined) return
+
+      const query = this.#cache.getOrCreate<TData>(key, this.#gcTime())
 
       // It has no options of its own: it merges the way the query's data was
       // fetched, or by the default before any fetch.
@@ -401,8 +421,9 @@ export class QueryClient {
    * `refetch()`. A mutation in flight isn't stopped: its write
    * has most likely reached the server, so it finishes and runs its hooks, as
    * when its component goes away, and a component showing it sees how it
-   * went. The app counts as busy until it's done. A hook that writes into the
-   * cache puts that key back.
+   * went. The app counts as busy until it's done. A hook that writes data
+   * into the cache puts that key back; one that only updates what's cached,
+   * as `(todos) => todos?.map(…)` does, finds nothing and writes nothing.
    *
    * @example
    * ```ts

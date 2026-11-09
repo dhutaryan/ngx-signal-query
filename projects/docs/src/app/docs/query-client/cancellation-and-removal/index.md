@@ -49,8 +49,8 @@ this.#client.removeQueries()
 A component that shows one of those keys afterwards finds nothing cached: a cold
 fetch, with a loading state. A component already showing one keeps what it
 shows — removal refetches nothing — until something puts the key back in the
-cache: a refetch, `setQueryData`, another component, or its own polling. From
-then on it shows what the cache holds again.
+cache: a refetch, data written with `setQueryData`, another component, or its
+own polling. From then on it shows what the cache holds again.
 
 Reach for it when data should be **gone**, not merely refreshed, such as when
 leaving a feature area for good, to free memory you won't need again. On
@@ -105,10 +105,11 @@ readonly logout = injectMutation(() => ({
 }))
 ```
 
-A hook that runs after the clear and writes into the cache, such as a save's
-`setQueryData()`, puts that key back. With the user's id in the key, the entry
-belongs to the previous user: nothing shows it, and it's removed `gcTime` after
-the write.
+A hook that runs after the clear and writes data into the cache puts that key
+back. With the user's id in the key, the entry belongs to the previous user:
+nothing shows it, and it's removed `gcTime` after the write. A save that only
+updates what's cached, `(todos) => todos?.map(…)`, finds nothing after the
+clear and writes nothing.
 
 ## What waiting code gets
 

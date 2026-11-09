@@ -33,13 +33,13 @@ export class MutationDemo {
       this.#log.add(`onMutate("${vars.title}")`)
 
       const key = this.#queries.list().queryKey
-      const previous = this.#client.getQueryData<Todo[]>(key) ?? []
+      const previous = this.#client.getQueryData<Todo[]>(key)
       const tempId = -Date.now()
 
-      this.#client.setQueryData<Todo[]>(key, (todos = []) => [
-        ...todos,
-        { id: tempId, title: vars.title },
-      ])
+      this.#client.setQueryData<Todo[]>(
+        key,
+        (todos) => todos && [...todos, { id: tempId, title: vars.title }],
+      )
 
       return { previous, tempId }
     },
@@ -51,20 +51,18 @@ export class MutationDemo {
       // reply rather than invalidating (which would just drop it).
       this.#client.setQueryData<Todo[]>(
         this.#queries.list().queryKey,
-        (todos = []) =>
-          todos.map((todo) => (todo.id === context?.tempId ? created : todo)),
+        (todos) =>
+          todos?.map((todo) => (todo.id === context?.tempId ? created : todo)),
       )
     },
 
     onError: (error, vars, context) => {
       this.#log.add(`onError("${vars.title}") — ${error.message}`)
 
-      if (context) {
-        this.#client.setQueryData<Todo[]>(
-          this.#queries.list().queryKey,
-          context.previous,
-        )
-      }
+      this.#client.setQueryData<Todo[]>(
+        this.#queries.list().queryKey,
+        context?.previous,
+      )
     },
 
     onSettled: (_data, _error, vars) => {

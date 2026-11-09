@@ -103,10 +103,10 @@ const queries = inject(TodoQueries)
 client.invalidateQueries({ queryKey: queries.list().queryKey })
 
 // Write to the cache directly
-client.setQueryData<Todo[]>(queries.list().queryKey, (todos = []) => [
-  ...todos,
-  newTodo,
-])
+client.setQueryData<Todo[]>(
+  queries.list().queryKey,
+  (todos) => todos && [...todos, newTodo],
+)
 ```
 
 Rename the key in the service and every call site follows. Nothing to grep for.
