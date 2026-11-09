@@ -26,6 +26,7 @@ import {
   flushMicrotasks,
   tick,
 } from '@angular/core/testing'
+import { createApplication } from '@angular/platform-browser'
 import { EMPTY, firstValueFrom, of, Subject, throwError } from 'rxjs'
 
 import { mountHost } from '../../spec-helpers/host'
@@ -1300,6 +1301,41 @@ describe('injectMutation', () => {
       expect(client.getMutationCache().getAll().length).toBe(0)
     })
 
+    // On the server, Angular tears the app down after each render: it marks
+    // the app's injector destroyed first, then destroys the components, so a
+    // DestroyRef callback runs with the client's injector gone.
+    it('runs a mutation its component starts as the whole app is torn down', async () => {
+      const mutationFn = jasmine
+        .createSpy('mutationFn')
+        .and.returnValue(of('saved'))
+
+      @Component({ selector: 'nsq-draft-editor', template: '' })
+      class DraftEditor {
+        readonly saveDraft = injectMutation<string, Error, string>(() => ({
+          mutationFn,
+        }))
+
+        constructor() {
+          // Saves the draft on leave.
+          inject(DestroyRef).onDestroy(() => this.saveDraft.mutate('milk'))
+        }
+      }
+
+      const host = document.body.appendChild(
+        document.createElement('nsq-draft-editor'),
+      )
+      const app = await createApplication({
+        providers: [provideZonelessChangeDetection(), provideQueryClient()],
+      })
+
+      app.bootstrap(DraftEditor, host)
+
+      expect(() => app.destroy()).not.toThrow()
+      expect(mutationFn).toHaveBeenCalledOnceWith('milk')
+
+      host.remove()
+    })
+
     it('drops a mutation started after the host is destroyed once its request lands', fakeAsync(() => {
       const created = new Subject<number>()
       const attached = new Subject<string>()
@@ -1637,6 +1673,65 @@ describe('injectMutation', () => {
 
       expect(appIsStable()).toBe(true)
       expect(m.isSuccess()).toBe(true)
+    }))
+
+    // A run already going when the injector that provides its client is
+    // destroyed is let finish, as its write has most likely reached the
+    // server, and the app waits for it.
+    it("keeps the app busy until a run going when the client's injector is destroyed is done", fakeAsync(() => {
+      const clientInjector = createEnvironmentInjector(
+        [provideQueryClient()],
+        TestBed.inject(EnvironmentInjector),
+      )
+      // Made by hand, it can outlive the injector of the client it uses.
+      const injector = createEnvironmentInjector([], clientInjector)
+      const response = new Subject<string>()
+      const m = injectMutation<string, Error, string>(
+        () => ({ mutationFn: () => response }),
+        { injector },
+      )
+
+      m.mutate('milk')
+      clientInjector.destroy()
+
+      expect(appIsStable()).toBe(false)
+
+      response.next('saved')
+      response.complete()
+
+      expect(m.isSuccess()).toBe(true)
+      expect(appIsStable()).toBe(true)
+    }))
+
+    // A run started on a client after the injector that provides it is
+    // destroyed still runs, but doesn't keep the app busy.
+    it("doesn't let a run started after the client's injector is destroyed keep the app busy", fakeAsync(() => {
+      const clientInjector = createEnvironmentInjector(
+        [provideQueryClient()],
+        TestBed.inject(EnvironmentInjector),
+      )
+      // Made by hand, it can outlive the injector of the client it uses.
+      const injector = createEnvironmentInjector([], clientInjector)
+      const response = new Subject<string>()
+      const m = injectMutation<string, Error, string>(
+        () => ({
+          mutationFn: (title) => (title === 'eggs' ? of(title) : response),
+        }),
+        { injector },
+      )
+
+      // One while the client's injector was there, answered at once.
+      m.mutate('eggs')
+      clientInjector.destroy()
+      m.mutate('milk')
+
+      expect(appIsStable()).toBe(true)
+
+      response.next('saved')
+      response.complete()
+
+      expect(m.isSuccess()).toBe(true)
+      expect(m.data()).toBe('saved')
     }))
 
     // zone.js counts the app as busy while a timer set in the Angular zone is

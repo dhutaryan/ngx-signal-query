@@ -17,7 +17,9 @@ import {
  * Call once at the app root (in `ApplicationConfig.providers` or a root
  * `bootstrapApplication`). A client provided by another environment injector
  * goes with it: once that injector is destroyed, its queries stop, and none
- * of their fetches keeps the app busy. Pass features such as
+ * of their fetches keeps the app busy, nor does anything started on the
+ * client after that. A mutation already running finishes, and the app waits
+ * for it. Pass features such as
  * {@link withDefaultOptions} to configure defaults, or {@link withHydration}
  * to bring the data of a server render over to the browser. Registering the
  * same feature twice throws.
