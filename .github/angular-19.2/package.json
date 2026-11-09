@@ -1,0 +1,31 @@
+{
+  "name": "ngx-signal-query",
+  "description": "Angular 19.2, the 19 most apps run, for CI's run of the library's specs. The job copies this file and pnpm-lock.yaml over the repo's own; see .github/workflows/ci.yml.",
+  "private": true,
+  "scripts": {
+    "test:ci": "ng test ngx-signal-query --watch=false --browsers=ChromeHeadless"
+  },
+  "dependencies": {
+    "@angular/common": "19.2.25",
+    "@angular/compiler": "19.2.25",
+    "@angular/core": "19.2.25",
+    "@angular/platform-browser": "19.2.25",
+    "@angular/platform-browser-dynamic": "19.2.25",
+    "rxjs": "~7.8.0",
+    "tslib": "^2.3.0",
+    "zone.js": "~0.15.0"
+  },
+  "devDependencies": {
+    "@angular/build": "19.2.27",
+    "@angular/cli": "19.2.27",
+    "@angular/compiler-cli": "19.2.25",
+    "@types/jasmine": "~5.1.0",
+    "jasmine-core": "~5.9.0",
+    "karma": "~6.4.0",
+    "karma-chrome-launcher": "~3.2.0",
+    "karma-coverage": "~2.2.0",
+    "karma-jasmine": "~5.1.0",
+    "karma-jasmine-html-reporter": "~2.1.0",
+    "typescript": "~5.8.3"
+  }
+}

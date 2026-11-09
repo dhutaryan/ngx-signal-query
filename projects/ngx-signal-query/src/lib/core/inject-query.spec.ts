@@ -1,4 +1,5 @@
 import {
+  ApplicationRef,
   Component,
   type DoCheck,
   type EnvironmentProviders,
@@ -12,7 +13,6 @@ import {
   type WritableSignal,
   effect,
   input,
-  provideZonelessChangeDetection,
   signal,
   viewChild,
   viewChildren,
@@ -37,6 +37,7 @@ import {
 } from '../../spec-helpers/page-events'
 import { settled } from '../../spec-helpers/promises'
 import { appIsStable } from '../../spec-helpers/stability'
+import { provideZonelessChangeDetection } from '../../spec-helpers/zoneless'
 import { withDefaultOptions } from '../features/with-default-options'
 import { injectQuery } from './inject-query'
 import { keepPreviousData } from './keep-previous-data'
@@ -5877,28 +5878,32 @@ describe('injectQuery', () => {
         expect(appIsStable()).toBe(true)
       }))
 
-      // Angular ticks from outside the zone when a test calls TestBed.tick(),
-      // or an app calls ApplicationRef.tick() there. Entering the zone for an
-      // answer that comes at once would make Angular start another tick in
-      // the middle of that one (NG0101).
-      it('lets Angular tick from outside the zone while a query answers at once', () => {
+      // Angular ticks from outside the zone when an app calls
+      // ApplicationRef.tick() there, as these specs do. Entering the zone for
+      // an answer that comes at once would make Angular start another tick in
+      // the middle of that one (NG0101). Angular 19 throws that error from a
+      // timer a moment later instead of handing it to the ErrorHandler, so
+      // these specs end with flush().
+      it('lets Angular tick from outside the zone while a query answers at once', fakeAsync(() => {
         const handleError = spyOn(TestBed.inject(ErrorHandler), 'handleError')
         const result = injectQuery(
           () => ({ queryKey: ['todos'], queryFn: () => of('v1') }),
           { injector: TestBed.inject(Injector) },
         )
 
-        TestBed.tick()
+        TestBed.inject(ApplicationRef).tick()
 
         expect(result.data()).toBe('v1')
         expect(handleError).not.toHaveBeenCalled()
-      })
+
+        flush()
+      }))
 
       // The same for a request asked for from inside the zone, answered in
       // the middle of such a tick, as a test double answering in a lifecycle
       // hook does. A failure with a retry to come leaves nothing else in the
       // zone to wait for.
-      it('lets Angular tick from outside the zone while a failure comes in, a retry to follow', () => {
+      it('lets Angular tick from outside the zone while a failure comes in, a retry to follow', fakeAsync(() => {
         const handleError = spyOn(TestBed.inject(ErrorHandler), 'handleError')
         const response = new Subject<string>()
         let answer: (() => void) | undefined
@@ -5923,15 +5928,20 @@ describe('injectQuery', () => {
         }
 
         const fixture = TestBed.createComponent(TodoList)
+        const app = TestBed.inject(ApplicationRef)
 
         // Change detection runs in the zone here, and asks for the query.
         fixture.detectChanges()
         answer = () => response.error(new Error('down'))
-        TestBed.tick()
+        // Attached as an app's components are, so the app's tick checks it.
+        app.attachView(fixture.componentRef.hostView)
+        app.tick()
 
         expect(fixture.componentInstance.todos.failureCount()).toBe(1)
         expect(handleError).not.toHaveBeenCalled()
-      })
+
+        flush()
+      }))
     })
   })
 
@@ -6135,7 +6145,7 @@ describe('injectQuery', () => {
       )
 
       // Effects are tied to the environment injector; flush them explicitly.
-      TestBed.tick()
+      TestBed.inject(ApplicationRef).tick()
 
       expect(queryFn).toHaveBeenCalledTimes(1)
       expect(result.isSuccess()).toBe(true)

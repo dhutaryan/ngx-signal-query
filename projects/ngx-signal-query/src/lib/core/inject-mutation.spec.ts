@@ -15,7 +15,6 @@ import {
   createEnvironmentInjector,
   effect,
   inject,
-  provideZonelessChangeDetection,
   signal,
 } from '@angular/core'
 import {
@@ -32,6 +31,7 @@ import { EMPTY, firstValueFrom, of, Subject, throwError } from 'rxjs'
 import { mountHost } from '../../spec-helpers/host'
 import { settled } from '../../spec-helpers/promises'
 import { appIsStable } from '../../spec-helpers/stability'
+import { provideZonelessChangeDetection } from '../../spec-helpers/zoneless'
 import { withDefaultOptions } from '../features/with-default-options'
 import { injectMutation } from './inject-mutation'
 import { injectQuery } from './inject-query'
@@ -1753,12 +1753,14 @@ describe('injectMutation', () => {
       expect(appIsStable()).toBe(true)
     }))
 
-    // Angular ticks from outside the zone when a test calls TestBed.tick(),
-    // or an app calls ApplicationRef.tick() there. A run an effect starts
+    // Angular ticks from outside the zone when an app calls
+    // ApplicationRef.tick() there, as these specs do. A run an effect starts
     // during such a tick is asked for from outside the zone, so its outcome
     // stays there: entering the zone for an answer that comes at once would
     // make Angular start another tick in the middle of that one (NG0101).
-    it('lets Angular tick from outside the zone while a run an effect starts answers at once', () => {
+    // Angular 19 throws that error from a timer a moment later instead of
+    // handing it to the ErrorHandler, so these specs end with flush().
+    it('lets Angular tick from outside the zone while a run an effect starts answers at once', fakeAsync(() => {
       const handleError = spyOn(TestBed.inject(ErrorHandler), 'handleError')
       const save = signal(false)
       const m = setup(() => ({ mutationFn: () => of('saved') }))
@@ -1769,17 +1771,19 @@ describe('injectMutation', () => {
         }),
       )
       save.set(true)
-      TestBed.tick()
+      TestBed.inject(ApplicationRef).tick()
 
       expect(m.isSuccess()).toBe(true)
       expect(handleError).not.toHaveBeenCalled()
-    })
+
+      flush()
+    }))
 
     // The same for a run asked for from inside the zone, answered in the
     // middle of such a tick, as a test double answering in a lifecycle hook
     // does. A run nobody waits for leaves nothing else in the zone to wait
     // for once it lands.
-    it('lets Angular tick from outside the zone while a run lands that nobody waits for', () => {
+    it('lets Angular tick from outside the zone while a run lands that nobody waits for', fakeAsync(() => {
       const handleError = spyOn(TestBed.inject(ErrorHandler), 'handleError')
       const ack = new Subject<string>()
       let answer: (() => void) | undefined
@@ -1799,6 +1803,7 @@ describe('injectMutation', () => {
       }
 
       const fixture = TestBed.createComponent(SaveTodo)
+      const app = TestBed.inject(ApplicationRef)
 
       fixture.detectChanges()
       // A click handler that starts the write and doesn't wait for it.
@@ -1806,11 +1811,15 @@ describe('injectMutation', () => {
         fixture.componentInstance.save.mutateAsync()
       })
       answer = () => ack.next('saved')
-      TestBed.tick()
+      // Attached as an app's components are, so the app's tick checks it.
+      app.attachView(fixture.componentRef.hostView)
+      app.tick()
 
       expect(fixture.componentInstance.save.isSuccess()).toBe(true)
       expect(handleError).not.toHaveBeenCalled()
-    })
+
+      flush()
+    }))
   })
 
   describe('concurrent calls', () => {

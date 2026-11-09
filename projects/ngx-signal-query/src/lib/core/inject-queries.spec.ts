@@ -1,4 +1,5 @@
 import {
+  ApplicationRef,
   Component,
   computed,
   Injector,
@@ -745,13 +746,13 @@ describe('injectQueries', () => {
       )
 
       // Effects are tied to the environment injector; flush them explicitly.
-      TestBed.tick()
+      TestBed.inject(ApplicationRef).tick()
 
       expect(queryFn).toHaveBeenCalledTimes(1)
       expect(results()[0].data()).toBe(10)
 
       ids.set([1, 2])
-      TestBed.tick()
+      TestBed.inject(ApplicationRef).tick()
 
       expect(results().length).toBe(2)
       expect(results()[1].data()).toBe(20)
