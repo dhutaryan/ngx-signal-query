@@ -1,4 +1,6 @@
-import { Injector, PendingTasks } from '@angular/core'
+import { type Injector, PendingTasks } from '@angular/core'
+
+import { isDestroyed } from './injector'
 
 /**
  * The app's pending tasks, reached through `injector` each time a task is
@@ -33,16 +35,5 @@ export function lazyPendingTasks(
         return () => undefined
       }
     },
-  }
-}
-
-// A destroyed injector throws for any token, its own included.
-function isDestroyed(injector: Injector): boolean {
-  try {
-    injector.get(Injector)
-
-    return false
-  } catch {
-    return true
   }
 }
