@@ -1556,6 +1556,23 @@ describe('injectQuery', () => {
         expect(inFlight()).toBe(1)
       })
 
+      it('keeps the request of the key it moves to when the key it left changes', () => {
+        const { queryFn, inFlight } = requests<string>()
+        const { fixture, value } = mount(
+          (id) => ({ queryKey: ['todo', id()], queryFn }),
+          1,
+        )
+
+        value.set(2)
+        fixture.detectChanges()
+        // Todo 1 changes after the component has left it, as when a save
+        // writes it.
+        client.setQueryData(['todo', 1], 'todo 1')
+        fixture.detectChanges()
+
+        expect(inFlight()).toBe(1)
+      })
+
       it('stops waiting for a retry at once', fakeAsync(() => {
         const { queryFn, fail } = requests<string>()
         const { fixture } = mount(() => ({
