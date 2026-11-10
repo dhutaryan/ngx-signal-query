@@ -253,7 +253,15 @@ export function createQueryObserver<TData, TError = Error>(
     }
 
     q.addObserver(subscriber)
-    cleanup(() => q.removeObserver(subscriber))
+    // Untracked, as Angular 20 runs cleanups anyway: Angular 19 runs them at
+    // the start of the effect's next run, where what they read becomes a
+    // dependency of the effect. Leaving q may cancel its request, which reads
+    // and writes q's state: that write, or any later one to q, would run the
+    // effect again, and that run's cleanup would leave the query the observer
+    // has just moved to.
+    //
+    // TODO: drop the untracked once the minimum supported Angular is 20.
+    cleanup(() => untracked(() => q.removeObserver(subscriber)))
   })
 
   // Memoized so options re-evaluations that leave the flag alone don't wake
