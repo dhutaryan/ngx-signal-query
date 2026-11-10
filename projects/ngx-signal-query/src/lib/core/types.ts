@@ -317,7 +317,8 @@ export interface DefaultQueryOptions {
  *
  * The hooks run in the injection context of the injector that provides the
  * client, so they can call `inject()` before their first `await`. Once that
- * injector is destroyed, they no longer run.
+ * injector is destroyed, or the app it's part of is torn down, they no longer
+ * run.
  */
 export interface DefaultMutationOptions {
   /** Retry policy on failure. Defaults to `0`: writes aren't retried. */

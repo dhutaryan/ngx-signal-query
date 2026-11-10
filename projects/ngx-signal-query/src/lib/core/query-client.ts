@@ -503,11 +503,11 @@ export class QueryClient {
     if (!hook) return
 
     return (...args) => {
-      // Once that injector is destroyed, the app the defaults belong to is
-      // gone: a run that lands after it, e.g. after its test has ended, skips
-      // them. So does one that lands while Angular tears the app down, a save
-      // a component starts as it goes say: the injector counts as destroyed
-      // by then (see isDestroyed).
+      // Once that injector, or one above it, is destroyed, the app the
+      // defaults belong to is gone: a run that lands after it, e.g. after its
+      // test has ended, skips them. So does one that lands while Angular tears
+      // the app down, a save a component starts as it goes say: the app's
+      // injector counts as destroyed by then (see isDestroyed).
       if (isDestroyed(this.#injector)) return
 
       return runInInjectionContext(this.#injector, () => hook(...args))

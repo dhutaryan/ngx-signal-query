@@ -9,10 +9,11 @@ import { isDestroyed } from './injector'
  * injected it along with the client would keep an app whose ErrorHandler
  * uses the client from starting.
  *
- * A fetch or a mutation run that starts once `injector` is destroyed goes on
- * without a task. Angular tears the app down that way after each server
- * render: it marks the injector destroyed before it destroys the components,
- * whose DestroyRef callbacks may still start one.
+ * A fetch or a mutation run that starts once `injector`, or one above it, is
+ * destroyed goes on without a task (see isDestroyed). Angular tears the app
+ * down that way after each server render: it marks the app's injector
+ * destroyed before it destroys the components, whose DestroyRef callbacks may
+ * still start one.
  *
  * Any other failure is thrown. On Angular 19, a fetch or a mutation started
  * while Angular creates the ErrorHandler, by a service the ErrorHandler

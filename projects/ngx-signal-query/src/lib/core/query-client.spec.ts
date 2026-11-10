@@ -4,6 +4,7 @@ import {
   EnvironmentInjector,
   NgZone,
   PLATFORM_ID,
+  createComponent,
   createEnvironmentInjector,
   effect,
   inject,
@@ -931,6 +932,53 @@ describe('QueryClient', () => {
       expect(() => app.destroy()).not.toThrow()
       expect(queryFn).toHaveBeenCalledTimes(1)
 
+      host.remove()
+    })
+  })
+
+  // A route's providers make an environment injector below the app's, which
+  // the router never destroys, not even with the app. As the app is torn down,
+  // the client's own injector still counts as alive, but what the client
+  // reaches through it from the app's injector is gone.
+  describe('when the app above the injector that provides it is torn down', () => {
+    it('runs a fetch a component starts as the app is torn down', async () => {
+      const queryFn = jasmine.createSpy('queryFn').and.returnValue(of('draft'))
+
+      @Component({ selector: 'nsq-draft', template: '' })
+      class Draft {
+        constructor() {
+          const client = inject(QueryClient)
+
+          inject(DestroyRef).onDestroy(() => {
+            client.fetchQuery(['draft'], queryFn)
+          })
+        }
+      }
+
+      const host = document.body.appendChild(
+        document.createElement('nsq-draft'),
+      )
+      const app = await createApplication({
+        providers: [provideZonelessChangeDetection()],
+      })
+      // Made as the router makes a route's, with the client among its
+      // providers.
+      const route = createEnvironmentInjector(
+        [provideQueryClient()],
+        app.injector,
+      )
+      const draft = createComponent(Draft, {
+        environmentInjector: route,
+        hostElement: host,
+      })
+
+      app.attachView(draft.hostView)
+
+      expect(() => app.destroy()).not.toThrow()
+      expect(queryFn).toHaveBeenCalledTimes(1)
+
+      // The router never destroys it; the spec does, to leave nothing behind.
+      route.destroy()
       host.remove()
     })
   })
