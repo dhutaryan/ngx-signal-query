@@ -2048,6 +2048,91 @@ describe('injectMutation', () => {
       expect(second).toHaveBeenCalledTimes(1)
       expect(m.data()).toBe(2)
     })
+
+    // The options function runs on every call, so it can throw then: say it
+    // reads the todo that's selected, and none is. Both calls throw its error
+    // before they change anything: the run before stays the one the mutation
+    // shows, and stays in the cache.
+    it('throws what the options function throws from mutate() and mutateAsync(), and sends nothing', () => {
+      const rename = jasmine.createSpy('rename').and.returnValue(of('saved'))
+      const todo = signal<{ id: number } | null>(null)
+      const noTodo = new Error('No todo selected')
+      const m = setup<string, Error, string>(() => {
+        const selected = todo()
+
+        if (!selected) throw noTodo
+
+        return { mutationFn: (title) => rename(selected.id, title) }
+      })
+
+      expect(() => m.mutate('Buy milk')).toThrow(noTodo)
+      expect(() => m.mutateAsync('Buy milk')).toThrow(noTodo)
+      expect(rename).not.toHaveBeenCalled()
+      expect(m.isIdle()).toBe(true)
+      expect(client.getMutationCache().getAll().length).toBe(0)
+    })
+
+    it('keeps the run in flight when the options throw, and shows how it went once it lands', () => {
+      const response = new Subject<string>()
+      const rename = jasmine.createSpy('rename').and.returnValue(response)
+      const todo = signal<{ id: number } | null>({ id: 1 })
+      const m = setup<string, Error, string>(() => {
+        const id = todo()!.id
+
+        return { mutationFn: (title) => rename(id, title) }
+      })
+      const cache = client.getMutationCache()
+
+      m.mutate('Buy milk')
+
+      const [inFlight] = cache.getAll()
+
+      todo.set(null)
+
+      expect(() => m.mutate('Buy bread')).toThrowError(TypeError)
+      expect(() => m.mutateAsync('Buy bread')).toThrowError(TypeError)
+
+      response.next('saved')
+      response.complete()
+
+      expect(m.isSuccess()).toBe(true)
+      expect(m.data()).toBe('saved')
+      expect(rename).toHaveBeenCalledOnceWith(1, 'Buy milk')
+      // It's still the run the mutation shows, so it stays in the cache.
+      expect(cache.getAll()).toEqual([inFlight])
+    })
+
+    it('keeps a settled run when the options throw, until its host is destroyed', () => {
+      const todo = signal<{ id: number } | null>({ id: 1 })
+
+      @Component({ template: '' })
+      class Host {
+        readonly rename = injectMutation(() => {
+          const id = todo()!.id
+
+          return { mutationFn: (title: string) => of(`${id}: ${title}`) }
+        })
+      }
+
+      const fixture: ComponentFixture<Host> = TestBed.createComponent(Host)
+      const { rename } = fixture.componentInstance
+      const cache = client.getMutationCache()
+
+      fixture.detectChanges()
+      rename.mutate('Buy milk')
+
+      const [run] = cache.getAll()
+
+      todo.set(null)
+
+      expect(() => rename.mutate('Buy bread')).toThrowError(TypeError)
+      expect(rename.data()).toBe('1: Buy milk')
+      expect(cache.getAll()).toEqual([run])
+
+      fixture.destroy()
+
+      expect(cache.getAll().length).toBe(0)
+    })
   })
 
   // withDefaultOptions({ mutations }) fills in what a mutation leaves unset,

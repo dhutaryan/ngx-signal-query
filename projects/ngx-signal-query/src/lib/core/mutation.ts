@@ -131,14 +131,19 @@ export type MutationOptions<TData, TError, TVariables, TContext> = {
 
 /** Reactive result returned by {@link injectMutation}; state fields are signals. */
 export type MutationResult<TData, TError, TVariables> = {
-  /** Triggers the mutation with the given variables. */
+  /**
+   * Triggers the mutation with the given variables. A failed write doesn't
+   * throw: it shows in the signals. If the options function throws, this
+   * throws its error before anything is sent.
+   */
   mutate: (variables: TVariables) => void
   /**
    * Triggers the mutation as `mutate()` does, and returns a promise of that
    * run: it resolves with the data once the last hook is done, or rejects
    * with the error once `onError` and `onSettled` are. Unlike `mutate()`, a
    * failure nobody catches surfaces as an unhandled rejection, as with any
-   * async call.
+   * async call. If the options function throws, this throws its error at
+   * once, as `mutate()` does, rather than returning a rejected promise.
    */
   mutateAsync: (variables: TVariables) => Promise<TData>
   /**

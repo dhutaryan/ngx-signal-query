@@ -29,7 +29,9 @@ import {
  * idempotent); opt in via `options.retry`. Whatever of `retry`, `retryDelay`
  * and the `onSuccess` / `onError` / `onSettled` hooks a mutation leaves unset
  * comes from {@link withDefaultOptions}. `mutateAsync(variables)` runs it
- * the same way and returns a promise of the run's data. `mutate()`,
+ * the same way and returns a promise of the run's data. Both call
+ * `optionsFn` each time; if it throws, they throw its error before anything
+ * is sent, and the signals keep showing the run before. `mutate()`,
  * `mutateAsync()` and `reset()` are safe to call from an effect: none makes
  * the effect depend on what it reads, such as the options or the previous
  * run. Bound to the current injection
@@ -46,7 +48,8 @@ import {
  * @typeParam TError - Type of the error thrown by `mutationFn`.
  * @typeParam TVariables - Type of the argument passed to `mutate()`.
  * @typeParam TContext - Type returned by `onMutate`, passed to later hooks.
- * @param optionsFn - Factory returning the {@link MutationOptions}.
+ * @param optionsFn - Factory returning the {@link MutationOptions}, called on
+ *   every `mutate()` and `mutateAsync()`.
  * @param options - Optional `injector` to use outside an injection context.
  * @returns A {@link MutationResult}: `mutate()`, `mutateAsync()`, `reset()`,
  *   and state signals (`status`, `data`, `error`, `isPending`, …).
@@ -121,13 +124,17 @@ export function injectMutation<
     // signals below follow, and returns its promise.
     const start = (variables: TVariables): Promise<TData> =>
       untracked(() => {
+        // Options are read per call, so a signal used in them stays live.
+        // First, so that if optionsFn throws, nothing has changed yet: the
+        // previous run is still observed, and the signals keep following it.
+        const options = client.defaultMutationOptions(optionsFn())
+
         // Stop observing the previous run. It isn't cancelled — if it's
         // still in flight it finishes and fires its hooks; it just no longer
         // feeds the signals below.
         current()?.removeObserver()
 
-        // Options are read per call, so a signal used in them stays live.
-        const run = cache.build(client.defaultMutationOptions(optionsFn()))
+        const run = cache.build(options)
 
         // Once the host is destroyed, nothing will remove an observer added
         // now, and a run with one never leaves the cache. So a run started

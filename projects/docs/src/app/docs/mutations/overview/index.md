@@ -135,7 +135,7 @@ protected async save(title: string): Promise<void> {
 }
 ```
 
-Catch what it rejects with. As with any `async` call, a rejection nobody handles surfaces as an unhandled rejection. `mutate()` never throws, which is why it's the one to call when nothing waits for the outcome.
+Catch what it rejects with. As with any `async` call, a rejection nobody handles surfaces as an unhandled rejection. `mutate()` doesn't throw when the write fails, which is why it's the one to call when nothing waits for the outcome. `mutate()` and `mutateAsync()` both throw at once if the options function itself throws: nothing is sent, and the signals keep showing the run before.
 
 ## Mutations don't retry
 
@@ -162,7 +162,7 @@ A few sharp edges, especially if you're arriving from TanStack Query.
 
 **A failing hook doesn't undo the write.** If `onSuccess` throws, the mutation still ends in `'success'`, because the write went through, `onSettled` still runs, and `mutateAsync()` resolves with the data; the same goes for `onError` and `onSettled`. The error isn't swallowed: it goes to your app's `ErrorHandler`, once, with zone.js or without, in the browser and during a server render, which still finishes. Only `onMutate` is different: if it fails, the request isn't sent and the mutation ends in `'error'`. (In TanStack Query, a failing `onSuccess` turns the mutation into an error.)
 
-**Calls aren't serialized.** Each `mutate()` is its own independent run, so two of them can be in flight at once and there's no `scope` option to queue them. The signals always track the **latest** call — an earlier run landing later won't hijack `data()` — but both writes do reach the server, and both fire their hooks. If the operation isn't safe to run twice, guard the trigger:
+**Calls aren't serialized.** Each `mutate()` is its own independent run, so two of them can be in flight at once and there's no `scope` option to queue them. The signals always track the **latest** run — an earlier one landing later won't hijack `data()` — but both writes do reach the server, and both fire their hooks. If the operation isn't safe to run twice, guard the trigger:
 
 ```html
 <button (click)="add(title())" [disabled]="addTodo.isPending()">Add</button>
