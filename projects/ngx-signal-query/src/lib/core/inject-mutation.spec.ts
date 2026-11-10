@@ -12,6 +12,7 @@ import {
   NgZone,
   PLATFORM_ID,
   type Signal,
+  createComponent,
   createEnvironmentInjector,
   effect,
   inject,
@@ -1336,6 +1337,54 @@ describe('injectMutation', () => {
       host.remove()
     })
 
+    // A route's providers make an environment injector below the app's, which
+    // the router never destroys, not even with the app. As the app is torn
+    // down, the client's own injector still counts as alive, but what the
+    // client reaches through it from the app's injector is gone.
+    it('runs a mutation its component starts as the whole app is torn down, with the client provided below the app', async () => {
+      const mutationFn = jasmine
+        .createSpy('mutationFn')
+        .and.returnValue(of('saved'))
+
+      @Component({ selector: 'nsq-draft-editor', template: '' })
+      class DraftEditor {
+        readonly saveDraft = injectMutation<string, Error, string>(() => ({
+          mutationFn,
+        }))
+
+        constructor() {
+          // Saves the draft on leave.
+          inject(DestroyRef).onDestroy(() => this.saveDraft.mutate('milk'))
+        }
+      }
+
+      const host = document.body.appendChild(
+        document.createElement('nsq-draft-editor'),
+      )
+      const app = await createApplication({
+        providers: [provideZonelessChangeDetection()],
+      })
+      // Made as the router makes a route's, with the client among its
+      // providers.
+      const route = createEnvironmentInjector(
+        [provideQueryClient()],
+        app.injector,
+      )
+      const editor = createComponent(DraftEditor, {
+        environmentInjector: route,
+        hostElement: host,
+      })
+
+      app.attachView(editor.hostView)
+
+      expect(() => app.destroy()).not.toThrow()
+      expect(mutationFn).toHaveBeenCalledOnceWith('milk')
+
+      // The router never destroys it; the spec does, to leave nothing behind.
+      route.destroy()
+      host.remove()
+    })
+
     it('drops a mutation started after the host is destroyed once its request lands', fakeAsync(() => {
       const created = new Subject<number>()
       const attached = new Subject<string>()
@@ -2472,6 +2521,66 @@ describe('injectMutation', () => {
       expect(onSuccess).not.toHaveBeenCalled()
       expect(onSettled).not.toHaveBeenCalled()
 
+      host.remove()
+    }))
+
+    // A client provided below the app's injector, by a route say, outlives
+    // the app: the router never destroys that injector. Its defaults belong
+    // to the app all the same.
+    it('skips the default hooks of a client provided below the app once the app is torn down', fakeAsync(() => {
+      const response = new Subject<string>()
+      const mutationFn = jasmine
+        .createSpy('mutationFn')
+        .and.returnValue(response)
+      const onSuccess = jasmine.createSpy('default onSuccess')
+      const onSettled = jasmine.createSpy('default onSettled')
+
+      @Component({ selector: 'nsq-draft-editor', template: '' })
+      class DraftEditor {
+        readonly saveDraft = injectMutation<string, Error, string>(() => ({
+          mutationFn,
+        }))
+      }
+
+      const host = document.body.appendChild(
+        document.createElement('nsq-draft-editor'),
+      )
+      let app!: ApplicationRef
+
+      void createApplication({
+        providers: [provideZonelessChangeDetection()],
+      }).then((created) => (app = created))
+      flushMicrotasks()
+
+      // Made as the router makes a route's, with the client among its
+      // providers.
+      const route = createEnvironmentInjector(
+        [
+          provideQueryClient(
+            withDefaultOptions({ mutations: { onSuccess, onSettled } }),
+          ),
+        ],
+        app.injector,
+      )
+      const editor = createComponent(DraftEditor, {
+        environmentInjector: route,
+        hostElement: host,
+      })
+
+      app.attachView(editor.hostView)
+      editor.instance.saveDraft.mutate('milk')
+      // The app is torn down while the save is in flight.
+      app.destroy()
+      response.next('saved')
+      response.complete()
+
+      expect(() => flush()).not.toThrow()
+      expect(mutationFn).toHaveBeenCalledOnceWith('milk')
+      expect(onSuccess).not.toHaveBeenCalled()
+      expect(onSettled).not.toHaveBeenCalled()
+
+      // The router never destroys it; the spec does, to leave nothing behind.
+      route.destroy()
       host.remove()
     }))
   })

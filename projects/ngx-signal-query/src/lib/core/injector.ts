@@ -1,22 +1,29 @@
-import { Injector } from '@angular/core'
+import { InjectionToken, type Injector } from '@angular/core'
+
+// No injector provides it, so a lookup of it, with a value to fall back on,
+// asks every injector up to the platform's, where a lookup of a token that
+// some injector provides would stop at that injector.
+const PROVIDED_NOWHERE = new InjectionToken<null>('PROVIDED_NOWHERE')
 
 /**
- * Whether `injector` is destroyed. Angular counts it destroyed as soon as it
- * starts destroying it: before it calls its services' ngOnDestroy,
- * ApplicationRef's among them, which destroys the app's components, and
- * before it runs its own DestroyRef callbacks. So this holds for the code
- * those run too, unlike a flag set from one of those callbacks.
+ * Whether `injector`, or any injector above it, is destroyed. A client that a
+ * route provides sits in an injector below the app's, which the router never
+ * destroys, not even along with the app. Once the app is torn down, that
+ * injector, and its DestroyRef, still count as alive, but whatever the client
+ * looks up through it from the app's injector throws.
  *
- * TODO: once the minimum supported Angular is 20.1, where DestroyRef.destroyed
- * became public, the callers can inject DestroyRef up front and read that
- * instead: looking it up through a destroyed injector throws too.
+ * Angular counts an injector destroyed as soon as it starts destroying it:
+ * before it calls its services' ngOnDestroy, ApplicationRef's among them,
+ * which destroys the app's components, and before it runs its own DestroyRef
+ * callbacks. So this holds for the code those run too, unlike a flag set from
+ * one of those callbacks.
  *
  * @internal
  */
 export function isDestroyed(injector: Injector): boolean {
-  // A destroyed injector throws for any token, its own included.
+  // A lookup throws as it reaches a destroyed injector.
   try {
-    injector.get(Injector)
+    injector.get(PROVIDED_NOWHERE, null)
 
     return false
   } catch {
