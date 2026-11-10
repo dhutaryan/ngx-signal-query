@@ -120,4 +120,4 @@ mutations: {
 },
 ```
 
-Once that injector is destroyed, because the app was torn down or its test has ended, a mutation that lands afterwards skips the default hooks: the app they belong to is gone.
+Once that injector is destroyed, because the app was torn down or its test has ended, a mutation that lands afterwards skips the default hooks: the app they belong to is gone. So does one a component starts as the app is torn down, to save a draft on leave say, since Angular counts the injector as destroyed before it destroys the components. The write is still sent, and the mutation's own hooks still run.

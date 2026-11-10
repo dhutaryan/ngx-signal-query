@@ -1,5 +1,4 @@
 import {
-  DestroyRef,
   EnvironmentInjector,
   inject,
   Injectable,
@@ -10,6 +9,7 @@ import type { Observable } from 'rxjs'
 
 import { onReconnect, onWindowFocus } from './browser-events'
 import { transferCache } from './hydration'
+import { isDestroyed } from './injector'
 import { inBrowser } from './platform'
 import { QueryCache } from './query-cache'
 import { MutationCache } from './mutation-cache'
@@ -59,18 +59,9 @@ export class QueryClient {
   readonly #onServer = !inBrowser()
   /** @internal */
   readonly #injector = inject(EnvironmentInjector)
-  /**
-   * Set once #injector is destroyed. TODO: read DestroyRef.destroyed instead
-   * once the minimum supported Angular is 20.1, where it became public.
-   *
-   * @internal
-   */
-  #destroyed = false
 
   /** @internal */
   constructor() {
-    inject(DestroyRef).onDestroy(() => (this.#destroyed = true))
-
     // With withHydration(), the cache carries over from the server render.
     // Here, before anything can read the cache: whatever reads it first, a
     // component or an app initializer, finds the server's data in it.
@@ -513,9 +504,11 @@ export class QueryClient {
 
     return (...args) => {
       // Once that injector is destroyed, the app the defaults belong to is
-      // gone: a run that lands after it, e.g. after its test has ended,
-      // skips them.
-      if (this.#destroyed) return
+      // gone: a run that lands after it, e.g. after its test has ended, skips
+      // them. So does one that lands while Angular tears the app down, a save
+      // a component starts as it goes say: the injector counts as destroyed
+      // by then (see isDestroyed).
+      if (isDestroyed(this.#injector)) return
 
       return runInInjectionContext(this.#injector, () => hook(...args))
     }

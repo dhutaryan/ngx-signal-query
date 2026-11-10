@@ -2426,6 +2426,54 @@ describe('injectMutation', () => {
       expect(onSuccess).not.toHaveBeenCalled()
       expect(m.isSuccess()).toBe(true)
     }))
+
+    // Angular counts that injector destroyed as soon as it starts tearing the
+    // app down, after each server render say, and destroys the components
+    // after that. A mutation one of them starts as it goes, with a write that
+    // answers at once, lands in between.
+    it('skips the default hooks for a mutation its component starts as the whole app is torn down', fakeAsync(() => {
+      const mutationFn = jasmine
+        .createSpy('mutationFn')
+        .and.returnValue(of('saved'))
+      const onSuccess = jasmine.createSpy('default onSuccess')
+      const onSettled = jasmine.createSpy('default onSettled')
+
+      @Component({ selector: 'nsq-draft-editor', template: '' })
+      class DraftEditor {
+        readonly saveDraft = injectMutation<string, Error, string>(() => ({
+          mutationFn,
+        }))
+
+        constructor() {
+          // Saves the draft on leave.
+          inject(DestroyRef).onDestroy(() => this.saveDraft.mutate('milk'))
+        }
+      }
+
+      const host = document.body.appendChild(
+        document.createElement('nsq-draft-editor'),
+      )
+      let app!: ApplicationRef
+
+      void createApplication({
+        providers: [
+          provideZonelessChangeDetection(),
+          provideQueryClient(
+            withDefaultOptions({ mutations: { onSuccess, onSettled } }),
+          ),
+        ],
+      }).then((created) => (app = created))
+      flushMicrotasks()
+      app.bootstrap(DraftEditor, host)
+      app.destroy()
+
+      expect(() => flush()).not.toThrow()
+      expect(mutationFn).toHaveBeenCalledOnceWith('milk')
+      expect(onSuccess).not.toHaveBeenCalled()
+      expect(onSettled).not.toHaveBeenCalled()
+
+      host.remove()
+    }))
   })
 
   // An effect that mutates or resets should depend only on what it reads
