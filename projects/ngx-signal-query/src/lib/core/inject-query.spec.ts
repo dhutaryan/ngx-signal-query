@@ -1941,6 +1941,35 @@ describe('injectQuery', () => {
       expect(client.getQueryCache().get(['todo', 1])).toBeUndefined()
     })
 
+    it('loads the key again once its options run again, even with no option changed', () => {
+      // Read by the options, though no option depends on it.
+      const unrelated = signal(0)
+      const { queryFn, resolve } = requests<string>()
+      const { fixture, result } = mount((id) => {
+        unrelated()
+
+        return { queryKey: ['todo', id()], queryFn, staleTime: Infinity }
+      }, 1)
+
+      resolve('v1')
+      fixture.detectChanges()
+      client.removeQueries({ queryKey: ['todo', 1] })
+      fixture.detectChanges()
+      unrelated.set(1)
+      fixture.detectChanges()
+
+      // The key is back as a new entry, with no data for staleTime to keep.
+      expect(queryFn).toHaveBeenCalledTimes(2)
+      expect(result.isPending()).toBe(true)
+      expect(result.data()).toBeUndefined()
+
+      resolve('v2')
+      fixture.detectChanges()
+
+      expect(result.data()).toBe('v2')
+      expect(client.getQueryData(['todo', 1])).toBe('v2')
+    })
+
     it('stays without data when removed during its first load', () => {
       const { queryFn, inFlight, cancelled } = requests<string>()
       const { fixture, result } = mount(
@@ -6038,6 +6067,27 @@ describe('injectQuery', () => {
       expect(queryFn).toHaveBeenCalledTimes(3)
       expect(result.data()).toBe('todo 1')
       expect(result.isFetching()).toBe(true)
+    })
+
+    it("doesn't refetch fresh data when the key switches back to it", () => {
+      const { queryFn, resolve } = requests<string>()
+      const { fixture, result, value } = mount(
+        (id) => ({ queryKey: ['todo', id()], queryFn, staleTime: 60_000 }),
+        1,
+      )
+
+      resolve('todo 1')
+      fixture.detectChanges()
+      value.set(2)
+      fixture.detectChanges()
+      resolve('todo 2')
+      fixture.detectChanges()
+      value.set(1)
+      fixture.detectChanges()
+
+      expect(queryFn).toHaveBeenCalledTimes(2)
+      expect(result.data()).toBe('todo 1')
+      expect(result.isFetching()).toBe(false)
     })
 
     it('refetches cached data in the background when enabled turns true', () => {

@@ -32,7 +32,10 @@ import { requestOutsideZone } from './zone'
 /** Lifecycle status of a mutation: not yet run, running (hooks included), succeeded, or failed. */
 export type MutationStatus = 'idle' | 'pending' | 'success' | 'error'
 
-/** Selects which mutations an operation applies to (e.g. `injectIsMutating`). */
+/**
+ * Selects mutations by status, for the library's own lookups. No public API
+ * takes it, `injectIsMutating` included.
+ */
 export type MutationFilters = {
   /** Match mutations in this status. */
   status?: MutationStatus

@@ -130,7 +130,7 @@ const todos = client.getQueryData<Todo[]>(queries.list().queryKey)
 
 ## Testing
 
-A pleasant side effect: query definitions become plain, testable objects. No component, no `TestBed`, no rendering — just call the method and assert:
+A pleasant side effect: query definitions become plain, testable objects. No component, no rendering — get the service from `TestBed`, call the method and assert (see [Testing](/testing)):
 
 ```ts
 it('builds a stable key per id', () => {
@@ -140,4 +140,4 @@ it('builds a stable key per id', () => {
 
 ## Mutations too
 
-`mutationOptions()` is the same idea on the write side, and it earns its keep even harder there: it links the `TContext` returned by `onMutate` to the `context` argument of `onSuccess` / `onError` / `onSettled`, so optimistic rollbacks type-check. More on that in the Mutations guides.
+`mutationOptions()` is the same idea on the write side: a mutation defined once, in a service, typed as `injectMutation` would type it inline, `context` from `onMutate` included. More on that in [Mutation Options](/mutations/mutation-options).

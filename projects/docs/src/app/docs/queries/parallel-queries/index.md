@@ -54,11 +54,17 @@ Every entry behaves exactly like a standalone `injectQuery`: its own cache entry
 ```html
 <ul>
   @for (todo of todos(); track todo) {
-  <li>
-    @if (todo.isLoading()) { Loading… } @else if (todo.data(); as data) { {{
-    data.title }} } @else if (todo.isError()) { Failed: {{ todo.error()?.message
-    }} }
-  </li>
+    <li>
+      @if (todo.isLoading()) {
+        Loading…
+      } @else {
+        @if (todo.data(); as data) {
+          {{ data.title }}
+        } @else if (todo.isError()) {
+          Failed: {{ todo.error()?.message }}
+        }
+      }
+    </li>
   }
 </ul>
 ```

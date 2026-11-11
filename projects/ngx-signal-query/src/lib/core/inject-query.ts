@@ -28,7 +28,9 @@ import type { QueryOptions, QueryResult } from './types'
  * @param optionsFn - Factory returning the {@link QueryOptions}. Re-evaluated
  *   reactively: a new `queryKey` switches to that query and fetches it, and
  *   turning `enabled` on starts the fetch. Re-evaluating with the same key
- *   does not refetch, so every value `queryFn` reads belongs in the key.
+ *   does not refetch, so every value `queryFn` reads belongs in the key. A
+ *   key that `removeQueries()` or `clear()` dropped is the exception:
+ *   re-evaluating puts it back and fetches it as it would a new key.
  * @param options - Optional `injector` to use outside an injection context.
  * @returns A {@link QueryResult} of signals (`data`, `status`, `error`,
  *   `isLoading`, `isPending`, …) plus a `refetch()` that forces a fresh fetch.

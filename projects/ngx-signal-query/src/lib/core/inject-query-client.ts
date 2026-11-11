@@ -3,7 +3,9 @@ import { type Injector, assertInInjectionContext, inject } from '@angular/core'
 import { QueryClient } from './query-client'
 
 /**
- * Returns the application's {@link QueryClient} for imperative cache access.
+ * Returns the {@link QueryClient} the injection context (or the given
+ * `injector`) sees, for imperative cache access: the app's, unless a route or
+ * another environment injector provides one of its own.
  *
  * Use it to read or write cached data (`getQueryData`, `setQueryData`) and to
  * invalidate, cancel, or remove queries — typically from mutation hooks or
@@ -12,7 +14,7 @@ import { QueryClient } from './query-client'
  * Must run in an injection context, or be given an explicit `injector`.
  *
  * @param options - Optional `injector` to use outside an injection context.
- * @returns The shared {@link QueryClient} instance.
+ * @returns That {@link QueryClient}.
  *
  * @example
  * ```ts
