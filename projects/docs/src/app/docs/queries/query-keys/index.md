@@ -72,7 +72,7 @@ export class TodoComponent {
 }
 ```
 
-Calling `todoId.set(2)` switches the query to the key `['todo', 2]`: it starts observing the new entry, fetching it if needed. The data for `['todo', 1]` **stays in the cache** — flip back and it's there instantly, no refetch.
+Calling `todoId.set(2)` switches the query to the key `['todo', 2]`: it starts observing the new entry, fetching it if needed. The data for `['todo', 1]` **stays in the cache** — flip back and it's there instantly. With the [default](/important-defaults) `staleTime` of `0` it's stale by then, so it also refetches in the background; a `staleTime` skips that while the data is fresh.
 
 This leads to the single most important rule on this page:
 

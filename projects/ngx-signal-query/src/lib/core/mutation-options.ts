@@ -3,9 +3,12 @@ import type { MutationOptions } from './mutation'
 /**
  * Identity helper that defines a typed, reusable set of {@link MutationOptions}.
  *
- * Returns the options unchanged at runtime; its job is to anchor type inference
- * (notably linking `TContext` returned by `onMutate` to the later hooks) so a
- * mutation can be defined once in a service and passed to {@link injectMutation}.
+ * Returns the options unchanged at runtime. It types a mutation defined
+ * outside {@link injectMutation}, in a service say, as `injectMutation` types
+ * one written inline: the hooks get the variables, the data and, as
+ * `context`, what `onMutate` returns. TypeScript infers `context` in the
+ * order the object is written, so put `onMutate` above the hooks that take
+ * it.
  *
  * @typeParam TData - Type of the data resolved by `mutationFn`.
  * @typeParam TError - Type of the error thrown by `mutationFn`.

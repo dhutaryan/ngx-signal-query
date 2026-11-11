@@ -30,7 +30,9 @@ this.#client.removeQueries({ queryKey: ['todos', 5], exact: true })
 this.#client.removeQueries()
 ```
 
-A component that shows one of those keys afterwards finds nothing cached: a cold fetch, with a loading state. A component already showing one keeps what it shows — removal refetches nothing — until something puts the key back in the cache: a refetch, data written with `setQueryData`, another component, or its own polling. From then on it shows what the cache holds again.
+A component that shows one of those keys afterwards finds nothing cached: a cold fetch, with a loading state. A component already showing one keeps what it shows — removal refetches nothing — until something puts the key back in the cache: a refetch, data written with `setQueryData`, another component, its own polling, or its options function running again. From then on it shows what the cache holds again.
+
+A component's options function runs again whenever a signal it reads changes, one of the component's inputs say, even if no option ends up different. After a removal, that's enough to bring the key back as one the component has never shown: a cold fetch with a loading state, unless `placeholderData` or `initialData` fills in; a disabled query shows no data and fetches nothing.
 
 Reach for it when data should be **gone**, not merely refreshed, such as when leaving a feature area for good, to free memory you won't need again. On logout, empty the whole cache with [`clear()`](/query-client/cancellation-and-removal#clear--empty-the-cache) instead: it removes every query the same way, and forgets the mutations too.
 

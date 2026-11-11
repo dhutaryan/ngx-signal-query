@@ -390,7 +390,10 @@ export class QueryClient {
    * and cancelling their fetches. Nothing is refetched: a component still
    * showing a removed key keeps what it shows until something puts the key
    * back in the cache (a write, a refetch, another component, its own
-   * polling), then shows what the cache holds, as after a key change.
+   * polling, its options function running again), then shows what the cache
+   * holds, as after a key change. The options function runs again whenever a
+   * signal it reads changes, even if no option ends up different, and the
+   * component then fetches the key as it would a new one.
    *
    * @param filters - Which queries to remove; omit to remove all.
    */

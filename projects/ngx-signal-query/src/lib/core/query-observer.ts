@@ -175,11 +175,13 @@ export function createQueryObserver<TData, TError = Error>(
   )
 
   // After removeQueries the observer keeps the query the cache dropped and
-  // shows what it had: nothing here brings the key back, as in TanStack, where
-  // a removal doesn't refetch. Whatever does bring it back (a write, a refetch,
-  // another component, a poll), the observer follows it there as on a key
-  // change: resolve() seeds initialData into an entry still pending. Without
-  // this, it would see the new entry only once its options change.
+  // shows what it had: the removal refetches nothing, as in TanStack. The key
+  // comes back with a write, a refetch, another component, a poll, or the
+  // next run of optionsFn, after which the key effect above resolves the key
+  // into a new entry and the fetch effect fetches it. Whatever else brings it
+  // back, the observer follows it there as on a key change: resolve() seeds
+  // initialData into an entry still pending. Without this, it would see the
+  // new entry only on the next run of optionsFn.
   track(() => {
     const entry = cached()
 

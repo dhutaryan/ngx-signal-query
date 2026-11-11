@@ -67,8 +67,10 @@ export class ReportComponent {
 
 @if (report.isFetching()) {
   <p>Crunching…</p>
-} @else if (report.data(); as data) {
-  <p>Total: {{ data.total }}</p>
+} @else {
+  @if (report.data(); as data) {
+    <p>Total: {{ data.total }}</p>
+  }
 }
 ```
 

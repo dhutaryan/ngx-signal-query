@@ -63,13 +63,15 @@ Use **`isLoading()`** for "a request is genuinely in flight, and there's no data
 
 ```html
 @if (projects.isLoading()) {
-<p>Loading projects…</p>
-} @else if (projects.data(); as data) {
-<ul>
-  @for (project of data; track project.id) {
-  <li>{{ project.name }}</li>
+  <p>Loading projects…</p>
+} @else {
+  @if (projects.data(); as data) {
+    <ul>
+      @for (project of data; track project.id) {
+        <li>{{ project.name }}</li>
+      }
+    </ul>
   }
-</ul>
 }
 ```
 

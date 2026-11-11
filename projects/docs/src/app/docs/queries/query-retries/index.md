@@ -31,12 +31,16 @@ Retrying a `404` or a `403` is pointless — the answer won't change. The useful
 ```ts
 import { HttpErrorResponse } from '@angular/common/http'
 
+// Worth another try: no response at all (status 0), a timeout, rate limiting,
+// or a server error. Other HTTP statuses rarely change on a retry.
+const transient = (status: number): boolean =>
+  status === 0 || status === 408 || status === 429 || status >= 500
+
 injectQuery(() => ({
   queryKey: ['todos'],
   queryFn: () => this.#http.get<Todo[]>('/api/todos'),
   retry: (failureCount, error) => {
-    // Client errors are permanent — give up at once.
-    if (error instanceof HttpErrorResponse && error.status < 500) {
+    if (error instanceof HttpErrorResponse && !transient(error.status)) {
       return false
     }
 
@@ -44,6 +48,8 @@ injectQuery(() => ({
   },
 }))
 ```
+
+`HttpClient` reports a request that got no response at all, because the user is offline, a DNS lookup failed or the connection dropped, with status `0`: that's where a retry helps most, so a check like `status < 500` gives up too soon. A `429` gets through to `retryDelay` below, which waits longer for it.
 
 ## `retryDelay`
 

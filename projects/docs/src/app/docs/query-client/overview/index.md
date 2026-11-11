@@ -1,4 +1,4 @@
-The **query client** owns the cache. Every query and mutation reads and writes through it, and there's exactly one for your whole application — the one you set up at startup:
+The **query client** owns the cache. Every query and mutation reads and writes through it. An app sets one up at startup, and these docs assume it has just that one:
 
 ```ts
 // app.config.ts
@@ -21,7 +21,7 @@ export class TodosComponent {
 }
 ```
 
-It's the same instance everywhere, so a write in one place is visible everywhere else.
+With that one client, it's the same instance everywhere, so a write in one place is visible everywhere else.
 
 ## What it can do
 
@@ -81,4 +81,4 @@ The client also exposes `isFetching()` and `isMutating()` as plain numbers, but 
 
 ## A note on scope
 
-There's one client per application, provided at the root. Per-route or per-component clients, and the multi-client setups you might know from TanStack Query, aren't a thing here — the cache is global, and that's the whole model.
+There's one client per application, provided at the root, and the cache is global: that's the model these docs describe.

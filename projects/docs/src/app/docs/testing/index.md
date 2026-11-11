@@ -223,21 +223,31 @@ A query's `refetch()` and the client's `fetchQuery()` and `invalidateQueries()` 
 
 ## Test the definitions directly
 
-If you keep queries and mutations in a service with `queryOptions` / `mutationOptions`, the definitions are plain objects — you can assert on them with no `TestBed` at all:
+If you keep queries and mutations in a service with `queryOptions` / `mutationOptions`, the definitions are plain objects. Get the service from `TestBed`, with what it injects mocked, and assert on what its methods return — no component, nothing rendered:
 
 ```ts
+beforeEach(() => {
+  TestBed.configureTestingModule({
+    providers: [
+      provideQueryClient(),
+      { provide: HttpClient, useValue: httpMock },
+    ],
+  })
+})
+
 it('builds the right key', () => {
-  const queries = new TodoQueries(httpMock)
+  const queries = TestBed.inject(TodoQueries)
 
   expect(queries.detail(5).queryKey).toEqual(['todos', 'detail', 5])
 })
 
 it('invalidates on success', () => {
-  const options = mutations.add()
+  const invalidate = spyOn(TestBed.inject(QueryClient), 'invalidateQueries')
+  const options = TestBed.inject(TodoMutations).add()
 
   options.onSuccess?.(todo, 'Buy milk', undefined)
 
-  expect(invalidateSpy).toHaveBeenCalled()
+  expect(invalidate).toHaveBeenCalled()
 })
 ```
 

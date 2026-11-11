@@ -34,7 +34,7 @@ export class AddTodoComponent {
 
 For queries, the win from `queryOptions` is mostly not repeating the key. For mutations there's no key — so what does `mutationOptions` actually buy you?
 
-**It links the hooks' types together.** The value `onMutate` returns becomes the `context` argument of `onSuccess` / `onError` / `onSettled`. Writing that inline, TypeScript infers the chain but it's easy to drift. `mutationOptions` pins all four generics in one place, so an optimistic rollback type-checks end to end:
+**It gives a mutation defined outside `injectMutation` its types.** Inline, `injectMutation(() => ({ … }))` types the hooks for you: the variables, the data, and the `context` argument of `onSuccess` / `onError` / `onSettled`, which is the value `onMutate` returns. An object a service method returns has nothing to take its types from, so its hooks' parameters are implicitly `any`, an error under `strict`. `mutationOptions` types it as `injectMutation` would, so an optimistic rollback type-checks end to end:
 
 ```ts
 public add() {
@@ -65,6 +65,8 @@ public add() {
 
 Get `context?.previous` wrong — a typo, the wrong shape — and it's a compile error, not a broken rollback at runtime.
 
+Inline or not, **write `onMutate` above the hooks that take `context`**. TypeScript infers `context` in the order the object is written: with `onError: (error, title, context) => …` above `onMutate: (title) => …`, it's `unknown` in every hook.
+
 ## Overriding per component
 
 The returned object is plain, so spread it to tweak one field locally:
@@ -80,7 +82,7 @@ Note a spread **replaces** a hook, it doesn't stack — the override's `onSucces
 
 ## Testing
 
-Same payoff as `queryOptions`: a mutation definition is a plain object you can build and assert without a component or `TestBed`:
+Same payoff as `queryOptions`: a mutation definition is a plain object. A test gets the service from `TestBed` and calls its hooks, with no component and nothing rendered (see [Testing](/testing)):
 
 ```ts
 it('invalidates todos on success', () => {
@@ -94,4 +96,4 @@ it('invalidates todos on success', () => {
 
 ## No `mutationKey`
 
-If you're coming from TanStack Query: there's no `mutationKey` here. Mutations aren't looked up by key, so there's nothing to name them with, and the mutation cache can only be filtered by `status` (which is what `injectIsMutating` uses). `mutationOptions` is purely about typing and reuse, not identity.
+If you're coming from TanStack Query: there's no `mutationKey` here. Mutations aren't looked up by key, so there's nothing to name them with, and they aren't filtered: `injectIsMutating` takes no filter. `mutationOptions` is purely about typing and reuse, not identity.

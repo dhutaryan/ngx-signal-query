@@ -35,7 +35,7 @@ queryOptions({
 
 The default is **`0`** — data is stale the instant it arrives. That's why, out of the box, a query refetches every time a new component mounts it, or the user comes back to the tab: it's never considered fresh. Turn that off by raising `staleTime`.
 
-At the other end, **`Infinity`** means never stale — the query fetches once and then only ever refetches when you invalidate it by hand.
+At the other end, **`Infinity`** means never stale: mounting, switching keys, refocusing the tab and reconnecting never refetch it. It refetches only when asked to: by `invalidateQueries()`, `refetch()`, `refetchQueries()`, polling, or `refetchOnWindowFocus` / `refetchOnReconnect` set to `'always'`.
 
 Stale data isn't thrown away. A stale query still shows its cached data immediately and refetches in the background — you never stare at a blank screen waiting for a refresh.
 

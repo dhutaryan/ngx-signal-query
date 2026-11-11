@@ -81,10 +81,10 @@ A query fails when the `Observable` errors or the `Promise` rejects. Whatever wa
 
 **With `HttpClient` you get this for free** — it errors automatically on any non-2xx response, so a 404 or 500 becomes a failed query with no extra code.
 
-**With `fetch` you don't.** `fetch` only rejects on network failure; an HTTP 404 or 500 resolves _successfully_. If you don't check the status yourself, a 404 HTML error page gets cached as if it were valid data:
+**With `fetch` you don't.** `fetch` only rejects on network failure; an HTTP 404 or 500 resolves _successfully_. If you don't check the status yourself, an error the server sends as JSON gets cached as if it were valid data, and an HTML error page fails with a `SyntaxError` from `json()` rather than its status:
 
 ```ts
-// ❌ a 500 lands in the cache as "successful" data
+// ❌ a 404 or 500 with a JSON body lands in the cache as "successful" data
 queryFn: () => fetch('/api/todos').then((r) => r.json())
 
 // ✅ turn a bad status into a real error
