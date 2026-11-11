@@ -279,9 +279,10 @@ export function createQueryObserver<TData, TError = Error>(
   // Invalidation isn't a trigger: invalidateQueries() refetches each active
   // query once itself. A query it skipped (unobserved, or its observers
   // disabled) stays invalidated, so it fetches here once observed or enabled:
-  // shouldFetch sees the flag. The key and queryFn come from one read of the
-  // options, so the fetch can't go to another key's query, whatever order the
-  // effects run in.
+  // shouldFetch sees the flag. A fetch from before the invalidation that still
+  // runs is joined, not replaced; the flag outlives it, so the next trigger
+  // refetches. The key and queryFn come from one read of the options, so the
+  // fetch can't go to another key's query, whatever order the effects run in.
   track(() => {
     query()
 

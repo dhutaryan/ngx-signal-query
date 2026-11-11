@@ -7,7 +7,7 @@ Cached data goes out of date, and `invalidateQueries` is how you say so. It mark
 Two steps, both right away:
 
 1. **Mark stale.** The matching queries are flagged — regardless of their `staleTime`. Invalidation overrides it; that's the point.
-2. **Refetch, if anyone's looking.** A query that's currently observed starts refetching in the background — one request, however many components observe it — and keeps its old data visible until the new data lands (`isFetching()` goes `true`, `data()` doesn't blank). A request already in flight is cancelled and restarted, since it may have read the data before the change. A query nobody is observing just keeps the stale mark and refetches the next time a component uses it.
+2. **Refetch, if anyone's looking.** A query that's currently observed starts refetching in the background — one request, however many components observe it — and keeps its old data visible until the new data lands (`isFetching()` goes `true`, `data()` doesn't blank). A request already in flight is cancelled and restarted, since it may have read the data before the change. A query nobody is observing just keeps the stale mark and refetches the next time a component uses it. A fetch of it that was already running still lands, but the query stays marked, as that data may predate the change: a component that starts using the query meanwhile waits for that fetch, and the query refetches the next time stale data would.
 
 So it's cheap: nothing hits the network unless it's actually needed on screen.
 
@@ -88,7 +88,7 @@ this.#client.invalidateQueries({
 })
 ```
 
-Each one then refetches the next time stale data would: a component starts showing it, the user comes back to the tab, the network comes back. Use it when a refetch now would be wasted, e.g. while more writes to the same data are on their way.
+Each one then refetches the next time stale data would: a component starts showing it, the user comes back to the tab, the network comes back. A fetch already running isn't stopped: it lands, the query stays marked, and the refetch comes with the next of these after that. Use it when a refetch now would be wasted, e.g. while more writes to the same data are on their way.
 
 ## Refetching without marking: `refetchQueries`
 

@@ -110,7 +110,7 @@ The library cancels an in-flight fetch by **unsubscribing** from it. What that d
 
 So when no component shows a key any more (the last one showing it is destroyed, or its reactive key moves on), a fetch still running stops only if it's an `Observable`. A `Promise` fetch runs on, and its response is cached as usual: come back before the query is [removed](/query-client/caching), and the data shows at once. Until then it still counts as fetching, in `injectIsFetching()` too, and keeps the app busy: a server render and `whenStable()` wait for it. Nobody is left to want a failure tried again, though, so a failed attempt isn't retried, unless a component shows the key again before the fetch ends.
 
-`refetch()` and `invalidateQueries()` cancel a fetch in flight to start a fresh one, and `cancelQueries()` and `removeQueries()` cancel it outright, whatever `queryFn` returned: a promise's response is ignored then.
+`refetch()` cancels a fetch in flight to start a fresh one, and so do `invalidateQueries()` and `refetchQueries()` for a query a component shows, and `fetchQuery()` with `cancelRefetch`; `cancelQueries()` and `removeQueries()` cancel it outright. Whatever `queryFn` returned, a promise's response is ignored then.
 
 So pick per query. To leave no requests behind (rapid typing in a search box, say), use `HttpClient` and its `Observable`. To keep a response the user may come back for, return a promise, e.g. `lastValueFrom(this.#http.get(...))`. Don't wrap a promise in an `Observable` (`from(fetch(...))`): unsubscribing can't abort the request, and its response is thrown away. Return the promise itself.
 

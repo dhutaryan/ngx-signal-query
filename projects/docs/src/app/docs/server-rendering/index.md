@@ -37,7 +37,7 @@ Only the page the browser loads first comes with data: navigating within the app
 
 ## Fresh or stale
 
-The data counts as fetched when the server fetched it, and `staleTime` decides as for any data in the cache. With the default of `0`, it's stale by the time the browser has it: each component refetches its query in the background as it appears, showing the server's data meanwhile. To skip that request, set a `staleTime` longer than a page takes to reach the browser and boot, as the 30 seconds above.
+The data counts as fetched when the server fetched it, and `staleTime` decides as for any data in the cache. With the default of `0`, it's stale by the time the browser has it: each component refetches its query in the background as it appears, showing the server's data meanwhile. To skip that request, set a `staleTime` longer than a page takes to reach the browser and boot, as the 30 seconds above. A query still marked stale by `invalidateQueries()` when the page is rendered comes over marked, and refetches as it appears, whatever its `staleTime`.
 
 A page prerendered at build time, or served from a cache, carries data as old as the page: once that's older than `staleTime`, the browser refetches it in the background.
 
