@@ -971,6 +971,218 @@ describe('injectQuery', () => {
       expect(queryFn).toHaveBeenCalledTimes(2)
     })
 
+    // A fetch already in flight when the query is invalidated may have read
+    // the data before the change: when nothing replaces it, its response
+    // mustn't clear the stale mark. One that started after the invalidation
+    // read the data after it, and clears the mark as usual.
+    it('keeps the stale mark when a prefetch from before the invalidation lands', () => {
+      const prefetch = requests<string>()
+      const queryFn = jasmine.createSpy('queryFn').and.returnValue(of('fresh'))
+
+      // Nobody shows the key yet, so the invalidation only marks it.
+      client.fetchQuery(['todo', 1], prefetch.queryFn)
+      client.invalidateQueries({ queryKey: ['todo', 1] })
+      prefetch.resolve('read before the change')
+
+      const { result } = mount(
+        (id) => ({ queryKey: ['todo', id()], queryFn, staleTime: Infinity }),
+        1,
+      )
+
+      // Fresh for staleTime: Infinity, so only the stale mark makes it fetch.
+      expect(queryFn).toHaveBeenCalledTimes(1)
+      expect(result.data()).toBe('fresh')
+    })
+
+    it('keeps the stale mark when a fetchQuery waits for the prefetch from before the invalidation', fakeAsync(() => {
+      const prefetch = requests<string>()
+      const queryFn = jasmine.createSpy('queryFn').and.returnValue(of('fresh'))
+
+      client.fetchQuery(['todo', 1], prefetch.queryFn)
+      client.invalidateQueries({ queryKey: ['todo', 1] })
+
+      // A key already fetching is waited for, not fetched again.
+      const waited = settled(
+        client.fetchQuery(['todo', 1], () => of('not asked')),
+      )
+
+      prefetch.resolve('read before the change')
+      flushMicrotasks()
+
+      expect(waited).toEqual({ value: 'read before the change' })
+
+      const { result } = mount(
+        (id) => ({ queryKey: ['todo', id()], queryFn, staleTime: Infinity }),
+        1,
+      )
+
+      // Fresh for staleTime: Infinity, so only the stale mark makes it fetch.
+      expect(queryFn).toHaveBeenCalledTimes(1)
+      expect(result.data()).toBe('fresh')
+    }))
+
+    it('keeps the stale mark when a first load outlives its component and lands after the invalidation', fakeAsync(() => {
+      const firstLoad = deferred<string>()
+      const queryFn = jasmine
+        .createSpy('queryFn')
+        .and.returnValues(firstLoad.promise, Promise.resolve('fresh'))
+      const options = (id: Signal<number>): QueryOptions<string> => ({
+        queryKey: ['todo', id()],
+        queryFn,
+        staleTime: Infinity,
+      })
+
+      // Leaving doesn't stop a promise: it lands after an invalidation that
+      // only marked the key, as nobody showed it any more.
+      mount(options, 1).fixture.destroy()
+      client.invalidateQueries({ queryKey: ['todo', 1] })
+      firstLoad.resolve('read before the change')
+      flushMicrotasks()
+
+      const { result } = mount(options, 1)
+
+      flushMicrotasks()
+
+      expect(queryFn).toHaveBeenCalledTimes(2)
+      expect(result.data()).toBe('fresh')
+    }))
+
+    it("keeps the stale mark when refetchType 'none' comes during a refetch", () => {
+      const { queryFn, resolve } = requests<string>()
+      const { result } = mount(
+        (id) => ({ queryKey: ['todo', id()], queryFn, staleTime: Infinity }),
+        1,
+      )
+
+      resolve('cached')
+      result.refetch()
+      client.invalidateQueries({ queryKey: ['todo', 1], refetchType: 'none' })
+      resolve('read before the change')
+
+      // Back on the tab: still marked, so it refetches, although the data is
+      // fresh for staleTime: Infinity.
+      leaveAndComeBack()
+      resolve('fresh')
+
+      expect(queryFn).toHaveBeenCalledTimes(3)
+      expect(result.data()).toBe('fresh')
+    })
+
+    it("keeps the stale mark when refetchType 'none' comes during a first load", () => {
+      const { queryFn, resolve } = requests<string>()
+      const options = (id: Signal<number>): QueryOptions<string> => ({
+        queryKey: ['todo', id()],
+        queryFn,
+        staleTime: Infinity,
+      })
+
+      mount(options, 1)
+      client.invalidateQueries({ queryKey: ['todo', 1], refetchType: 'none' })
+      resolve('read before the change')
+
+      // Another component starts showing the key: still marked, so it
+      // refetches.
+      const { result } = mount(options, 1)
+
+      resolve('fresh')
+
+      expect(queryFn).toHaveBeenCalledTimes(2)
+      expect(result.data()).toBe('fresh')
+    })
+
+    it('keeps the stale mark when invalidated again during the fetch the mark started', () => {
+      const prefetch = requests<string>()
+      const queryFn = jasmine.createSpy('queryFn').and.returnValue(of('fresh'))
+
+      client.setQueryData(['todo', 1], 'cached')
+      client.invalidateQueries({ queryKey: ['todo', 1] })
+      // Only the mark makes this fetch; the query stays marked while it runs.
+      client.fetchQuery(['todo', 1], prefetch.queryFn, { staleTime: Infinity })
+      client.invalidateQueries({ queryKey: ['todo', 1] })
+      prefetch.resolve('read before the second change')
+
+      const { result } = mount(
+        (id) => ({ queryKey: ['todo', id()], queryFn, staleTime: Infinity }),
+        1,
+      )
+
+      expect(queryFn).toHaveBeenCalledTimes(1)
+      expect(result.data()).toBe('fresh')
+    })
+
+    it('clears the stale mark once a retry started after the invalidation lands', fakeAsync(() => {
+      const prefetch = requests<string>()
+      const queryFn = jasmine.createSpy('queryFn').and.returnValue(of('fresh'))
+
+      client.fetchQuery(['todo', 1], prefetch.queryFn, {
+        retry: 1,
+        retryDelay: 100,
+      })
+      prefetch.fail(new Error('down'))
+      // Between the attempts: the retry reads the data after the change.
+      client.invalidateQueries({ queryKey: ['todo', 1] })
+      tick(100)
+      prefetch.resolve('read after the change')
+
+      const { result } = mount(
+        (id) => ({ queryKey: ['todo', id()], queryFn, staleTime: Infinity }),
+        1,
+      )
+
+      // Fresh for staleTime: Infinity, and no longer marked: nothing to fetch.
+      expect(queryFn).not.toHaveBeenCalled()
+      expect(result.data()).toBe('read after the change')
+    }))
+
+    it('keeps the stale mark when invalidated while a retry runs', fakeAsync(() => {
+      const prefetch = requests<string>()
+      const queryFn = jasmine.createSpy('queryFn').and.returnValue(of('fresh'))
+
+      client.fetchQuery(['todo', 1], prefetch.queryFn, {
+        retry: 1,
+        retryDelay: 100,
+      })
+      prefetch.fail(new Error('down'))
+      tick(100)
+      // The retry's request is running: it may have read the data before the
+      // change.
+      client.invalidateQueries({ queryKey: ['todo', 1] })
+      prefetch.resolve('read before the change')
+
+      const { result } = mount(
+        (id) => ({ queryKey: ['todo', id()], queryFn, staleTime: Infinity }),
+        1,
+      )
+
+      expect(queryFn).toHaveBeenCalledTimes(1)
+      expect(result.data()).toBe('fresh')
+    }))
+
+    it('clears the stale mark once the refetch that replaced a running one lands', () => {
+      const { queryFn, resolve, cancelled } = requests<string>()
+      const options = (id: Signal<number>): QueryOptions<string> => ({
+        queryKey: ['todo', id()],
+        queryFn,
+        staleTime: Infinity,
+      })
+      const { result } = mount(options, 1)
+
+      resolve('cached')
+      result.refetch()
+      // A component shows the key, so the invalidation replaces the refetch
+      // in flight with one that reads the data after the change.
+      client.invalidateQueries({ queryKey: ['todo', 1] })
+      resolve('fresh')
+
+      expect(cancelled()).toBe(1)
+
+      // Fresh for staleTime: Infinity, and no longer marked: nothing to fetch.
+      mount(options, 1)
+
+      expect(queryFn).toHaveBeenCalledTimes(3)
+      expect(result.data()).toBe('fresh')
+    })
+
     it('leaves the previous key alone when invalidated before the key switch', () => {
       // The key reads a plain signal, not an input: an input only changes
       // with change detection, and this has to happen before it.

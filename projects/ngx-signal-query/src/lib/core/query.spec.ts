@@ -970,6 +970,39 @@ describe('Query', () => {
       expect(query.state().status).toBe('error')
       expect(query.shouldFetch(Infinity)).toBe(true)
     })
+
+    it('stays marked when the attempt that lands started before the invalidation', () => {
+      const { query } = createQuery<number>()
+      const response = new Subject<number>()
+
+      query.fetch({ queryFn: () => response })
+      query.invalidate()
+      response.next(1)
+      response.complete()
+
+      expect(query.state().data).toBe(1)
+      expect(query.state().isInvalidated).toBe(true)
+      expect(query.shouldFetch(Infinity)).toBe(true)
+    })
+
+    it('stays marked when the response lands over a write made after the invalidation', () => {
+      const { query } = createQuery<number>()
+      const response = new Subject<number>()
+
+      query.fetch({ queryFn: () => response })
+      query.invalidate()
+      // The write clears the mark, but the response replaces the write, and
+      // it may have been read before the change.
+      query.setData(5)
+
+      expect(query.state().isInvalidated).toBe(false)
+
+      response.next(1)
+      response.complete()
+
+      expect(query.state().data).toBe(1)
+      expect(query.state().isInvalidated).toBe(true)
+    })
   })
 
   describe('observers and gc', () => {

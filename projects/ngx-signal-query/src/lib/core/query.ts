@@ -98,6 +98,11 @@ interface InFlightFetch<TData, TError> {
   // lands as usual, but a failure isn't tried again. Whoever joins the fetch
   // wants its data, so joining clears it.
   retriesStopped: boolean
+  // Set when the query is invalidated while the fetch is in flight: the
+  // attempt running then may have read the data before the change, so its
+  // response leaves the query marked stale. Each attempt clears it as it
+  // starts: a retry reads the data after the change.
+  invalidated: boolean
   // Removes the app's pending task the fetch holds. While it's held, Angular
   // counts the app as busy: a server render and whenStable() wait for the
   // fetch, whatever its queryFn gets the data with. Removed once the outcome
@@ -287,6 +292,7 @@ export class Query<TData, TError = Error> {
       queryFn,
       abortable: false,
       retriesStopped: false,
+      invalidated: false,
       removeTask: this.#pendingTasks.add(),
     }
 
@@ -322,6 +328,8 @@ export class Query<TData, TError = Error> {
         : this.#retryQueryFn(inFlight)
 
       firstAttempt = false
+      // This attempt reads the data after any invalidation so far.
+      inFlight.invalidated = false
 
       const request = attemptQueryFn()
 
@@ -400,7 +408,9 @@ export class Query<TData, TError = Error> {
             status: 'success',
             error: null,
             isFetching: false,
-            isInvalidated: false,
+            // Still stale if invalidated while this attempt ran: the data
+            // may predate the change.
+            isInvalidated: inFlight.invalidated,
             failureCount: 0,
             failureReason: null,
             updatedAt: Date.now(),
@@ -452,6 +462,8 @@ export class Query<TData, TError = Error> {
     }))
 
     // A write made during a fetch is what stopping the fetch goes back to.
+    // It leaves the fetch's `invalidated` as it is: the response replaces
+    // the write when it lands, and may have been read before the change.
     if (this.#inFlight) this.#inFlight.before = this.state()
 
     // A write counts as use: a query nobody observes is kept for another
@@ -461,6 +473,11 @@ export class Query<TData, TError = Error> {
 
   invalidate(): void {
     this.#state.update((state) => ({ ...state, isInvalidated: true }))
+
+    // The fetch in flight may have read the data before the change, so its
+    // response mustn't clear the mark. Hence no early return when the query
+    // is marked already: the fetch may be one that the earlier mark started.
+    if (this.#inFlight) this.#inFlight.invalidated = true
   }
 
   shouldFetch(staleTime: number): boolean {

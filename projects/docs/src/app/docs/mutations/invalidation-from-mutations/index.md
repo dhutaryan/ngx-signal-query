@@ -16,7 +16,7 @@ Add a todo, and the list refetches itself. No manual cache surgery, no passing d
 `invalidateQueries` marks the matching queries **stale**. What happens next depends on whether anyone is looking:
 
 - A query that's **currently on screen** refetches right away, in the background — one request, however many components show it. Its data stays visible while the new data loads (`isFetching()` flips to `true`, `data()` doesn't blank out) — the stale-while-revalidate pattern.
-- A query that **isn't currently observed** just keeps the stale mark and refetches the next time a component uses it.
+- A query that **isn't currently observed** just keeps the stale mark and refetches the next time a component uses it (for a fetch of it that's already running, see [Query Invalidation](/query-client/query-invalidation)).
 
 So invalidation is cheap and safe to over-call: nothing fetches unless it's actually needed on screen.
 

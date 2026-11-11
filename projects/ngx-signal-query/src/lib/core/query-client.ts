@@ -317,8 +317,10 @@ export class QueryClient {
    * once per query however many components observe it. The refetch starts
    * right away and replaces a fetch already in flight, which may predate the
    * change. A query with no enabled observer keeps the stale mark and
-   * refetches as soon as one appears. Commonly called after a mutation
-   * succeeds.
+   * refetches as soon as one appears. A fetch of it already in flight still
+   * lands, and the query stays marked: an observer that appears meanwhile
+   * waits for that fetch, and the query refetches the next time stale data
+   * would. Commonly called after a mutation succeeds.
    *
    * Resolves once those refetches have settled, so a mutation hook that
    * returns it keeps the mutation pending until the data is fresh. It never
@@ -339,7 +341,8 @@ export class QueryClient {
       queries.forEach((query) => query.invalidate())
 
       // An inactive query refetches when next observed, as shouldFetch sees
-      // the flag.
+      // the flag. A fetch of it already running lands and leaves the flag
+      // set (see Query#invalidate).
       return filters?.refetchType === 'none'
         ? Promise.resolve()
         : whenAllSettled(queries.map((query) => query.refetchIfActive()))

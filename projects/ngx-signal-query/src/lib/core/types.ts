@@ -27,7 +27,11 @@ export interface QueryState<TData, TError = Error> {
   error: TError | null
   /** Whether a fetch is currently in flight. */
   isFetching: boolean
-  /** Whether the query has been marked stale via `invalidateQueries`. */
+  /**
+   * Whether the query has been marked stale via `invalidateQueries`. Data
+   * requested after the invalidation clears it as it lands, and so does a
+   * `setQueryData` write.
+   */
   isInvalidated: boolean
   /** Number of consecutive failed attempts in the current fetch. */
   failureCount: number
@@ -51,7 +55,9 @@ export type InvalidateQueryFilters = QueryFilters & {
    * Which of the marked queries to refetch now: `'active'`, the default,
    * refetches those a component shows; `'none'` refetches none, so each one
    * refetches when stale data next would, e.g. as a component starts showing
-   * it. Queries nobody shows are only marked either way.
+   * it. Queries nobody shows are only marked either way. A fetch of a query
+   * not refetched now still lands, and the query stays marked: a component
+   * that starts showing it meanwhile waits for that fetch.
    */
   refetchType?: 'active' | 'none'
 }
