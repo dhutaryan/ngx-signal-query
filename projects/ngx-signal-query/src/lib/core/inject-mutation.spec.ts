@@ -124,6 +124,22 @@ describe('injectMutation', () => {
       expect(m.error()?.message).toContain('without emitting')
     })
 
+    // Today's rule, which #91 may change on purpose: an upload that reports
+    // its progress, say, ends at the first event.
+    it('uses the first value of a stream and lets go of it', () => {
+      const stream = new Subject<string>()
+      const onSuccess = jasmine.createSpy('onSuccess')
+      const m = setup<string>(() => ({ mutationFn: () => stream, onSuccess }))
+
+      m.mutate()
+      stream.next('first')
+      stream.next('second')
+
+      expect(m.data()).toBe('first')
+      expect(onSuccess).toHaveBeenCalledTimes(1)
+      expect(stream.observed).toBe(false)
+    })
+
     it('re-runs and overwrites state on a second mutate', () => {
       const m = setup<number, Error, number>(() => ({
         mutationFn: (v) => of(v),
@@ -237,6 +253,93 @@ describe('injectMutation', () => {
       expect(m.failureCount()).toBe(3) // retry: 2 -> 3 attempts
       expect(m.failureReason()).toBe(err)
     }))
+
+    it('passes the attempt index and its error to retry and retryDelay', fakeAsync(() => {
+      const errors = [new Error('first'), new Error('second')]
+      const mutationFn = jasmine.createSpy('mutationFn').and.returnValues(
+        throwError(() => errors[0]),
+        throwError(() => errors[1]),
+        of('ok'),
+      )
+      const retry = jasmine.createSpy('retry').and.returnValue(true)
+      const retryDelay = jasmine.createSpy('retryDelay').and.returnValue(10)
+      const m = setup<string>(() => ({ mutationFn, retry, retryDelay }))
+
+      m.mutate()
+      tick(100)
+
+      // The index counts the retries made before this one: 0 for the first.
+      expect(retry.calls.allArgs()).toEqual([
+        [0, errors[0]],
+        [1, errors[1]],
+      ])
+      expect(retryDelay.calls.allArgs()).toEqual([
+        [0, errors[0]],
+        [1, errors[1]],
+      ])
+      expect(m.data()).toBe('ok')
+    }))
+
+    it('backs off 1 s, then 2 s, when retries are on without a retryDelay', fakeAsync(() => {
+      const mutationFn = jasmine
+        .createSpy('mutationFn')
+        .and.returnValue(throwError(() => new Error('fail')))
+      const m = setup<unknown, Error, void>(() => ({ mutationFn, retry: 2 }))
+
+      m.mutate()
+      tick(999)
+
+      expect(mutationFn).toHaveBeenCalledTimes(1)
+
+      tick(1)
+
+      expect(mutationFn).toHaveBeenCalledTimes(2)
+
+      tick(1999)
+
+      expect(mutationFn).toHaveBeenCalledTimes(2)
+
+      tick(1)
+
+      expect(mutationFn).toHaveBeenCalledTimes(3)
+      expect(m.isError()).toBe(true)
+    }))
+
+    it('shows the last failed attempt in failureCount and failureReason while the next one runs', fakeAsync(() => {
+      const errors = [new Error('first'), new Error('second')]
+      const responses: Array<Subject<string>> = []
+      const m = setup<string>(() => ({
+        mutationFn: () => {
+          const response = new Subject<string>()
+
+          responses.push(response)
+
+          return response
+        },
+        retry: 2,
+        retryDelay: 10,
+      }))
+
+      m.mutate()
+      responses[0].error(errors[0])
+      tick(10)
+
+      // The retry is in flight: the failure before it still shows.
+      expect(m.isPending()).toBe(true)
+      expect(m.failureCount()).toBe(1)
+      expect(m.failureReason()).toBe(errors[0])
+
+      responses[1].error(errors[1])
+      tick(10)
+
+      expect(m.failureCount()).toBe(2)
+      expect(m.failureReason()).toBe(errors[1])
+
+      responses[2].next('ok')
+      responses[2].complete()
+
+      expect(m.isSuccess()).toBe(true)
+    }))
   })
 
   describe('side-effect callbacks', () => {
@@ -343,6 +446,35 @@ describe('injectMutation', () => {
 
       tick(3000)
       expect(message()).toBe('')
+    }))
+
+    it('runs them in the Angular zone after a retry too', fakeAsync(() => {
+      let attempts = 0
+      let inZone: boolean | undefined
+
+      @Component({ template: '<button (click)="save.mutate()">Save</button>' })
+      class SaveTodo {
+        readonly save = injectMutation(() => ({
+          mutationFn: () =>
+            ++attempts === 1
+              ? throwError(() => new Error('down'))
+              : of('saved'),
+          retry: 1,
+          retryDelay: 100,
+          onSuccess: () => {
+            inZone = NgZone.isInAngularZone()
+          },
+        }))
+      }
+
+      const fixture = TestBed.createComponent(SaveTodo)
+
+      fixture.autoDetectChanges()
+      fixture.nativeElement.querySelector('button').click()
+      tick(100)
+
+      expect(attempts).toBe(2)
+      expect(inZone).toBe(true)
     }))
 
     // Only a run asked for from inside the zone comes back into it. One that
@@ -2403,7 +2535,8 @@ describe('injectMutation', () => {
       }))
 
       m.mutate()
-      tick(100)
+      // Past three retries at the default retryDelay, 1 s, 2 s and 4 s apart.
+      tick(10_000)
 
       expect(attempts).toBe(1)
     }))

@@ -25,7 +25,15 @@ import {
   flushMicrotasks,
   tick,
 } from '@angular/core/testing'
-import { type Observable, map, of, Subject, throwError, timer } from 'rxjs'
+import {
+  type Observable,
+  EMPTY,
+  map,
+  of,
+  Subject,
+  throwError,
+  timer,
+} from 'rxjs'
 
 import { mountHost } from '../../spec-helpers/host'
 import {
@@ -302,6 +310,98 @@ describe('injectQuery', () => {
     expect(result.isError()).toBe(true)
     expect(result.failureCount()).toBe(3) // retry: 2 -> 3 attempts
     expect(result.failureReason()).toBe(err)
+  }))
+
+  it('passes the attempt index and its error to retry and retryDelay', fakeAsync(() => {
+    const errors = [new Error('first'), new Error('second')]
+    const queryFn = jasmine.createSpy('queryFn').and.returnValues(
+      throwError(() => errors[0]),
+      throwError(() => errors[1]),
+      of('ok'),
+    )
+    const retry = jasmine.createSpy('retry').and.returnValue(true)
+    const retryDelay = jasmine.createSpy('retryDelay').and.returnValue(10)
+    const { result } = mount<string>(() => ({
+      queryKey: ['f'],
+      queryFn,
+      retry,
+      retryDelay,
+    }))
+
+    tick(100)
+
+    // The index counts the retries made before this one: 0 for the first.
+    expect(retry.calls.allArgs()).toEqual([
+      [0, errors[0]],
+      [1, errors[1]],
+    ])
+    expect(retryDelay.calls.allArgs()).toEqual([
+      [0, errors[0]],
+      [1, errors[1]],
+    ])
+    expect(result.data()).toBe('ok')
+  }))
+
+  it('shows the last failed attempt in failureCount and failureReason while the next one runs', fakeAsync(() => {
+    const errors = [new Error('first'), new Error('second')]
+    const { queryFn, fail, resolve } = requests<string>()
+    const { result } = mount(() => ({
+      queryKey: ['f'],
+      queryFn,
+      retry: 2,
+      retryDelay: 10,
+    }))
+
+    fail(errors[0])
+    tick(10)
+
+    // The retry is in flight: the failure before it still shows.
+    expect(result.failureCount()).toBe(1)
+    expect(result.failureReason()).toBe(errors[0])
+
+    fail(errors[1])
+    tick(10)
+
+    expect(result.failureCount()).toBe(2)
+    expect(result.failureReason()).toBe(errors[1])
+
+    resolve('ok')
+
+    expect(result.data()).toBe('ok')
+    expect(result.failureCount()).toBe(0)
+    expect(result.failureReason()).toBeNull()
+  }))
+
+  it('uses the first value of a stream and lets go of it', () => {
+    const stream = new Subject<string>()
+    const { fixture, result } = mount(() => ({
+      queryKey: ['f'],
+      queryFn: () => stream,
+    }))
+
+    stream.next('first')
+    fixture.detectChanges()
+    stream.next('second')
+    fixture.detectChanges()
+
+    expect(result.data()).toBe('first')
+    expect(stream.observed).toBe(false)
+  })
+
+  it('fails at once, without a retry, when the stream completes empty', fakeAsync(() => {
+    const queryFn = jasmine.createSpy('queryFn').and.returnValue(EMPTY)
+    const { result } = mount<string>(() => ({
+      queryKey: ['f'],
+      queryFn,
+      retry: 1,
+      retryDelay: 10,
+    }))
+
+    expect(result.isError()).toBe(true)
+
+    tick(10)
+
+    expect(queryFn).toHaveBeenCalledTimes(1)
   }))
 
   // A detail looked up in a list that lacks it. undefined means "no data",
@@ -831,6 +931,46 @@ describe('injectQuery', () => {
       expect(result.data()).toBe('fresh')
     })
 
+    it('clears the stale mark once the refetch it caused lands', () => {
+      const queryFn = jasmine.createSpy('queryFn').and.returnValue(of('fresh'))
+      const options = (id: Signal<number>): QueryOptions<string> => ({
+        queryKey: ['todo', id()],
+        queryFn,
+        staleTime: Infinity,
+      })
+
+      client.setQueryData(['todo', 1], 'cached')
+      client.invalidateQueries({ queryKey: ['todo', 1] })
+      mount(options, 1).fixture.destroy()
+
+      // Fresh for staleTime: Infinity, and no longer marked: nothing to fetch.
+      const { result } = mount(options, 1)
+
+      expect(queryFn).toHaveBeenCalledTimes(1)
+      expect(result.data()).toBe('fresh')
+    })
+
+    it('keeps the stale mark when the refetch it caused is stopped', () => {
+      const { queryFn, cancelled } = requests<string>()
+      const options = (id: Signal<number>): QueryOptions<string> => ({
+        queryKey: ['todo', id()],
+        queryFn,
+        staleTime: Infinity,
+      })
+
+      client.setQueryData(['todo', 1], 'cached')
+      client.invalidateQueries({ queryKey: ['todo', 1] })
+      // Leaving before the response stops the request.
+      mount(options, 1).fixture.destroy()
+
+      expect(cancelled()).toBe(1)
+
+      // Still marked, so it's fetched again, fresh as staleTime says it is.
+      mount(options, 1)
+
+      expect(queryFn).toHaveBeenCalledTimes(2)
+    })
+
     it('leaves the previous key alone when invalidated before the key switch', () => {
       // The key reads a plain signal, not an input: an input only changes
       // with change detection, and this has to happen before it.
@@ -1188,6 +1328,51 @@ describe('injectQuery', () => {
 
       expect(result.status()).toBe('error')
       expect(result.error()).toBe(second)
+    })
+
+    it('starts the new fetch with failureCount and failureReason cleared', () => {
+      const { queryFn, fail, resolve } = requests<string>()
+      const { result } = mount(() => ({
+        queryKey: ['todos'],
+        queryFn,
+        retry: false,
+      }))
+
+      fail(new Error('first'))
+
+      expect(result.failureCount()).toBe(1)
+
+      result.refetch()
+
+      // The new fetch hasn't failed yet.
+      expect(result.failureCount()).toBe(0)
+      expect(result.failureReason()).toBeNull()
+
+      resolve('todos')
+
+      expect(result.data()).toBe('todos')
+    })
+
+    it('starts a refetch of cached data with failureCount and failureReason cleared', () => {
+      const { queryFn, fail, resolve } = requests<string>()
+      const { result } = mount(() => ({
+        queryKey: ['todos'],
+        queryFn,
+        retry: false,
+      }))
+
+      resolve('todos')
+      result.refetch()
+      fail(new Error('down'))
+
+      expect(result.failureCount()).toBe(1)
+
+      result.refetch()
+
+      // The new fetch hasn't failed yet, though the data stays on screen.
+      expect(result.data()).toBe('todos')
+      expect(result.failureCount()).toBe(0)
+      expect(result.failureReason()).toBeNull()
     })
 
     it('reads as loading in every component while invalidateQueries() refetches it', () => {
