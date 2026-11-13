@@ -340,6 +340,41 @@ describe('injectMutation', () => {
 
       expect(m.isSuccess()).toBe(true)
     }))
+
+    it('counts a mutationFn that completes without emitting as one failure', fakeAsync(() => {
+      const m = setup<string>(() => ({
+        mutationFn: () => EMPTY,
+        retry: 1,
+        retryDelay: 10,
+      }))
+
+      m.mutate()
+      tick(10)
+
+      expect(m.error()?.message).toBe(
+        'Mutation function completed without emitting a value',
+      )
+      expect(m.failureCount()).toBe(1)
+      expect(m.failureReason()).toBe(m.error())
+    }))
+
+    it('counts a retry that completes without emitting as one more failure', fakeAsync(() => {
+      const mutationFn = jasmine.createSpy('mutationFn').and.returnValues(
+        throwError(() => new Error('down')),
+        EMPTY,
+      )
+      const m = setup<string>(() => ({ mutationFn, retry: 2, retryDelay: 10 }))
+
+      m.mutate()
+      tick(20)
+
+      expect(mutationFn).toHaveBeenCalledTimes(2)
+      expect(m.error()?.message).toBe(
+        'Mutation function completed without emitting a value',
+      )
+      expect(m.failureCount()).toBe(2)
+      expect(m.failureReason()).toBe(m.error())
+    }))
   })
 
   describe('side-effect callbacks', () => {
@@ -851,6 +886,25 @@ describe('injectMutation', () => {
         undefined,
       )
     })
+
+    it('counts an onMutate that throws as one failure', fakeAsync(() => {
+      const error = new Error('onMutate failed')
+      const m = setup(() => ({
+        mutationFn: (title: string) => of(title),
+        onMutate: () => {
+          throw error
+        },
+        retry: 1,
+        retryDelay: 10,
+      }))
+
+      m.mutate('b')
+      tick(10)
+
+      expect(m.error()).toBe(error)
+      expect(m.failureCount()).toBe(1)
+      expect(m.failureReason()).toBe(error)
+    }))
 
     it('fails the run without sending the write when an async onMutate rejects', fakeAsync(() => {
       const error = new Error('onMutate failed')

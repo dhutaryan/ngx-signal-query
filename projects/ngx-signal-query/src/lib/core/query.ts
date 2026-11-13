@@ -12,7 +12,12 @@ import {
 
 import { CancelledError } from './cancelled-error'
 import type { QueryCache } from './query-cache'
-import { defaultRetryDelay, resolveRetryDelay, shouldRetry } from './retryer'
+import {
+  countFailure,
+  defaultRetryDelay,
+  resolveRetryDelay,
+  shouldRetry,
+} from './retryer'
 import { type Deferred, deferred, isValidTimeout, replaceData } from './utils'
 import { requestOutsideZone } from './zone'
 import type {
@@ -427,6 +432,7 @@ export class Query<TData, TError = Error> {
             status: 'error',
             error: err,
             isFetching: false,
+            ...countFailure(state, err),
           }))
           outcome.reject(err)
           this.#scheduleGc()
