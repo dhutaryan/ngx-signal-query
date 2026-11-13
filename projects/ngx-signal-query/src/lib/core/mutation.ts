@@ -24,7 +24,12 @@ import {
 } from 'rxjs'
 
 import type { MutationCache } from './mutation-cache'
-import { defaultRetryDelay, resolveRetryDelay, shouldRetry } from './retryer'
+import {
+  countFailure,
+  defaultRetryDelay,
+  resolveRetryDelay,
+  shouldRetry,
+} from './retryer'
 import type { RetryDelayValue, RetryValue } from './types'
 import { deferred, isPromiseLike } from './utils'
 import { requestOutsideZone } from './zone'
@@ -53,9 +58,9 @@ export type MutationState<TData, TError, TVariables, TContext> = {
   variables: TVariables | undefined
   /** Value returned by `onMutate` for the current run, or what its promise resolved to. */
   context: TContext | undefined
-  /** Number of consecutive failed attempts in the current run. */
+  /** Number of consecutive failures in the current run. */
   failureCount: number
-  /** Error of the most recent failed attempt, or `null`. */
+  /** Error of the most recent failure, or `null`. */
   failureReason: TError | null
   /** Timestamp (ms) when the current run was submitted; `0` if never. */
   submittedAt: number
@@ -172,7 +177,7 @@ export type MutationResult<TData, TError, TVariables> = {
   isError: Signal<boolean>
   /** Consecutive failures in the current run. */
   failureCount: Signal<number>
-  /** Error of the most recent failed attempt, or `null`. */
+  /** Error of the most recent failure, or `null`. */
   failureReason: Signal<TError | null>
 }
 
@@ -313,7 +318,11 @@ export class Mutation<
         ),
       )
       .subscribe((outcome) => {
-        this.#state.update((state) => ({ ...state, ...outcome }))
+        this.#state.update((state) => ({
+          ...state,
+          ...outcome,
+          ...(outcome.status === 'error' && countFailure(state, outcome.error)),
+        }))
         this.#disposeIfDone()
 
         if (outcome.status === 'success') {

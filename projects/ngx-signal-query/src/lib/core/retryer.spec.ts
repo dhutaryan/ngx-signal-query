@@ -1,4 +1,9 @@
-import { defaultRetryDelay, resolveRetryDelay, shouldRetry } from './retryer'
+import {
+  countFailure,
+  defaultRetryDelay,
+  resolveRetryDelay,
+  shouldRetry,
+} from './retryer'
 
 describe('defaultRetryDelay', () => {
   it('grows exponentially from the failure count', () => {
@@ -49,5 +54,14 @@ describe('resolveRetryDelay', () => {
 
     expect(resolveRetryDelay(delay, 2, error)).toBe(1234)
     expect(delay).toHaveBeenCalledWith(2, error)
+  })
+})
+
+describe('countFailure', () => {
+  // null is also what failureReason holds before the first failure.
+  it('counts a null error when nothing is counted yet', () => {
+    expect(
+      countFailure<unknown>({ failureCount: 0, failureReason: null }, null),
+    ).toEqual({ failureCount: 1, failureReason: null })
   })
 })

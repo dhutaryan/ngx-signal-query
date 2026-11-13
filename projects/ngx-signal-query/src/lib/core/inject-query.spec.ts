@@ -438,6 +438,97 @@ describe('injectQuery', () => {
     })
   })
 
+  // The response is in, but the query can't take it: the stream completed
+  // empty, it gave undefined, or the structuralSharing function threw. The
+  // fetch fails without a retry, and that counts as a failure, as a failed
+  // request does: failureReason() is the error() the fetch ends with.
+  describe('a response the query fails on', () => {
+    const todos: Todo[] = [{ id: 1, title: 'Buy milk' }]
+
+    it('counts a stream that completes empty as one failure', fakeAsync(() => {
+      const { result } = mount<string>(() => ({
+        queryKey: ['f'],
+        queryFn: () => EMPTY,
+        retry: 1,
+        retryDelay: 10,
+      }))
+
+      tick(10)
+
+      expect(result.error()?.message).toBe(
+        'Query function for ["f"] completed without emitting a value',
+      )
+      expect(result.failureCount()).toBe(1)
+      expect(result.failureReason()).toBe(result.error())
+    }))
+
+    it('counts undefined as one failure', fakeAsync(() => {
+      const { result } = mount(
+        (id) => ({
+          queryKey: ['todo', id()],
+          queryFn: () => of(todos.find((todo) => todo.id === id())),
+          retry: 1,
+          retryDelay: 10,
+        }),
+        3,
+      )
+
+      tick(10)
+
+      expect(result.error()?.message).toBe(
+        'Query function for ["todo",3] produced undefined; return null for no data',
+      )
+      expect(result.failureCount()).toBe(1)
+      expect(result.failureReason()).toBe(result.error())
+    }))
+
+    it('counts a structuralSharing function that throws as one failure', fakeAsync(() => {
+      const error = new Error('cannot merge')
+      const { fixture, result } = mount(() => ({
+        queryKey: ['todos'],
+        queryFn: () => of([...todos]),
+        retry: 1,
+        retryDelay: 10,
+        // There's something to merge with from the second fetch on.
+        structuralSharing: (oldData, newData) => {
+          if (oldData) throw error
+
+          return newData
+        },
+      }))
+
+      result.refetch()
+      tick(10)
+      fixture.detectChanges()
+
+      expect(result.error()).toBe(error)
+      expect(result.failureCount()).toBe(1)
+      expect(result.failureReason()).toBe(error)
+    }))
+
+    it('counts a retry that gives undefined as one more failure', fakeAsync(() => {
+      const queryFn = jasmine.createSpy('queryFn').and.returnValues(
+        throwError(() => new Error('down')),
+        of(todos.find((todo) => todo.id === 3)),
+      )
+      const { result } = mount<Todo | undefined>(() => ({
+        queryKey: ['todo', 3],
+        queryFn,
+        retry: 2,
+        retryDelay: 10,
+      }))
+
+      tick(20)
+
+      expect(queryFn).toHaveBeenCalledTimes(2)
+      expect(result.error()?.message).toBe(
+        'Query function for ["todo",3] produced undefined; return null for no data',
+      )
+      expect(result.failureCount()).toBe(2)
+      expect(result.failureReason()).toBe(result.error())
+    }))
+  })
+
   describe('enabled', () => {
     it('does not fetch while disabled', () => {
       const queryFn = jasmine.createSpy('queryFn').and.returnValue(of(1))
@@ -2128,6 +2219,38 @@ describe('injectQuery', () => {
             status: 'error',
             error,
             failureCount: 1,
+            isFetching: false,
+          }),
+        )
+      }))
+
+      it('counts a retry that fails once nothing shows the key, without trying again', fakeAsync(() => {
+        const { queryFn, requests } = promiseRequests<string>()
+        // The same error both times, as a request kept in a variable gives:
+        // the count can't rely on telling the two failures apart.
+        const error = new Error('down')
+        const { fixture } = mount(() => ({
+          queryKey: ['todos'],
+          queryFn,
+          retry: 3,
+          retryDelay: 100,
+        }))
+
+        // The first request fails, and the user leaves while the retry is
+        // in flight.
+        requests[0].reject(error)
+        tick(100)
+        fixture.destroy()
+        requests[1].reject(error)
+        tick(100)
+
+        expect(queryFn).toHaveBeenCalledTimes(2)
+        expect(client.getQueryCache().get(['todos'])?.state()).toEqual(
+          jasmine.objectContaining({
+            status: 'error',
+            error,
+            failureCount: 2,
+            failureReason: error,
             isFetching: false,
           }),
         )
