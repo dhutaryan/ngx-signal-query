@@ -1,23 +1,16 @@
 import { type NgZone, type PendingTasks, signal } from '@angular/core'
 import {
+  type Observable,
   isObservable,
   map,
-  retry as retryOperator,
   take,
-  tap,
   throwIfEmpty,
-  timer,
   Subscription,
 } from 'rxjs'
 
 import { CancelledError } from './cancelled-error'
 import type { QueryCache } from './query-cache'
-import {
-  countFailure,
-  defaultRetryDelay,
-  resolveRetryDelay,
-  shouldRetry,
-} from './retryer'
+import { countFailure, defaultRetryDelay, retryer } from './retryer'
 import { type Deferred, deferred, isValidTimeout, replaceData } from './utils'
 import { requestOutsideZone } from './zone'
 import type {
@@ -96,8 +89,8 @@ interface InFlightFetch<TData, TError> {
   queryFn: QueryOptions<TData, TError>['queryFn']
   // Whether stopping the fetch aborts its request: unsubscribing tears an
   // Observable down (HttpClient aborts the request), while a promise runs to
-  // the end anyway. Each attempt sets it, so while the fetch waits to retry,
-  // the last attempt decides.
+  // the end anyway. Each request sets it (see #request), so while the fetch
+  // waits to retry, the last one decides.
   abortable: boolean
   // Set once the last observer leaves while the request runs on: the request
   // lands as usual, but a failure isn't tried again. Whoever joins the fetch
@@ -320,62 +313,30 @@ export class Query<TData, TError = Error> {
 
     // The first attempt runs the caller's queryFn, each retry the one
     // #retryQueryFn picks. Each attempt makes a fresh request (a Promise is
-    // one-shot) outside Angular's zone, and its outcome comes back to where
-    // the fetch was asked for from (see requestOutsideZone): with zone.js,
-    // what the request waits on mustn't keep the app from counting as stable.
-    // The task this fetch holds keeps the app busy until the outcome is in
-    // all the same.
-    let firstAttempt = true
+    // one-shot), and only the request leaves Angular's zone: see #request.
+    const attempts = retryer<TData, TError>({
+      attempt: (attemptIndex) => {
+        const attemptQueryFn =
+          attemptIndex === 0 ? queryFn : this.#retryQueryFn(inFlight)
 
-    const attempts = requestOutsideZone(this.#zone, () => {
-      const attemptQueryFn = firstAttempt
-        ? queryFn
-        : this.#retryQueryFn(inFlight)
+        // This attempt reads the data after any invalidation so far.
+        inFlight.invalidated = false
 
-      firstAttempt = false
-      // This attempt reads the data after any invalidation so far.
-      inFlight.invalidated = false
-
-      const request = attemptQueryFn()
-
-      inFlight.abortable = isObservable(request)
-
-      return request
+        return this.#request(attemptQueryFn, inFlight)
+      },
+      retry,
+      retryDelay,
+      onFail: (failureCount, failureReason) =>
+        this.#state.update((state) => ({
+          ...state,
+          failureCount,
+          failureReason,
+        })),
+      // Once the last observer left, a failure ends the fetch at once, and
+      // so does the end of a wait for a retry, as in TanStack; whoever joins
+      // meanwhile clears the flag, and the retry goes out on time.
+      stopped: () => inFlight.retriesStopped,
     }).pipe(
-      take(1),
-      retryOperator({
-        delay: (error, retryCount) => {
-          // retryCount (1-based) is the number of failures so far; the retry
-          // predicate/delay take a 0-based attempt index (0 = first retry).
-          this.#state.update((state) => ({
-            ...state,
-            failureCount: retryCount,
-            failureReason: error as TError,
-          }))
-
-          const attemptIndex = retryCount - 1
-
-          // Once the last observer left, the failure ends the fetch at once.
-          if (
-            inFlight.retriesStopped ||
-            !shouldRetry(retry, attemptIndex, error as TError)
-          ) {
-            throw error
-          }
-
-          // The retry goes out when the wait is over. If the last observer
-          // left during the wait, an error thrown when the timer fires ends
-          // the fetch with this error instead, as in TanStack; whoever joins
-          // meanwhile clears the flag, and the retry goes out on time.
-          return timer(
-            resolveRetryDelay(retryDelay, attemptIndex, error as TError),
-          ).pipe(
-            tap(() => {
-              if (inFlight.retriesStopped) throw error
-            }),
-          )
-        },
-      }),
       throwIfEmpty(
         () =>
           new Error(
@@ -590,6 +551,26 @@ export class Query<TData, TError = Error> {
     }
 
     return inFlight.queryFn
+  }
+
+  // One request of a fetch: made outside Angular's zone, with its outcome
+  // brought back to where the fetch was asked for from (see
+  // requestOutsideZone): with zone.js, what the request waits on mustn't
+  // keep the app from counting as stable. The task the fetch holds keeps the
+  // app busy until the outcome is in all the same. It takes the first value
+  // an Observable gives and lets go of it, and sets whether stopping the
+  // fetch aborts it.
+  #request(
+    queryFn: QueryOptions<TData, TError>['queryFn'],
+    inFlight: InFlightFetch<TData, TError>,
+  ): Observable<TData> {
+    return requestOutsideZone(this.#zone, () => {
+      const request = queryFn()
+
+      inFlight.abortable = isObservable(request)
+
+      return request
+    }).pipe(take(1))
   }
 
   // Removes the query gcTime from now, unless something uses it by then: an
