@@ -15,21 +15,14 @@ import {
   ignoreElements,
   map,
   of,
-  retry as retryOperator,
   take,
   tap,
   throwIfEmpty,
-  timer,
   type Observable,
 } from 'rxjs'
 
 import type { MutationCache } from './mutation-cache'
-import {
-  countFailure,
-  defaultRetryDelay,
-  resolveRetryDelay,
-  shouldRetry,
-} from './retryer'
+import { countFailure, defaultRetryDelay, retryer } from './retryer'
 import type { RetryDelayValue, RetryValue } from './types'
 import { deferred, isPromiseLike } from './utils'
 import { requestOutsideZone } from './zone'
@@ -351,27 +344,20 @@ export class Mutation<
     // what the write waits on mustn't keep the app from counting as stable,
     // and the hooks run where they would without this. The task the run holds
     // keeps the app busy until its last hook is done all the same.
-    return requestOutsideZone(this.#zone, () =>
-      this.#options.mutationFn(variables),
-    ).pipe(
-      take(1),
-      retryOperator({
-        delay: (error, retryCount) => {
-          this.#state.update((state) => ({
-            ...state,
-            failureCount: retryCount,
-            failureReason: error as TError,
-          }))
-
-          const attemptIndex = retryCount - 1
-
-          if (!shouldRetry(retry, attemptIndex, error as TError)) throw error
-
-          return timer(
-            resolveRetryDelay(retryDelay, attemptIndex, error as TError),
-          )
-        },
-      }),
+    return retryer<TData, TError>({
+      attempt: () =>
+        requestOutsideZone(this.#zone, () =>
+          this.#options.mutationFn(variables),
+        ).pipe(take(1)),
+      retry,
+      retryDelay,
+      onFail: (failureCount, failureReason) =>
+        this.#state.update((state) => ({
+          ...state,
+          failureCount,
+          failureReason,
+        })),
+    }).pipe(
       throwIfEmpty(
         () => new Error('Mutation function completed without emitting a value'),
       ),
