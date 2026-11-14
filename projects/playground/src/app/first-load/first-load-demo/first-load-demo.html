@@ -1,0 +1,129 @@
+<section class="panel">
+  <h2>
+    A refetch during the first load
+    <small>(issue #33)</small>
+  </h2>
+
+  <p class="hint">
+    Press
+    <strong>Start</strong>
+    : the list mounts, and its first load takes {{ listLatency }} ms. While it
+    still loads, ask for a refetch the ways an app does: save a todo (the write
+    takes {{ writeLatency }} ms, and its
+    <code>onSuccess</code>
+    returns
+    <code>invalidateQueries()</code>
+    ), press Refresh (
+    <code>refetch()</code>
+    ), or turn the socket on (a todo changes every {{ socketInterval }} ms, and
+    each message invalidates the list). The fake server answers with the version
+    of the list it read when the request came in. Expected after #33: the first
+    load lands and shows, then the list refetches once more.
+  </p>
+
+  <div class="controls">
+    <button class="primary" (click)="start()">Start</button>
+    <button (click)="saveTodo()" [disabled]="run() === 0 || save.isPending()">
+      Save a todo
+    </button>
+    <button (click)="refresh()" [disabled]="run() === 0">Refresh</button>
+    <button (click)="toggleSocket()" [class.on]="socket()">
+      socket:
+      <strong>{{ socket() ? 'on' : 'off' }}</strong>
+    </button>
+    <span class="state">mutation: {{ save.status() }}</span>
+  </div>
+
+  <div class="list">
+    <span class="title">List</span>
+    @if (run() === 0) {
+      <span class="state">press Start</span>
+    } @else if (list.data(); as data) {
+      <strong>v{{ data.version }}</strong>
+      @if (list.isFetching()) {
+        <span class="state">refreshing…</span>
+      }
+    } @else if (list.isFetching()) {
+      <span class="state">loading… {{ seconds(trace.elapsed()) }}</span>
+    } @else if (list.error(); as error) {
+      <span class="state">failed: {{ error.message }}</span>
+    }
+  </div>
+
+  <table class="counters">
+    <thead>
+      <tr>
+        <th>first load</th>
+        <th>list first shown</th>
+        <th>requests cancelled before that</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>actual</td>
+        <td [class.bad]="late()">
+          @if (run() === 0) {
+            –
+          } @else if (trace.firstDataAt(); as at) {
+            {{ seconds(at) }}
+          } @else {
+            not yet ({{ seconds(trace.elapsed()) }})
+          }
+        </td>
+        <td [class.bad]="trace.cancelledBeforeData() > 0">
+          {{ trace.cancelledBeforeData() }}
+        </td>
+      </tr>
+      <tr class="expected">
+        <td>expected after #33</td>
+        <td>{{ seconds(listLatency) }}</td>
+        <td>0</td>
+      </tr>
+    </tbody>
+  </table>
+
+  @if (run() > 0) {
+    <ol class="timeline">
+      @for (entry of trace.entries(); track $index) {
+        <li [class]="entry.kind">
+          <span class="at">{{ seconds(entry.at) }}</span>
+          {{ entry.text }}
+        </li>
+      }
+    </ol>
+  }
+
+  <details>
+    <summary>What to try</summary>
+    <ul class="hint">
+      <li>
+        <strong>Start, then nothing</strong>
+        — the list shows v1 at {{ seconds(listLatency) }}, nothing cancelled:
+        the baseline, right either way.
+      </li>
+      <li>
+        <strong>Start, then Save a todo while it loads</strong>
+        — expected: v1 shows at {{ seconds(listLatency) }}, then one more
+        request brings the saved todo's version, and the mutation finishes with
+        it.
+      </li>
+      <li>
+        <strong>Socket on, then Start</strong>
+        — expected: v1 shows at {{ seconds(listLatency) }}, although a todo
+        changes every {{ socketInterval / 1000 }} s.
+      </li>
+      <li>
+        <strong>Start, then Refresh twice while it loads</strong>
+        — expected: v1 shows at {{ seconds(listLatency) }}, then one more
+        request, and both
+        <code>refetch()</code>
+        calls resolve with what it brings.
+      </li>
+      <li>
+        <strong>Any of them once the list shows</strong>
+        — with data, a refetch replaces the request in flight, so cancels from
+        then on are expected. The table judges only the first load.
+      </li>
+    </ul>
+  </details>
+</section>
