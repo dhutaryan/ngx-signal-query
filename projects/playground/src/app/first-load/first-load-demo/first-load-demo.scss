@@ -1,0 +1,147 @@
+// Spans the whole grid row, like the invalidation and promises demos.
+:host {
+  display: block;
+  grid-column: 1 / -1;
+}
+
+.panel {
+  border: 1px solid #d0d7de;
+  border-radius: 8px;
+  padding: 1rem;
+  background: #fff;
+}
+
+h2 {
+  margin: 0 0 0.75rem;
+  font-size: 1rem;
+}
+
+.hint,
+.state {
+  color: #57606a;
+  font-size: 0.85rem;
+  line-height: 1.5;
+}
+
+.controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
+  margin-bottom: 0.75rem;
+
+  .primary {
+    background: #0969da;
+    border-color: #0969da;
+    color: #fff;
+  }
+
+  .state {
+    margin-left: 0.5rem;
+  }
+}
+
+button {
+  padding: 0.3rem 0.6rem;
+  border: 1px solid #d0d7de;
+  border-radius: 6px;
+  background: #f6f8fa;
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.85rem;
+
+  &.on {
+    background: #fff1e5;
+    border-color: #d4a72c;
+  }
+
+  &:disabled {
+    cursor: default;
+    opacity: 0.5;
+  }
+}
+
+.list {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  margin-bottom: 0.75rem;
+  font-size: 0.9rem;
+
+  .title {
+    font-weight: 600;
+  }
+}
+
+.counters {
+  border-collapse: collapse;
+  font-size: 0.85rem;
+  margin-bottom: 0.75rem;
+
+  th,
+  td {
+    padding: 0.25rem 0.75rem;
+    border-bottom: 1px solid #f0f2f4;
+    text-align: right;
+
+    &:first-child {
+      text-align: left;
+      padding-left: 0;
+    }
+  }
+
+  th {
+    color: #57606a;
+    font-weight: normal;
+  }
+
+  td {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+
+  .bad {
+    color: #cf222e;
+    font-weight: 600;
+  }
+
+  .expected td {
+    color: #57606a;
+  }
+}
+
+.timeline {
+  list-style: none;
+  margin: 0 0 0.75rem;
+  padding: 0.5rem 0 0;
+  border-top: 1px solid #f0f2f4;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.8rem;
+
+  .at {
+    display: inline-block;
+    min-width: 4.5rem;
+    color: #57606a;
+  }
+
+  .trigger {
+    color: #9a6700;
+  }
+
+  .data,
+  .outcome {
+    font-weight: 600;
+  }
+}
+
+summary {
+  cursor: pointer;
+  font-size: 0.85rem;
+}
+
+code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  background: #f6f8fa;
+  padding: 0.05rem 0.3rem;
+  border-radius: 4px;
+  font-size: 0.85em;
+}
