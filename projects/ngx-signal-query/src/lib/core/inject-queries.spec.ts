@@ -177,6 +177,31 @@ describe('injectQueries', () => {
     expect(subjects[1].observed).toBe(true)
   })
 
+  it('lets the first load of a query it shows land when the query is invalidated, then refetches it once', fakeAsync(() => {
+    const subjects: Array<Subject<string>> = []
+    const queryFn = jasmine.createSpy('queryFn').and.callFake(() => {
+      const subject = new Subject<string>()
+
+      subjects.push(subject)
+
+      return subject
+    })
+    const { results } = mount(() => ({
+      queries: [{ queryKey: ['todo', 1], queryFn }],
+    }))
+
+    client.invalidateQueries({ queryKey: ['todo', 1] })
+
+    expect(subjects[0].observed).toBe(true)
+
+    subjects[0].next('first')
+    subjects[0].complete()
+    tick()
+
+    expect(results()[0].data()).toBe('first')
+    expect(queryFn).toHaveBeenCalledTimes(2)
+  }))
+
   it('refetches its queries when the user comes back to the page, once per key shared with injectQuery', () => {
     const subjects: Array<Subject<string>> = []
     const queryFn = jasmine.createSpy('queryFn').and.callFake(() => {

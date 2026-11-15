@@ -202,22 +202,18 @@ export function createQueryObserver<TData, TError = Error>(
     }
   }
 
-  // How this observer would fetch q right now, and when it wants q
-  // refetched, from the live options; null while it is disabled, its options
-  // throw, or once the key has moved on. Before the key effect above catches
-  // up, queryFn already fetches the next query's data, so q must not be fetched
-  // with it. Every refetch made on our behalf goes by it: through q's
-  // subscriber handle the invalidation one and the window focus and reconnect
-  // ones, and polling.
-  const fetchOptionsFor = (
+  // How this observer would refetch q by hand, as refetch() does, enabled or
+  // not, from the live options; null while they throw, or once the key has
+  // moved on. Before the key effect above catches up, queryFn already fetches
+  // the next query's data, so q must not be fetched with it.
+  const refetchOptionsFor = (
     q: Query<TData, TError>,
   ): ReturnType<QuerySubscriber<TData, TError>['fetchOptions']> => {
     const options = liveOptions()
 
-    if (!options) return null
+    if (!options || hashKey(options.queryKey) !== q.queryHash) return null
 
     const {
-      queryKey,
       queryFn,
       retry,
       retryDelay,
@@ -225,12 +221,7 @@ export function createQueryObserver<TData, TError = Error>(
       staleTime,
       refetchOnWindowFocus,
       refetchOnReconnect,
-      enabled,
     } = options
-
-    if (enabled === false || hashKey(queryKey) !== q.queryHash) {
-      return null
-    }
 
     return {
       queryFn,
@@ -243,17 +234,36 @@ export function createQueryObserver<TData, TError = Error>(
     }
   }
 
+  // How this observer would fetch q right now, and when it wants q
+  // refetched: the same while it is enabled, null while it is disabled. Every
+  // refetch made on our behalf goes by it: through the subscriber below the
+  // invalidation one and the window focus and reconnect ones, and polling.
+  const fetchOptionsFor = (
+    q: Query<TData, TError>,
+  ): ReturnType<QuerySubscriber<TData, TError>['fetchOptions']> =>
+    liveOptions()?.enabled === false ? null : refetchOptionsFor(q)
+
+  // The query the subscriber below is registered with, set by the effect that
+  // registers it. Not query(): on a key change, that is the next query before
+  // the effect moves the subscriber there, and on Angular 19 effects outside
+  // components may run in between, such as one that invalidates the query
+  // being left: answered with the next query's options, it would get the next
+  // key's data.
+  let shown: Query<TData, TError> | undefined
+
+  // This observer as the query it shows sees it. One handle, moved from query
+  // to query along with the observer: refetch() hands it over to say who asks.
+  const subscriber: QuerySubscriber<TData, TError> = {
+    fetchOptions: () => (shown ? fetchOptionsFor(shown) : null),
+    refetchOptions: () => (shown ? refetchOptionsFor(shown) : null),
+    structuralSharing: () => liveOptions()?.structuralSharing,
+  }
+
   track((cleanup) => {
     const q = query()
 
     q.updateGcTime(untracked(defaultedOptions).gcTime)
-
-    // This observer as q sees it.
-    const subscriber: QuerySubscriber<TData, TError> = {
-      fetchOptions: () => fetchOptionsFor(q),
-      structuralSharing: () => liveOptions()?.structuralSharing,
-    }
-
+    shown = q
     q.addObserver(subscriber)
     // Untracked, as Angular 20 runs cleanups anyway: Angular 19 runs them at
     // the start of the effect's next run, where what they read becomes a
@@ -428,8 +438,9 @@ export function createQueryObserver<TData, TError = Error>(
     failureReason: computed(
       () => query().state().failureReason as TError | null,
     ),
-    // Force a fresh fetch regardless of staleTime and enabled, cancelling
-    // any in-flight request (explicit user intent — get current data).
+    // Force a fresh fetch regardless of staleTime and enabled (explicit user
+    // intent — get current data): a fetch in flight is replaced, or, with no
+    // data yet, let land first (see Query#refetch).
     // Untracked, as the client's methods are: called from an effect, it
     // mustn't make the effect depend on the options or on the query. However
     // the fetch ends, the signals show it, so the promise resolves with their
@@ -438,9 +449,7 @@ export function createQueryObserver<TData, TError = Error>(
       untracked(() => {
         const options = defaultedOptions()
 
-        return resolve(options.queryKey).fetch(options, {
-          cancelRefetch: true,
-        })
+        return resolve(options.queryKey).refetch(options, subscriber)
       })
         .catch(() => undefined)
         .then(() => ({ data: result.data(), error: result.error() })),

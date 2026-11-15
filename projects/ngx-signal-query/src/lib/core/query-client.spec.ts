@@ -356,7 +356,7 @@ describe('QueryClient', () => {
       expect(second).not.toHaveBeenCalled()
     })
 
-    it('cancelRefetch restarts an in-flight fetch with a fresh queryFn', fakeAsync(() => {
+    it('cancelRefetch restarts an in-flight fetch of a key with data, with a fresh queryFn', fakeAsync(() => {
       const first = jasmine
         .createSpy('first')
         .and.returnValue(new Promise<number>(() => {})) // never resolves
@@ -364,6 +364,7 @@ describe('QueryClient', () => {
         .createSpy('second')
         .and.returnValue(Promise.resolve(2))
 
+      client.setQueryData(['n'], 1)
       client.fetchQuery(['n'], first)
       client.fetchQuery(['n'], second, { staleTime: 0, cancelRefetch: true })
       tick()
@@ -371,6 +372,235 @@ describe('QueryClient', () => {
       expect(first).toHaveBeenCalledTimes(1)
       expect(second).toHaveBeenCalledTimes(1)
       expect(client.getQueryData(['n'])).toBe(2)
+    }))
+
+    it('cancelRefetch lets a fetch of a key with no data land, then fetches once more with its own queryFn', fakeAsync(() => {
+      const load = new Subject<number>()
+      const again = new Subject<number>()
+      const first = settled(client.fetchQuery(['n'], () => load))
+      const second = settled(
+        client.fetchQuery(['n'], () => again, { cancelRefetch: true }),
+      )
+
+      expect(load.observed).toBe(true)
+      expect(again.observed).toBe(false)
+
+      load.next(1)
+      load.complete()
+      flushMicrotasks()
+
+      expect(first.value).toBe(1)
+      expect(again.observed).toBe(true)
+      expect(second).toEqual({})
+
+      again.next(2)
+      again.complete()
+      flushMicrotasks()
+
+      expect(second.value).toBe(2)
+      expect(client.getQueryData(['n'])).toBe(2)
+    }))
+
+    it('cancelRefetch rejects with a CancelledError once the key is removed during the fetch it waits for', fakeAsync(() => {
+      client.fetchQuery(['n'], () => new Subject<number>())
+
+      const waiting = settled(
+        client.fetchQuery(['n'], () => new Subject<number>(), {
+          cancelRefetch: true,
+        }),
+      )
+
+      client.removeQueries({ queryKey: ['n'] })
+      flushMicrotasks()
+
+      expect(waiting.error).toEqual(jasmine.any(CancelledError))
+    }))
+
+    it('cancelRefetch fetches once more with the queryFn of the call made last', fakeAsync(() => {
+      const load = new Subject<number>()
+      const earlier = jasmine.createSpy('earlier').and.returnValue(of(1))
+      const later = jasmine.createSpy('later').and.returnValue(of(2))
+
+      client.fetchQuery(['n'], () => load)
+      client.fetchQuery(['n'], earlier, { cancelRefetch: true })
+      client.fetchQuery(['n'], later, { cancelRefetch: true })
+
+      load.next(0)
+      load.complete()
+      flushMicrotasks()
+
+      expect(earlier).not.toHaveBeenCalled()
+      expect(later).toHaveBeenCalledTimes(1)
+      expect(client.getQueryData(['n'])).toBe(2)
+    }))
+
+    it('cancelRefetch fetches once more with its own queryFn and retry, not those of a component showing the key, even one that asked too', fakeAsync(() => {
+      const load = new Subject<string>()
+      const componentFn = jasmine.createSpy('componentFn').and.returnValue(load)
+
+      @Component({ template: '' })
+      class Todos {
+        readonly todos = injectQuery(() => ({
+          queryKey: ['n'],
+          queryFn: componentFn,
+          retry: 3,
+          retryDelay: 10,
+        }))
+      }
+
+      TestBed.createComponent(Todos).detectChanges()
+
+      const error = new Error('down')
+      const mine = jasmine
+        .createSpy('mine')
+        .and.returnValue(throwError(() => error))
+      const result = settled(
+        client.fetchQuery(['n'], mine, { cancelRefetch: true }),
+      )
+
+      // The component asks for a refetch after the call.
+      client.invalidateQueries({ queryKey: ['n'] })
+      load.next('first')
+      load.complete()
+      flushMicrotasks()
+
+      // Not retried: fetchQuery doesn't retry unless asked.
+      expect(mine).toHaveBeenCalledTimes(1)
+      expect(componentFn).toHaveBeenCalledTimes(1)
+      expect(result.error).toBe(error)
+    }))
+
+    it("cancelRefetch still fetches once more after a component's first load once the component is gone", fakeAsync(() => {
+      const load = deferred<string>()
+
+      @Component({ template: '' })
+      class Todos {
+        readonly todos = injectQuery(() => ({
+          queryKey: ['todos'],
+          queryFn: () => load.promise,
+        }))
+      }
+
+      const fixture = TestBed.createComponent(Todos)
+
+      fixture.detectChanges()
+
+      const fresh = jasmine.createSpy('fresh').and.returnValue(of('fresh'))
+      const result = settled(
+        client.fetchQuery(['todos'], fresh, { cancelRefetch: true }),
+      )
+
+      // fetchQuery needs no component: the one showing the key goes away
+      // while its first load runs on.
+      fixture.destroy()
+      load.resolve('old')
+      flushMicrotasks()
+
+      expect(fresh).toHaveBeenCalledTimes(1)
+      expect(result.value).toBe('fresh')
+    }))
+
+    it('cancelRefetch rejects with a CancelledError when the last component leaves the Observable load it waits behind', fakeAsync(() => {
+      @Component({ template: '' })
+      class Todos {
+        readonly todos = injectQuery(() => ({
+          queryKey: ['todos'],
+          queryFn: () => new Subject<string>(),
+        }))
+      }
+
+      const fixture = TestBed.createComponent(Todos)
+
+      fixture.detectChanges()
+
+      const fresh = jasmine.createSpy('fresh').and.returnValue(of('fresh'))
+      const result = settled(
+        client.fetchQuery(['todos'], fresh, { cancelRefetch: true }),
+      )
+
+      // Leaving stops the load, as it would stop any Observable fetch.
+      fixture.destroy()
+      flushMicrotasks()
+
+      expect(fresh).not.toHaveBeenCalled()
+      expect(result.error).toEqual(jasmine.any(CancelledError))
+    }))
+
+    it('cancelRefetch hands its queryFn over to the retries of the fetch it waits for', fakeAsync(() => {
+      const loadA = jasmine
+        .createSpy('loadA')
+        .and.returnValue(throwError(() => new Error('blip')))
+      const loadB = jasmine.createSpy('loadB').and.returnValue(of('B'))
+
+      client.fetchQuery(['n'], loadA, { retry: 1, retryDelay: 10 })
+
+      const result = settled(
+        client.fetchQuery(['n'], loadB, { cancelRefetch: true }),
+      )
+
+      tick(10)
+      flushMicrotasks()
+
+      // The retry went out after the call, with its queryFn.
+      expect(loadA).toHaveBeenCalledTimes(1)
+      expect(loadB).toHaveBeenCalledTimes(1)
+      expect(result.value).toBe('B')
+    }))
+
+    it('cancelRefetch rejects with the error of a retry that went out after the call', fakeAsync(() => {
+      const responses: Array<Subject<string>> = []
+
+      @Component({ template: '' })
+      class Todos {
+        readonly todos = injectQuery(() => ({
+          queryKey: ['todos'],
+          queryFn: () => {
+            const response = new Subject<string>()
+
+            responses.push(response)
+
+            return response
+          },
+          retry: 1,
+          retryDelay: 10,
+        }))
+      }
+
+      TestBed.createComponent(Todos).detectChanges()
+
+      const callerFn = jasmine.createSpy('callerFn').and.returnValue(of('mine'))
+      const result = settled(
+        client.fetchQuery(['todos'], callerFn, { cancelRefetch: true }),
+      )
+
+      responses[0].error(new Error('first'))
+      tick(10)
+
+      // The retry went out after the call, so it reads the data after it:
+      // its failure is the call's.
+      const error = new Error('second')
+
+      responses[1].error(error)
+      flushMicrotasks()
+
+      expect(callerFn).not.toHaveBeenCalled()
+      expect(result.error).toBe(error)
+    }))
+
+    it('cancelRefetch resolves with the data written meanwhile when the fetch it waits behind is cancelled', fakeAsync(() => {
+      client.fetchQuery(['todos'], () => new Subject<string>())
+
+      const result = settled(
+        client.fetchQuery(['todos'], () => of('fresh'), {
+          cancelRefetch: true,
+        }),
+      )
+
+      client.setQueryData(['todos'], 'written')
+      client.cancelQueries({ queryKey: ['todos'] })
+      flushMicrotasks()
+
+      expect(result.value).toBe('written')
     }))
 
     it("doesn't retry a failing fetch unless asked", fakeAsync(() => {
@@ -598,6 +828,22 @@ describe('QueryClient', () => {
       it("doesn't surface a failure nobody waits for as an unhandled rejection", fakeAsync(() => {
         // A prefetch that fails: only the query's state tells.
         client.fetchQuery(['n'], () => throwError(() => new Error('down')))
+
+        // fakeAsync rethrows an unhandled rejection when microtasks run.
+        expect(() => flushMicrotasks()).not.toThrow()
+        expect(client.getQueryCache().get(['n'])?.state().status).toBe('error')
+      }))
+
+      it("doesn't surface a failed refetch that cancelRefetch queued and nobody waits for as an unhandled rejection", fakeAsync(() => {
+        const load = new Subject<number>()
+
+        client.fetchQuery(['n'], () => load)
+        client.fetchQuery(['n'], () => throwError(() => new Error('down')), {
+          cancelRefetch: true,
+        })
+
+        load.next(1)
+        load.complete()
 
         // fakeAsync rethrows an unhandled rejection when microtasks run.
         expect(() => flushMicrotasks()).not.toThrow()

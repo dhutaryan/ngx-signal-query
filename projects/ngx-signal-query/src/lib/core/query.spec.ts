@@ -44,7 +44,11 @@ function createQuery<TData, TError = Error>(gcTime = 5 * 60_000) {
 // An observer that never wants the query fetched, for specs that only count
 // observers.
 function stubObserver(): QuerySubscriber<number> {
-  return { fetchOptions: () => null, structuralSharing: () => true }
+  return {
+    fetchOptions: () => null,
+    refetchOptions: () => null,
+    structuralSharing: () => true,
+  }
 }
 
 // How an observer that wants the query fetched would fetch it.
@@ -59,17 +63,20 @@ function activeObserver(
   queryFn: () => Observable<number>,
   options: Partial<ObserverOptions> = {},
 ): QuerySubscriber<number> {
+  const fetchOptions = (): ObserverOptions => ({
+    queryFn,
+    retry: 0,
+    retryDelay: 0,
+    structuralSharing: true,
+    staleTime: 0,
+    refetchOnWindowFocus: true,
+    refetchOnReconnect: true,
+    ...options,
+  })
+
   return {
-    fetchOptions: () => ({
-      queryFn,
-      retry: 0,
-      retryDelay: 0,
-      structuralSharing: true,
-      staleTime: 0,
-      refetchOnWindowFocus: true,
-      refetchOnReconnect: true,
-      ...options,
-    }),
+    fetchOptions,
+    refetchOptions: fetchOptions,
     structuralSharing: () => true,
   }
 }
@@ -895,6 +902,42 @@ describe('Query', () => {
       expect(tasks.held).toBe(0)
       expect(tasks.removals.length).toBe(2)
     })
+
+    it('has the refetch asked for during a first load take its own before the load lets go', () => {
+      const { query, tasks } = createQuery<number>()
+      const load = new Subject<number>()
+
+      query.fetch({ queryFn: () => load })
+      query.refetch({ queryFn: () => new Subject<number>() }, 'caller')
+
+      load.next(1)
+      load.complete()
+
+      // The app never counts as stable in between: the load lets go of its
+      // task, with its data in, once the refetch holds one.
+      expect(tasks.removals).toEqual([
+        { state: jasmine.objectContaining({ data: 1 }), held: 1 },
+      ])
+    })
+
+    it('has the refetch asked for during a first load that fails take its own before the load lets go', () => {
+      const { query, tasks } = createQuery<number>()
+      const load = new Subject<number>()
+      const refetch = jasmine
+        .createSpy('refetch')
+        .and.returnValue(new Subject<number>())
+
+      query.fetch({ queryFn: () => load })
+      query.refetch({ queryFn: refetch }, 'caller')
+
+      expect(refetch).not.toHaveBeenCalled()
+
+      load.error(new Error('down'))
+
+      // The app never counts as stable in between.
+      expect(refetch).toHaveBeenCalledTimes(1)
+      expect(tasks.removals).toEqual([{ state: jasmine.anything(), held: 1 }])
+    })
   })
 
   describe('setData', () => {
@@ -1410,10 +1453,11 @@ describe('Query', () => {
       expect(second).toHaveBeenCalledTimes(1)
     })
 
-    it('replaces a fetch in flight', () => {
+    it('replaces a fetch in flight while the query has data', () => {
       const { query } = createQuery<number>()
       const inFlight = new Subject<number>()
 
+      query.setData(1)
       query.addObserver(activeObserver(() => of(2)))
       query.fetch({ queryFn: () => inFlight })
       query.refetchIfActive()
@@ -1545,7 +1589,11 @@ describe('Query', () => {
     function sharingObserver(
       sharing: ReturnType<QuerySubscriber<number>['structuralSharing']>,
     ): QuerySubscriber<number> {
-      return { fetchOptions: () => null, structuralSharing: () => sharing }
+      return {
+        fetchOptions: () => null,
+        refetchOptions: () => null,
+        structuralSharing: () => sharing,
+      }
     }
 
     it('is that of the first observer with a say, false included', () => {

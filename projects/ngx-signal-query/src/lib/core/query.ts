@@ -47,6 +47,13 @@ export interface QuerySubscriber<TData, TError = Error> {
   > | null
 
   /**
+   * How this observer would refetch the query by hand, as its refetch()
+   * does, enabled or not; `null` while its options throw, or once its key has
+   * moved on to another query.
+   */
+  refetchOptions(): ReturnType<QuerySubscriber<TData, TError>['fetchOptions']>
+
+  /**
    * How this observer merges data written into the query by hand, read from
    * its live options, whether it's enabled or not; `undefined` while its
    * options throw.
@@ -69,6 +76,24 @@ export interface QueryConfig {
   gcTime: number
   pendingTasks: Pick<PendingTasks, 'add'>
   zone: Pick<NgZone, 'run' | 'runOutsideAngular'>
+}
+
+// What a fetch runs with, as its caller asks for it.
+type FetchArgs<TData, TError> = Pick<
+  QueryOptions<TData, TError>,
+  'queryFn' | 'retry' | 'retryDelay' | 'structuralSharing'
+>
+
+// A refetch asked for while a fetch of a query with no data yet runs, to run
+// once that fetch ends (see refetch).
+interface QueuedRefetch<TData, TError> {
+  // Settles the promise that everyone who asked for the refetch shares.
+  readonly outcome: Deferred<TData>
+  // What the last caller that isn't a component, as fetchQuery, asked to
+  // fetch with, if one asked.
+  callerArgs: FetchArgs<TData, TError> | undefined
+  // The component that asked last by hand, with its refetch(), if one did.
+  byHand: QuerySubscriber<TData, TError> | undefined
 }
 
 // The fetch in flight, from its first attempt until it lands, fails or is
@@ -101,6 +126,12 @@ interface InFlightFetch<TData, TError> {
   // response leaves the query marked stale. Each attempt clears it as it
   // starts: a retry reads the data after the change.
   invalidated: boolean
+  // The refetch to run once the fetch ends; null while nobody asked for one.
+  queuedRefetch: QueuedRefetch<TData, TError> | null
+  // Set when a refetch is asked for while the fetch is in flight, for the
+  // same reason, and cleared the same way: the refetch runs only if it was
+  // asked for during the attempt the fetch ends with.
+  refetchAsked: boolean
   // Removes the app's pending task the fetch holds. While it's held, Angular
   // counts the app as busy: a server render and whenStable() wait for the
   // fetch, whatever its queryFn gets the data with. Removed once the outcome
@@ -196,14 +227,13 @@ export class Query<TData, TError = Error> {
   }
 
   // Refetches the query if a component shows it: the first observer that
-  // wants it fetched decides how, as in TanStack. A fetch in flight is
-  // replaced, as it may predate the change the caller is after. Returns the
-  // fetch's promise, or undefined if no observer wants the query fetched.
+  // wants it fetched decides how, as in TanStack (see refetch). Returns the
+  // refetch's promise, or undefined if no observer wants the query fetched.
   refetchIfActive(): Promise<TData> | undefined {
     for (const observer of this.#observers) {
       const options = observer.fetchOptions()
 
-      if (options) return this.fetch(options, { cancelRefetch: true })
+      if (options) return this.refetch(options)
     }
 
     return
@@ -278,8 +308,11 @@ export class Query<TData, TError = Error> {
     // ignore the promise: handled here, a failure doesn't surface as an
     // unhandled rejection, and whoever awaits the promise still gets it.
     outcome.promise.catch(() => undefined)
-    // Whoever waits for the fetch this one replaces gets this one's outcome.
+    // Whoever waits for the fetch this one replaces gets this one's outcome,
+    // and so does whoever waits for a refetch queued after it: this fetch
+    // starts after they asked.
     running?.outcome.resolve(outcome.promise)
+    running?.queuedRefetch?.outcome.resolve(outcome.promise)
 
     const inFlight: InFlightFetch<TData, TError> = {
       outcome,
@@ -291,6 +324,8 @@ export class Query<TData, TError = Error> {
       abortable: false,
       retriesStopped: false,
       invalidated: false,
+      queuedRefetch: null,
+      refetchAsked: false,
       removeTask: this.#pendingTasks.add(),
     }
 
@@ -319,8 +354,10 @@ export class Query<TData, TError = Error> {
         const attemptQueryFn =
           attemptIndex === 0 ? queryFn : this.#retryQueryFn(inFlight)
 
-        // This attempt reads the data after any invalidation so far.
+        // This attempt reads the data after any invalidation or refetch
+        // asked for so far.
         inFlight.invalidated = false
+        inFlight.refetchAsked = false
 
         return this.#request(attemptQueryFn, inFlight)
       },
@@ -382,8 +419,10 @@ export class Query<TData, TError = Error> {
             updatedAt: Date.now(),
           })
           outcome.resolve(data)
+          this.#refetchIfAsked(inFlight)
           this.#scheduleGc()
-          // Last: whatever waits for the app to settle finds the data in.
+          // Last: whatever waits for the app to settle finds the data in, or
+          // the refetch queued after it holding a task of its own.
           inFlight.removeTask()
         },
         error: (err) => {
@@ -396,6 +435,7 @@ export class Query<TData, TError = Error> {
             ...countFailure(state, err),
           }))
           outcome.reject(err)
+          this.#refetchIfAsked(inFlight)
           this.#scheduleGc()
           inFlight.removeTask()
         },
@@ -403,6 +443,49 @@ export class Query<TData, TError = Error> {
     )
 
     return outcome.promise
+  }
+
+  // Refetches the query, as invalidation asks (no `by`), a component's
+  // refetch() (`by` that component) and fetchQuery() with cancelRefetch (`by`
+  // 'caller'). The fetch in flight may predate the reason: with data, it is
+  // replaced; with none yet, it is let land and show, and the query is
+  // fetched once more after it (see #refetchIfAsked), however many refetches
+  // are asked for meanwhile. Whoever asks gets that refetch's promise. A
+  // caller hands its queryFn over for the retries to come, as a caller that
+  // joins does.
+  refetch(
+    args: FetchArgs<TData, TError>,
+    by?: QuerySubscriber<TData, TError> | 'caller',
+  ): Promise<TData> {
+    const running = this.#inFlight
+
+    if (!running || this.state().data !== undefined) {
+      return this.fetch(args, { cancelRefetch: true })
+    }
+
+    running.refetchAsked = true
+
+    if (!running.queuedRefetch) {
+      const outcome = deferred<TData>()
+
+      // Handled here, as a fetch's own promise is: the refetch's failure
+      // shows in the state, and a caller may ignore the promise.
+      outcome.promise.catch(() => undefined)
+      running.queuedRefetch = {
+        outcome,
+        callerArgs: undefined,
+        byHand: undefined,
+      }
+    }
+
+    if (by === 'caller') {
+      running.queuedRefetch.callerArgs = args
+      running.queryFn = args.queryFn
+    } else if (by) {
+      running.queuedRefetch.byHand = by
+    }
+
+    return running.queuedRefetch.outcome.promise
   }
 
   // Without a structuralSharing setting the data is stored as is: which one
@@ -490,6 +573,7 @@ export class Query<TData, TError = Error> {
   }
 
   // Stops the fetch in flight, if any, and settles its promise with settle.
+  // A refetch queued after it is dropped: whoever asked for it gets the same.
   #stop(settle: (outcome: Deferred<TData>) => void): void {
     const inFlight = this.#inFlight
 
@@ -498,6 +582,7 @@ export class Query<TData, TError = Error> {
     inFlight.subscription.unsubscribe()
     this.#inFlight = null
     settle(inFlight.outcome)
+    inFlight.queuedRefetch?.outcome.resolve(inFlight.outcome.promise)
 
     const { before } = inFlight
 
@@ -515,6 +600,46 @@ export class Query<TData, TError = Error> {
       isFetching: false,
     }))
     inFlight.removeTask()
+  }
+
+  // Runs the refetch queued after the fetch that just ended (see
+  // #queuedRefetchArgs). Not if the attempt the fetch ended with started
+  // after the last request, as it read the data after the reason for the
+  // refetch. Whoever asked gets the refetch's outcome, or the fetch's.
+  #refetchIfAsked(inFlight: InFlightFetch<TData, TError>): void {
+    const queued = inFlight.queuedRefetch
+
+    if (!queued) return
+
+    const args = inFlight.refetchAsked ? this.#queuedRefetchArgs(queued) : null
+
+    queued.outcome.resolve(args ? this.fetch(args) : inFlight.outcome.promise)
+  }
+
+  // What the queued refetch runs with: the args of the caller that asked, if
+  // one did; else as the component that asked by hand would refetch it, as
+  // its refetch() does with data, while it still shows the query, enabled or
+  // not; else as the first component that wants the query fetched would
+  // fetch it, as an invalidation refetches. With none of them, the refetch is
+  // dropped: an invalidation leaves a query that only disabled components
+  // show alone.
+  #queuedRefetchArgs({
+    callerArgs,
+    byHand,
+  }: QueuedRefetch<TData, TError>): FetchArgs<TData, TError> | null {
+    if (callerArgs) return callerArgs
+
+    const own = byHand && this.#observers.has(byHand) && byHand.refetchOptions()
+
+    if (own) return own
+
+    for (const observer of this.#observers) {
+      const options = observer.fetchOptions()
+
+      if (options) return options
+    }
+
+    return null
   }
 
   // A fetch in flight is kept, as in TanStack, and the observers aren't even

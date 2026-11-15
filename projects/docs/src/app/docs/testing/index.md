@@ -131,6 +131,8 @@ it('goes pending, then success', fakeAsync(() => {
 
 Testing the error path is the same shape — `subject.error(new Error('nope'))`, then assert `todos.isError()`. (This is where **retries off** matters — otherwise the error shows only after the retries, seconds of fake time later.)
 
+One `Subject` answers one request. A test that also refetches, say by invalidating during the load, needs a new `Subject` per call: the refetch would otherwise get the one that has completed, and fail.
+
 ## Window focus and reconnect
 
 A test doesn't leave the page or lose the network, so [these refetches](/queries/focus-and-reconnect) don't happen in it on their own. To test one, fire the event the browser would:

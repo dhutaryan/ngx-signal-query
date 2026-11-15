@@ -17,8 +17,9 @@
     <code>refetch()</code>
     ), or turn the socket on (a todo changes every {{ socketInterval }} ms, and
     each message invalidates the list). The fake server answers with the version
-    of the list it read when the request came in. Expected after #33: the first
-    load lands and shows, then the list refetches once more.
+    of the list it read when the request came in. The first load lands and
+    shows, then the list refetches once more. Before #33, each request cancelled
+    the first load and started it over.
   </p>
 
   <div class="controls">
@@ -75,7 +76,7 @@
         </td>
       </tr>
       <tr class="expected">
-        <td>expected after #33</td>
+        <td>expected</td>
         <td>{{ seconds(listLatency) }}</td>
         <td>0</td>
       </tr>
@@ -103,19 +104,18 @@
       </li>
       <li>
         <strong>Start, then Save a todo while it loads</strong>
-        — expected: v1 shows at {{ seconds(listLatency) }}, then one more
-        request brings the saved todo's version, and the mutation finishes with
-        it.
+        — v1 shows at {{ seconds(listLatency) }}, then one more request brings
+        the saved todo's version, and the mutation finishes with it.
       </li>
       <li>
         <strong>Socket on, then Start</strong>
-        — expected: v1 shows at {{ seconds(listLatency) }}, although a todo
-        changes every {{ socketInterval / 1000 }} s.
+        — v1 shows at {{ seconds(listLatency) }}, although a todo changes every
+        {{ socketInterval / 1000 }} s.
       </li>
       <li>
         <strong>Start, then Refresh twice while it loads</strong>
-        — expected: v1 shows at {{ seconds(listLatency) }}, then one more
-        request, and both
+        — v1 shows at {{ seconds(listLatency) }}, then one more request, and
+        both
         <code>refetch()</code>
         calls resolve with what it brings.
       </li>

@@ -164,13 +164,20 @@ export class QueryClient {
    *
    * Resolves with the data as the cache holds it: at once if it's fresh,
    * otherwise once the fetch lands. A key already fetching is waited for,
-   * not fetched again, unless `cancelRefetch` is set. Rejects with the error
-   * if the fetch fails. A cancelled fetch resolves with the data the cache
-   * holds, or rejects with a {@link CancelledError} if it holds none; a
-   * removed query always rejects with one. Nothing has to wait for the
-   * promise: a prefetch that fails only leaves the query in `'error'`. A
-   * server render and `whenStable()` wait for the fetch all the same, as for
-   * a component's query, so its data is in the cache by then.
+   * not fetched again, unless `cancelRefetch` is set: then the fetch in
+   * flight is replaced, or, while the key has no data yet, let land, then
+   * fetched once more with this call's `queryFn` and options (the last such
+   * call's, if several came), unless a retry of it already started after
+   * this call. Either way the promise waits for data read after this call,
+   * unless the fetch it waits behind is cancelled, as when the last
+   * component showing the key leaves while its `Observable` load runs.
+   *
+   * Rejects with the error if the fetch fails. A cancelled fetch resolves
+   * with the data the cache holds, or rejects with a {@link CancelledError}
+   * if it holds none; a removed query always rejects with one. Nothing has to
+   * wait for the promise: a prefetch that fails only leaves the query in
+   * `'error'`. A server render and `whenStable()` wait for the fetch all the
+   * same, as for a component's query, so its data is in the cache by then.
    *
    * Unlike a component's query in the browser, it doesn't retry a failure
    * unless `retry` is set here or in {@link withDefaultOptions}, so whoever
@@ -232,9 +239,15 @@ export class QueryClient {
       // longer, as it does for each component showing it.
       query.updateGcTime(defaulted.gcTime)
 
-      return query.shouldFetch(defaulted.staleTime)
-        ? query.fetch(defaulted, { cancelRefetch })
-        : Promise.resolve(query.state().data as TData)
+      if (!query.shouldFetch(defaulted.staleTime)) {
+        return Promise.resolve(query.state().data as TData)
+      }
+
+      // A refetch asked for by a caller, not a component: run with this
+      // call's options.
+      return cancelRefetch
+        ? query.refetch(defaulted, 'caller')
+        : query.fetch(defaulted)
     })
   }
 
@@ -316,11 +329,14 @@ export class QueryClient {
    * Marks matching queries as stale and refetches the actively observed ones,
    * once per query however many components observe it. The refetch starts
    * right away and replaces a fetch already in flight, which may predate the
-   * change. A query with no enabled observer keeps the stale mark and
-   * refetches as soon as one appears. A fetch of it already in flight still
-   * lands, and the query stays marked: an observer that appears meanwhile
-   * waits for that fetch, and the query refetches the next time stale data
-   * would. Commonly called after a mutation succeeds.
+   * change; a query with no data yet lets that fetch land and show, then
+   * refetches once, however many times it's asked to meanwhile, unless a
+   * retry of that fetch already started after the call. A query with no
+   * enabled observer keeps the stale mark and refetches as soon as one
+   * appears. A fetch of it already in flight still lands, and the query
+   * stays marked: an observer that appears meanwhile waits for that fetch,
+   * and the query refetches the next time stale data would. Commonly called
+   * after a mutation succeeds.
    *
    * Resolves once those refetches have settled, so a mutation hook that
    * returns it keeps the mutation pending until the data is fresh. It never
@@ -352,9 +368,11 @@ export class QueryClient {
   /**
    * Refetches the matching queries that a component shows, whether their
    * data is stale or not, once per query however many components show it. A
-   * fetch already in flight is replaced. Queries nobody shows are left as
-   * they are, not even marked stale: to have them refetch once they're shown,
-   * invalidate them with `invalidateQueries()`.
+   * fetch already in flight is replaced; a query with no data yet lets it
+   * land and show, then refetches once, unless a retry of it already started
+   * after the call. Queries nobody shows are left as they are, not even
+   * marked stale: to have them refetch once they're shown, invalidate them
+   * with `invalidateQueries()`.
    *
    * Resolves once the refetches have settled. It never rejects: a refetch
    * that fails shows in its query's `error`.

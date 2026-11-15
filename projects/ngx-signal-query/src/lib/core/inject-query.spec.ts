@@ -1300,6 +1300,40 @@ describe('injectQuery', () => {
       expect(client.getQueryData(['item', 1])).toBe('v1')
     })
 
+    it('leaves the previous key alone when an effect outside components invalidates it during the key switch', () => {
+      const appRef = TestBed.inject(ApplicationRef)
+      const id = signal(1)
+
+      // Outside a component, as in a service: its effects run as root
+      // effects.
+      TestBed.runInInjectionContext(() =>
+        injectQuery(() => ({
+          queryKey: ['item', id()],
+          queryFn: () => of(`v${id()}`),
+          staleTime: Infinity,
+        })),
+      )
+      appRef.tick()
+
+      // Another root effect, made later, as by another service. Angular 19
+      // runs root effects in the order they're marked dirty, so on a change
+      // of id this one runs after the observer has switched to item 2 but
+      // before it has left item 1.
+      TestBed.runInInjectionContext(() =>
+        effect(() => {
+          id()
+          client.invalidateQueries({ queryKey: ['item'] })
+        }),
+      )
+      appRef.tick()
+
+      id.set(2)
+      appRef.tick()
+
+      expect(client.getQueryData(['item', 2])).toBe('v2')
+      expect(client.getQueryData(['item', 1])).toBe('v1')
+    })
+
     it('does not make an effect that invalidates track what queryFn reads', () => {
       const dep = signal(1)
       const queryFn = jasmine.createSpy('queryFn').and.callFake(() => of(dep()))
@@ -1568,10 +1602,11 @@ describe('injectQuery', () => {
       expect(queryFn).not.toHaveBeenCalled()
     }))
 
-    it('replaces a fetch in flight', fakeAsync(() => {
+    it('replaces a fetch in flight while the query has data', fakeAsync(() => {
       const { queryFn, resolve, cancelled } = requests<string>()
 
-      // The first load is still in flight.
+      client.setQueryData(['todos'], 'a')
+      // A refetch of the cached data is in flight.
       mount(() => ({ queryKey: ['todos'], queryFn }))
 
       const refetched = settled(client.refetchQueries({ queryKey: ['todos'] }))
@@ -4858,12 +4893,14 @@ describe('injectQuery', () => {
   })
 
   describe('cancelRefetch', () => {
-    it('invalidate cancels an in-flight fetch and starts a fresh one', fakeAsync(() => {
+    it('invalidate cancels an in-flight fetch of a query with data and starts a fresh one', fakeAsync(() => {
       const subjects = [new Subject<string>(), new Subject<string>()]
       let call = 0
       const queryFn = jasmine
         .createSpy('queryFn')
         .and.callFake(() => subjects[call++])
+
+      client.setQueryData(['c'], 'cached')
 
       const { fixture, result } = mount<string>(() => ({
         queryKey: ['c'],
@@ -4889,8 +4926,11 @@ describe('injectQuery', () => {
       expect(result.data()).toBe('fresh')
     }))
 
-    it('refetch() cancels an in-flight fetch and starts a fresh one', () => {
+    it('refetch() cancels an in-flight fetch of a query with data and starts a fresh one', () => {
       const { queryFn, inFlight, cancelled, resolve } = requests<string>()
+
+      client.setQueryData(['c'], 'cached')
+
       const { result } = mount(() => ({ queryKey: ['c'], queryFn }))
 
       result.refetch()
@@ -4903,6 +4943,789 @@ describe('injectQuery', () => {
 
       expect(result.data()).toBe('fresh')
     })
+
+    it('counts data seeded with initialData as data, whenever it is stamped: a request replaces the fetch in flight', fakeAsync(() => {
+      const { queryFn, cancelled } = requests<string>()
+
+      mount(() => ({
+        queryKey: ['todos'],
+        queryFn,
+        initialData: 'seed',
+        initialDataUpdatedAt: 0,
+      }))
+      client.invalidateQueries({ queryKey: ['todos'] })
+
+      expect(cancelled()).toBe(1)
+    }))
+
+    it('counts null as data: a request replaces the fetch in flight', fakeAsync(() => {
+      const { queryFn, cancelled } = requests<string | null>()
+
+      // null says there's nothing there, and still counts as data.
+      client.setQueryData<string | null>(['todo'], null)
+      mount(() => ({ queryKey: ['todo'], queryFn }))
+      client.invalidateQueries({ queryKey: ['todo'] })
+
+      expect(cancelled()).toBe(1)
+    }))
+
+    it('replaces the fetch in flight of a query whose refetch failed, as it holds data', fakeAsync(() => {
+      const { queryFn, cancelled, fail } = requests<string>()
+
+      client.setQueryData(['todos'], 'cached')
+
+      const { result } = mount(() => ({
+        queryKey: ['todos'],
+        queryFn,
+        retry: false,
+      }))
+
+      fail(new Error('down'))
+      flushMicrotasks()
+
+      expect(result.status()).toBe('error')
+
+      result.refetch()
+      client.invalidateQueries({ queryKey: ['todos'] })
+
+      expect(cancelled()).toBe(1)
+      expect(queryFn).toHaveBeenCalledTimes(3)
+    }))
+  })
+
+  // A query with no data yet: a refetch asked for while its first load runs
+  // lets the load land and show, then the query is fetched once more, however
+  // many refetches were asked for meanwhile. Whoever asked waits for that
+  // refetch. With data, a request replaces the fetch in flight instead (see
+  // cancelRefetch).
+  describe('a refetch asked for during the first load', () => {
+    it('invalidateQueries() lets the first load land and show, then refetches once', fakeAsync(() => {
+      const { queryFn, cancelled, resolve } = requests<string>()
+      // Two components on the key: still one load, and one refetch.
+      const { results } = mountMany(2, () => ({
+        queryKey: ['todos'],
+        queryFn,
+      }))
+      const invalidated = settled(
+        client.invalidateQueries({ queryKey: ['todos'] }),
+      )
+
+      expect(queryFn).toHaveBeenCalledTimes(1)
+      expect(cancelled()).toBe(0)
+
+      resolve('first')
+      flushMicrotasks()
+
+      // The load shows, and the refetch after it is in flight.
+      expect(results.map((result) => result.data())).toEqual(['first', 'first'])
+      expect(results[0].isFetching()).toBe(true)
+      expect(queryFn).toHaveBeenCalledTimes(2)
+      expect(invalidated).toEqual({})
+
+      resolve('fresh')
+      flushMicrotasks()
+
+      expect(results[0].data()).toBe('fresh')
+      expect(results[0].isFetching()).toBe(false)
+      expect(invalidated).toEqual({ value: undefined })
+    }))
+
+    it('refetch() lets the first load land and show, then refetches once, and resolves with what that brings', fakeAsync(() => {
+      const { queryFn, cancelled, resolve } = requests<string>()
+      const { result } = mount(() => ({ queryKey: ['todos'], queryFn }))
+      const refetched = settled(result.refetch())
+
+      expect(cancelled()).toBe(0)
+
+      resolve('first')
+      flushMicrotasks()
+
+      expect(result.data()).toBe('first')
+      expect(queryFn).toHaveBeenCalledTimes(2)
+      expect(refetched).toEqual({})
+
+      resolve('fresh')
+      flushMicrotasks()
+
+      expect(refetched.value).toEqual({ data: 'fresh', error: null })
+    }))
+
+    it('refetchQueries() lets the first load land and show, then refetches once, and resolves after that', fakeAsync(() => {
+      const { queryFn, cancelled, resolve } = requests<string>()
+      const { result } = mount(() => ({ queryKey: ['todos'], queryFn }))
+      const refetched = settled(client.refetchQueries({ queryKey: ['todos'] }))
+
+      expect(cancelled()).toBe(0)
+
+      resolve('first')
+      flushMicrotasks()
+
+      expect(result.data()).toBe('first')
+      expect(queryFn).toHaveBeenCalledTimes(2)
+      expect(refetched).toEqual({})
+
+      resolve('fresh')
+      flushMicrotasks()
+
+      expect(refetched).toEqual({ value: undefined })
+    }))
+
+    it('runs one refetch after the first load however many are asked for during it', fakeAsync(() => {
+      const { queryFn, resolve } = requests<string>()
+      const { result } = mount(() => ({ queryKey: ['todos'], queryFn }))
+      const asked = [
+        settled(client.invalidateQueries({ queryKey: ['todos'] })),
+        settled(result.refetch()),
+        settled(client.refetchQueries({ queryKey: ['todos'] })),
+        settled(client.invalidateQueries({ queryKey: ['todos'] })),
+      ]
+
+      resolve('first')
+      flushMicrotasks()
+
+      expect(queryFn).toHaveBeenCalledTimes(2)
+      expect(asked).toEqual([{}, {}, {}, {}])
+
+      resolve('fresh')
+      flushMicrotasks()
+
+      expect(queryFn).toHaveBeenCalledTimes(2)
+      expect(result.data()).toBe('fresh')
+      expect(asked.map((promise) => 'value' in promise)).toEqual([
+        true,
+        true,
+        true,
+        true,
+      ])
+    }))
+
+    it('refetches after a first load that failed', fakeAsync(() => {
+      const { queryFn, fail, resolve } = requests<string>()
+      const { result } = mount(() => ({
+        queryKey: ['todo', 1],
+        queryFn,
+        retry: false,
+      }))
+      const invalidated = settled(
+        client.invalidateQueries({ queryKey: ['todo', 1] }),
+      )
+
+      // Say the todo was still being created.
+      fail(new Error('404'))
+      flushMicrotasks()
+
+      // The refetch is in flight at once, so the query reads as a first load.
+      expect(queryFn).toHaveBeenCalledTimes(2)
+      expect(result.status()).toBe('pending')
+      expect(result.error()).toBeNull()
+      expect(invalidated).toEqual({})
+
+      resolve('created')
+      flushMicrotasks()
+
+      expect(result.data()).toBe('created')
+      expect(invalidated).toEqual({ value: undefined })
+    }))
+
+    it('needs no refetch once a retry started after the request', fakeAsync(() => {
+      const { queryFn, fail, resolve } = requests<string>()
+      const { result } = mount(() => ({
+        queryKey: ['todos'],
+        queryFn,
+        retry: 1,
+        retryDelay: 10,
+      }))
+      const invalidated = settled(
+        client.invalidateQueries({ queryKey: ['todos'] }),
+      )
+
+      fail(new Error('blip'))
+      tick(10)
+
+      // The retry went out after the invalidation, so it reads the data
+      // after it.
+      expect(queryFn).toHaveBeenCalledTimes(2)
+
+      resolve('after')
+      flushMicrotasks()
+
+      expect(queryFn).toHaveBeenCalledTimes(2)
+      expect(result.data()).toBe('after')
+      expect(invalidated).toEqual({ value: undefined })
+    }))
+
+    it('still refetches when the request comes during the last attempt', fakeAsync(() => {
+      const { queryFn, fail, resolve, cancelled } = requests<string>()
+      const { result } = mount(() => ({
+        queryKey: ['todos'],
+        queryFn,
+        retry: 1,
+        retryDelay: 10,
+      }))
+
+      fail(new Error('blip'))
+      tick(10)
+      // The retry is in flight: it may have read the data before this.
+      client.invalidateQueries({ queryKey: ['todos'] })
+
+      expect(cancelled()).toBe(0)
+
+      resolve('retried')
+      flushMicrotasks()
+
+      expect(result.data()).toBe('retried')
+      expect(queryFn).toHaveBeenCalledTimes(3)
+    }))
+
+    it('still refetches when one request comes during the first attempt and another during the last', fakeAsync(() => {
+      const { queryFn, fail, resolve } = requests<string>()
+      const { result } = mount(() => ({
+        queryKey: ['todos'],
+        queryFn,
+        retry: 1,
+        retryDelay: 10,
+      }))
+
+      client.invalidateQueries({ queryKey: ['todos'] })
+      fail(new Error('blip'))
+      tick(10)
+      // The retry went out after the first request, not after this one.
+      client.invalidateQueries({ queryKey: ['todos'] })
+      resolve('retried')
+      flushMicrotasks()
+
+      expect(result.data()).toBe('retried')
+      expect(queryFn).toHaveBeenCalledTimes(3)
+    }))
+
+    it('drops the refetch when the first load is cancelled', fakeAsync(() => {
+      const { queryFn, inFlight } = requests<string>()
+
+      mount(() => ({ queryKey: ['todos'], queryFn }))
+
+      const invalidated = settled(
+        client.invalidateQueries({ queryKey: ['todos'] }),
+      )
+
+      client.cancelQueries({ queryKey: ['todos'] })
+      flushMicrotasks()
+
+      expect(queryFn).toHaveBeenCalledTimes(1)
+      expect(inFlight()).toBe(0)
+      // It never rejects, though the refetch it waited for won't come.
+      expect(invalidated).toEqual({ value: undefined })
+    }))
+
+    it('drops the refetch when the last component leaves a load that runs on, and keeps what lands stale', fakeAsync(() => {
+      const { queryFn, requests: sent } = promiseRequests<string>()
+      const options = () => ({
+        queryKey: ['todos'],
+        queryFn,
+        staleTime: Infinity,
+      })
+      const { fixture } = mount(options)
+      const invalidated = settled(
+        client.invalidateQueries({ queryKey: ['todos'] }),
+      )
+
+      fixture.destroy()
+      sent[0].resolve('first')
+      flushMicrotasks()
+
+      expect(queryFn).toHaveBeenCalledTimes(1)
+      expect(client.getQueryData(['todos'])).toBe('first')
+      expect(invalidated).toEqual({ value: undefined })
+
+      // The data may predate the invalidation: the next component refetches
+      // it, whatever its staleTime.
+      mount(options)
+
+      expect(queryFn).toHaveBeenCalledTimes(2)
+    }))
+
+    it('lets a request replace the load once data is written during it, and the earlier callers wait for what replaces it', fakeAsync(() => {
+      const { queryFn, cancelled, resolve } = requests<string>()
+      const { result } = mount(() => ({ queryKey: ['todos'], queryFn }))
+      const first = settled(client.invalidateQueries({ queryKey: ['todos'] }))
+
+      client.setQueryData(['todos'], 'written')
+
+      // The query has data now, so this one replaces the load.
+      const second = settled(client.invalidateQueries({ queryKey: ['todos'] }))
+
+      expect(cancelled()).toBe(1)
+
+      resolve('fresh')
+      flushMicrotasks()
+
+      expect(queryFn).toHaveBeenCalledTimes(2)
+      expect(result.data()).toBe('fresh')
+      expect([first, second]).toEqual([
+        { value: undefined },
+        { value: undefined },
+      ])
+    }))
+
+    it('keeps the app busy until the refetch after the first load lands', fakeAsync(() => {
+      const { queryFn, resolve } = requests<string>()
+
+      mount(() => ({ queryKey: ['todos'], queryFn }))
+      client.invalidateQueries({ queryKey: ['todos'] })
+
+      resolve('first')
+
+      expect(appIsStable()).toBe(false)
+
+      resolve('fresh')
+
+      expect(appIsStable()).toBe(true)
+    }))
+
+    it('fetches the refetch as a component still on the key would, after the one that asked moved on', fakeAsync(() => {
+      const sent: Array<{ id: number; response: Subject<string> }> = []
+      const api = (id: number): Subject<string> => {
+        const response = new Subject<string>()
+
+        sent.push({ id, response })
+
+        return response
+      }
+      // queryFn reads the id only when it runs, as `() => api(this.id())`
+      // does.
+      const options = (id: Signal<number>) => ({
+        queryKey: ['todo', id()],
+        queryFn: () => api(id()),
+      })
+      const first = mount<string, Error, number>(options, 1)
+
+      mount(options, 1)
+      client.invalidateQueries({ queryKey: ['todo', 1] })
+
+      // The component that asked first moves on to another todo.
+      first.value.set(2)
+      first.fixture.detectChanges()
+
+      sent[0].response.next('todo 1')
+      sent[0].response.complete()
+      flushMicrotasks()
+
+      // Todo 1 is refetched as the component still showing it fetches it.
+      expect(sent.map((request) => request.id)).toEqual([1, 2, 1])
+      expect(client.getQueryData(['todo', 1])).toBe('todo 1')
+    }))
+
+    it("drops the refetch once the component that asked moved on and those left don't want the query fetched", fakeAsync(() => {
+      const sent: Array<{ id: number; response: Subject<string> }> = []
+      const api = (id: number): Subject<string> => {
+        const response = new Subject<string>()
+
+        sent.push({ id, response })
+
+        return response
+      }
+      // queryFn reads the id only when it runs, as `() => api(this.id())`
+      // does.
+      const asking = mount<string, Error, number>(
+        (id) => ({ queryKey: ['todo', id()], queryFn: () => api(id()) }),
+        1,
+      )
+
+      mount<string, Error, number>(
+        (id) => ({
+          queryKey: ['todo', id()],
+          queryFn: () => api(id()),
+          enabled: false,
+        }),
+        1,
+      )
+
+      const invalidated = settled(
+        client.invalidateQueries({ queryKey: ['todo', 1] }),
+      )
+
+      // The component that asked moves on to another todo.
+      asking.value.set(2)
+      asking.fixture.detectChanges()
+
+      sent[0].response.next('todo 1')
+      sent[0].response.complete()
+      flushMicrotasks()
+
+      // A disabled component doesn't refetch on invalidation, and the one
+      // that asked would fetch todo 2 now.
+      expect(sent.map((request) => request.id)).toEqual([1, 2])
+      expect(client.getQueryData(['todo', 1])).toBe('todo 1')
+      expect(invalidated).toEqual({ value: undefined })
+    }))
+
+    it('runs the refetch a disabled component asked for during a first load someone else started', fakeAsync(() => {
+      const load = new Subject<string>()
+      const queryFn = jasmine.createSpy('queryFn').and.returnValue(of('report'))
+
+      // A prefetch is the first load.
+      client.fetchQuery(['report'], () => load)
+
+      // Fetched only by hand: refetch() ignores enabled.
+      const { result } = mount(() => ({
+        queryKey: ['report'],
+        queryFn,
+        enabled: false,
+      }))
+      const refetched = settled(result.refetch())
+
+      expect(queryFn).not.toHaveBeenCalled()
+
+      load.next('prefetched')
+      load.complete()
+      flushMicrotasks()
+
+      expect(queryFn).toHaveBeenCalledTimes(1)
+      expect(refetched.value).toEqual({ data: 'report', error: null })
+    }))
+
+    it('lets refetch() start over a first load that hangs once cancelQueries() stopped it', () => {
+      const { queryFn, inFlight } = requests<string>()
+      const { result } = mount(() => ({ queryKey: ['todos'], queryFn }))
+
+      // The first request never answers, and refetch() waits for it.
+      result.refetch()
+
+      expect(queryFn).toHaveBeenCalledTimes(1)
+
+      client.cancelQueries({ queryKey: ['todos'] })
+      result.refetch()
+
+      expect(queryFn).toHaveBeenCalledTimes(2)
+      expect(inFlight()).toBe(1)
+    })
+
+    it('drops the refetch() of a component that goes away during its first load', fakeAsync(() => {
+      const { queryFn, requests: sent } = promiseRequests<string>()
+      const { fixture, result } = mount(() => ({
+        queryKey: ['todos'],
+        queryFn,
+      }))
+      const refetched = settled(result.refetch())
+
+      // The request runs on: a promise can't be aborted.
+      fixture.destroy()
+      sent[0].resolve('first')
+      flushMicrotasks()
+
+      expect(queryFn).toHaveBeenCalledTimes(1)
+      expect('value' in refetched).toBe(true)
+    }))
+
+    it('runs the refetch a caller asked for with its own queryFn, whatever components asked after it', fakeAsync(() => {
+      const sent: Array<{ id: number; response: Subject<string> }> = []
+      const api = (id: number): Subject<string> => {
+        const response = new Subject<string>()
+
+        sent.push({ id, response })
+
+        return response
+      }
+      const asking = mount<string, Error, number>(
+        (id) => ({ queryKey: ['todo', id()], queryFn: () => api(id()) }),
+        1,
+      )
+
+      mount<string, Error, number>(
+        (id) => ({
+          queryKey: ['todo', id()],
+          queryFn: () => api(id()),
+          enabled: false,
+        }),
+        1,
+      )
+
+      const callerFn = jasmine
+        .createSpy('callerFn')
+        .and.returnValue(of('todo 1, fresh'))
+      const fetched = settled(
+        client.fetchQuery(['todo', 1], callerFn, { cancelRefetch: true }),
+      )
+
+      // A component asks too, then moves on to another todo.
+      client.invalidateQueries({ queryKey: ['todo', 1] })
+      asking.value.set(2)
+      asking.fixture.detectChanges()
+
+      sent[0].response.next('todo 1')
+      sent[0].response.complete()
+      flushMicrotasks()
+
+      expect(callerFn).toHaveBeenCalledTimes(1)
+      expect(sent.map((request) => request.id)).toEqual([1, 2])
+      expect(fetched.value).toBe('todo 1, fresh')
+      expect(client.getQueryData(['todo', 1])).toBe('todo 1, fresh')
+    }))
+
+    it('runs the refetch an invalidation queued as the first enabled component would', fakeAsync(() => {
+      const load = new Subject<string>()
+      const shownFirst = jasmine
+        .createSpy('shownFirst')
+        .and.returnValues(load, of('a, fresh'))
+      const shownLast = jasmine.createSpy('shownLast').and.returnValue(of('b'))
+
+      mount(() => ({ queryKey: ['todos'], queryFn: shownFirst }))
+
+      const last = mount(() => ({ queryKey: ['todos'], queryFn: shownLast }))
+
+      client.invalidateQueries({ queryKey: ['todos'] })
+      load.next('a')
+      load.complete()
+      flushMicrotasks()
+
+      expect(shownFirst).toHaveBeenCalledTimes(2)
+      expect(shownLast).not.toHaveBeenCalled()
+      expect(last.result.data()).toBe('a, fresh')
+    }))
+
+    it("runs a component's refetch() as that component would, not as another one shown first", fakeAsync(() => {
+      const load = new Subject<string>()
+      const shownFirst = jasmine
+        .createSpy('shownFirst')
+        .and.returnValues(load, of('a, fresh'))
+      const shownLast = jasmine.createSpy('shownLast').and.returnValue(of('b'))
+
+      mount(() => ({ queryKey: ['todos'], queryFn: shownFirst }))
+
+      const last = mount(() => ({ queryKey: ['todos'], queryFn: shownLast }))
+      const refetched = settled(last.result.refetch())
+
+      load.next('a')
+      load.complete()
+      flushMicrotasks()
+
+      // As its refetch() would with data: with its own options.
+      expect(shownFirst).toHaveBeenCalledTimes(1)
+      expect(shownLast).toHaveBeenCalledTimes(1)
+      expect(refetched.value).toEqual({ data: 'b', error: null })
+    }))
+
+    it('runs the refetch as the component that asked last would, when several ask by hand', fakeAsync(() => {
+      const load = new Subject<string>()
+      const askedFirst = jasmine
+        .createSpy('askedFirst')
+        .and.returnValues(load, of('a, fresh'))
+      const askedLast = jasmine.createSpy('askedLast').and.returnValue(of('b'))
+      const first = mount(() => ({ queryKey: ['todos'], queryFn: askedFirst }))
+      const last = mount(() => ({ queryKey: ['todos'], queryFn: askedLast }))
+      const refetchedFirst = settled(first.result.refetch())
+      const refetchedLast = settled(last.result.refetch())
+
+      load.next('a')
+      load.complete()
+      flushMicrotasks()
+
+      // One refetch, with the options of the last to ask, as fetchQuery()
+      // takes those of the last call; both wait for it.
+      expect(askedFirst).toHaveBeenCalledTimes(1)
+      expect(askedLast).toHaveBeenCalledTimes(1)
+      expect(refetchedFirst.value).toEqual({ data: 'b', error: null })
+      expect(refetchedLast.value).toEqual({ data: 'b', error: null })
+    }))
+
+    it("doesn't refetch with the queryFn of a component whose key moved on before change detection", fakeAsync(() => {
+      const sent: Array<{ id: number; response: Subject<string> }> = []
+      const api = (id: number): Subject<string> => {
+        const response = new Subject<string>()
+
+        sent.push({ id, response })
+
+        return response
+      }
+      const id = signal(1)
+
+      mount(() => ({ queryKey: ['todo', id()], queryFn: () => api(id()) }))
+      client.invalidateQueries({ queryKey: ['todo', 1] })
+
+      // The key moves on, and the first load lands before change detection
+      // has moved the component to the next query.
+      id.set(2)
+      sent[0].response.next('todo 1')
+      sent[0].response.complete()
+      flushMicrotasks()
+
+      // Its queryFn would fetch todo 2 now: nothing fetches into todo 1.
+      expect(sent.map((request) => request.id)).toEqual([1])
+      expect(client.getQueryData(['todo', 1])).toBe('todo 1')
+    }))
+
+    it("doesn't refetch with the queryFn of a service whose key moved on, when the load lands during its key switch", fakeAsync(() => {
+      const appRef = TestBed.inject(ApplicationRef)
+      const sent: string[] = []
+      const responses: Array<Subject<string>> = []
+      const api = (id: number, by: string): Subject<string> => {
+        const response = new Subject<string>()
+
+        sent.push(`todo ${id} by ${by}`)
+        responses.push(response)
+
+        return response
+      }
+      const id = signal(1)
+      // Outside a component, as in a service: its effects run as root
+      // effects.
+      const service = TestBed.runInInjectionContext(() =>
+        injectQuery(() => ({
+          queryKey: ['todo', id()],
+          queryFn: () => api(id(), 'service'),
+        })),
+      )
+
+      // Another one stays on todo 1, so its load isn't cancelled when the
+      // service leaves it.
+      TestBed.runInInjectionContext(() =>
+        injectQuery(() => ({
+          queryKey: ['todo', 1],
+          queryFn: () => api(1, 'other'),
+        })),
+      )
+      appRef.tick()
+      service.refetch()
+      // Another root effect, made later. Angular 19 runs root effects in the
+      // order they're marked dirty, so on a change of id this one runs after
+      // the service has switched to todo 2 but before it has left todo 1:
+      // the first load of todo 1 lands right then.
+      TestBed.runInInjectionContext(() =>
+        effect(() => {
+          if (id() === 2) {
+            responses[0].next('todo 1')
+            responses[0].complete()
+          }
+        }),
+      )
+      appRef.tick()
+      id.set(2)
+      appRef.tick()
+      flushMicrotasks()
+
+      // The service's queryFn would fetch todo 2 now: todo 1 is refetched as
+      // the one still on it fetches.
+      expect(sent).toEqual([
+        'todo 1 by service',
+        'todo 2 by service',
+        'todo 1 by other',
+      ])
+    }))
+
+    it('runs the refetch an invalidation queued as the first enabled component would, not as a disabled one shown first', fakeAsync(() => {
+      const watcherFn = jasmine.createSpy('watcherFn').and.returnValue(EMPTY)
+
+      // Only watches the cache, as the Query Client page suggests, and is
+      // mounted first, as in an app shell.
+      mount(() => ({ queryKey: ['todos'], queryFn: watcherFn, enabled: false }))
+
+      const { queryFn, resolve } = requests<string>()
+      const list = mount(() => ({ queryKey: ['todos'], queryFn }))
+
+      client.invalidateQueries({ queryKey: ['todos'] })
+      resolve('first')
+      flushMicrotasks()
+
+      expect(watcherFn).not.toHaveBeenCalled()
+      expect(queryFn).toHaveBeenCalledTimes(2)
+
+      resolve('fresh')
+      flushMicrotasks()
+
+      expect(list.result.data()).toBe('fresh')
+      expect(list.result.error()).toBeNull()
+    }))
+
+    it('drops the refetch an invalidation queued once the only component showing the key is disabled, and keeps the stale mark', fakeAsync(() => {
+      const enabled = signal(true)
+      const { queryFn, resolve } = requests<string>()
+      const { fixture } = mount(() => ({
+        queryKey: ['todos'],
+        queryFn,
+        enabled: enabled(),
+        staleTime: Infinity,
+      }))
+      const invalidated = settled(
+        client.invalidateQueries({ queryKey: ['todos'] }),
+      )
+
+      // Say the user signs out: the query is turned off while it loads.
+      enabled.set(false)
+      fixture.detectChanges()
+      resolve('first')
+      flushMicrotasks()
+
+      expect(queryFn).toHaveBeenCalledTimes(1)
+      expect(invalidated).toEqual({ value: undefined })
+
+      // Still marked stale: turned on again, it refetches, although its
+      // staleTime would keep the data fresh.
+      enabled.set(true)
+      fixture.detectChanges()
+
+      expect(queryFn).toHaveBeenCalledTimes(2)
+    }))
+
+    it("runs a disabled component's refetch() with its own options, not those of another disabled one shown first", fakeAsync(() => {
+      const watcherFn = jasmine.createSpy('watcherFn').and.returnValue(EMPTY)
+
+      // Only watches the cache, and is mounted first.
+      mount(() => ({
+        queryKey: ['report'],
+        queryFn: watcherFn,
+        enabled: false,
+      }))
+
+      const { queryFn, resolve } = requests<string>()
+      // Fetched only by hand: refetch() ignores enabled.
+      const report = mount(() => ({
+        queryKey: ['report'],
+        queryFn,
+        enabled: false,
+      }))
+
+      report.result.refetch()
+
+      // Clicked again while the first load runs.
+      const again = settled(report.result.refetch())
+
+      resolve('first')
+      flushMicrotasks()
+
+      expect(watcherFn).not.toHaveBeenCalled()
+      expect(queryFn).toHaveBeenCalledTimes(2)
+
+      resolve('second')
+      flushMicrotasks()
+
+      expect(again.value).toEqual({ data: 'second', error: null })
+    }))
+
+    it("doesn't let invalidations that keep coming in starve the first load", fakeAsync(() => {
+      const { queryFn, starts } = timed(3000)
+      const { fixture, result } = mount(() => ({
+        queryKey: ['todos'],
+        queryFn,
+      }))
+      // Say a websocket message invalidates the list every 2 s.
+      const messages = setInterval(
+        () => client.invalidateQueries({ queryKey: ['todos'] }),
+        2000,
+      )
+
+      elapse(2990, fixture)
+
+      expect(result.data()).toBeUndefined()
+      expect(starts).toEqual([0])
+
+      elapse(10, fixture)
+
+      // The first load shows as it lands, 3 s in, and the refetch follows.
+      expect(result.data()).toBe(1)
+      expect(starts).toEqual([0, 3000])
+
+      clearInterval(messages)
+      flush()
+    }))
   })
 
   describe('dependent queries', () => {
@@ -6245,8 +7068,10 @@ describe('injectQuery', () => {
     it('keeps the app busy until a refetch that replaced the fetch in flight lands', fakeAsync(() => {
       const { queryFn, resolve } = requests<string>()
 
+      client.setQueryData(['todos'], 'v1')
       mount(() => ({ queryKey: ['todos'], queryFn }))
-      // The first request is dropped for a new one, and never answered.
+      // The refetch of the cached data is dropped for a new one, and never
+      // answered.
       client.invalidateQueries({ queryKey: ['todos'] })
 
       expect(queryFn).toHaveBeenCalledTimes(2)
