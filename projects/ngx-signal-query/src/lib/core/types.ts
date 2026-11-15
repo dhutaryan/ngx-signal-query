@@ -281,10 +281,14 @@ export type QueryResult<TData, TError = Error> = {
   /** Error of the most recent failed attempt, or `null`. */
   failureReason: Signal<TError | null>
   /**
-   * Forces a fresh fetch, cancelling any in-flight request. Resolves once the
-   * fetch has settled, or the fetch that replaced it has, with `data` and
-   * `error` as the signals above hold them then. It never rejects: a failure
-   * shows in `error`.
+   * Forces a fresh fetch. A fetch already in flight is cancelled, or, while
+   * there's no data yet, let land and show first. Resolves once a fetch
+   * started after the call has settled, or a fetch that replaced it has,
+   * with `data` and `error` as the signals above hold them then. No fetch
+   * follows one let land if it's cancelled or removed, or if by the time it
+   * lands this query has moved to another key or been destroyed and no
+   * enabled component shows the key: the promise then resolves as soon as
+   * it's done. It never rejects: a failure shows in `error`.
    */
   refetch: () => Promise<{ data: TData | undefined; error: TError | null }>
 }

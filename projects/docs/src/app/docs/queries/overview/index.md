@@ -152,7 +152,7 @@ A practical combination — a full-page spinner on first load, a subtle indicato
 
 {% endraw %}
 
-It returns a promise that resolves once the fetch is back, with the `data` and `error` the query shows then. It never rejects: a failed fetch resolves with its error.
+It returns a promise that resolves once the fetch is back, with the `data` and `error` the query shows then. Called while the first load is still running, it lets that load show first, and the promise waits for a fetch made after the call. No such fetch comes if that load is cancelled or removed, or if by the time it lands the component has moved to another key or been destroyed and no enabled component shows the key: the promise then resolves as soon as the load is done. It never rejects: a failed fetch resolves with its error.
 
 ```ts
 protected async refresh(): Promise<void> {

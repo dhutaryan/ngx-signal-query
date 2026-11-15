@@ -110,9 +110,11 @@ The library cancels an in-flight fetch by **unsubscribing** from it. What that d
 
 So when no component shows a key any more (the last one showing it is destroyed, or its reactive key moves on), a fetch still running stops only if it's an `Observable`. A `Promise` fetch runs on, and its response is cached as usual: come back before the query is [removed](/query-client/caching), and the data shows at once. Until then it still counts as fetching, in `injectIsFetching()` too, and keeps the app busy: a server render and `whenStable()` wait for it. Nobody is left to want a failure tried again, though, so a failed attempt isn't retried, unless a component shows the key again before the fetch ends.
 
-`refetch()` cancels a fetch in flight to start a fresh one, and so do `invalidateQueries()` and `refetchQueries()` for a query a component shows, and `fetchQuery()` with `cancelRefetch`; `cancelQueries()` and `removeQueries()` cancel it outright. Whatever `queryFn` returned, a promise's response is ignored then.
+`refetch()` cancels a fetch in flight to start a fresh one, and so do `invalidateQueries()` and `refetchQueries()` for a query a component shows, and `fetchQuery()` with `cancelRefetch`; `cancelQueries()` and `removeQueries()` cancel it outright. Whatever `queryFn` returned, a promise's response is ignored then. A query with no data yet is the exception to the first group: its fetch in flight lands, then a fresh one goes out, unless a retry of it already did after the call. So a first load that hangs isn't restarted that way: stop it with `cancelQueries()` first, or give the request a timeout.
 
 So pick per query. To leave no requests behind (rapid typing in a search box, say), use `HttpClient` and its `Observable`. To keep a response the user may come back for, return a promise, e.g. `lastValueFrom(this.#http.get(...))`. Don't wrap a promise in an `Observable` (`from(fetch(...))`): unsubscribing can't abort the request, and its response is thrown away. Return the promise itself.
+
+Whichever it returns, each call should make a new request: a refetch or a retry calls `queryFn` again for data read then. One that hands out the same `Observable` every time may get nothing new: shared with `share()`, the refetch that follows a first load joins the request that is just answering, gets no value from it, and fails; replayed with `shareReplay(1)`, it answers with the response it already gave; a `Subject` that has completed ends the fetch without a value, and the fetch fails.
 
 ## Where do the variables come from?
 

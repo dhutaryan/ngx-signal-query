@@ -799,9 +799,12 @@ describe('injectMutation', () => {
       TestBed.createComponent(TodoList).detectChanges()
 
       return {
+        // The answer may start the next request, which replaces `response`.
         answer: (todos) => {
-          response.next(todos)
-          response.complete()
+          const latest = response
+
+          latest.next(todos)
+          latest.complete()
         },
       }
     }
@@ -818,6 +821,29 @@ describe('injectMutation', () => {
       }))
 
       m.mutate('bread')
+      flushMicrotasks()
+
+      expect(m.isPending()).toBe(true)
+
+      list.answer(['milk', 'bread'])
+      flushMicrotasks()
+
+      expect(m.isSuccess()).toBe(true)
+    }))
+
+    it('stays pending until the refetch after the list’s first load has landed', fakeAsync(() => {
+      // The list's first load is still in flight.
+      const list = showTodos()
+      const m = setup(() => ({
+        mutationFn: (title: string) => of(title),
+        onSuccess: () => client.invalidateQueries({ queryKey: ['todos'] }),
+      }))
+
+      m.mutate('bread')
+      flushMicrotasks()
+
+      // The load lands, but it may have been read before the write.
+      list.answer(['milk'])
       flushMicrotasks()
 
       expect(m.isPending()).toBe(true)
