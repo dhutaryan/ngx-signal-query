@@ -251,11 +251,25 @@ export function createQueryObserver<TData, TError = Error>(
   // key's data.
   let shown: Query<TData, TError> | undefined
 
+  // Set once destroy() has run: the observer shows no query any more, so its
+  // queryFn fetches none on the handle's behalf (see subscriber.fetches).
+  let destroyed = false
+
   // This observer as the query it shows sees it. One handle, moved from query
-  // to query along with the observer: refetch() hands it over to say who asks.
+  // to query along with the observer: each fetch it asks for hands it over to
+  // say who asks.
   const subscriber: QuerySubscriber<TData, TError> = {
     fetchOptions: () => (shown ? fetchOptionsFor(shown) : null),
     refetchOptions: () => (shown ? refetchOptionsFor(shown) : null),
+    fetches: (queryHash) => {
+      if (destroyed) return false
+
+      const options = liveOptions()
+
+      return (
+        (options ? hashKey(options.queryKey) : shown?.queryHash) === queryHash
+      )
+    },
     structuralSharing: () => liveOptions()?.structuralSharing,
   }
 
@@ -302,7 +316,7 @@ export function createQueryObserver<TData, TError = Error>(
       const options = defaultedOptions()
       const q = resolve(options.queryKey)
 
-      if (q.shouldFetch(options.staleTime)) q.fetch(options)
+      if (q.shouldFetch(options.staleTime)) q.fetch(options, { by: subscriber })
     })
   })
 
@@ -368,7 +382,7 @@ export function createQueryObserver<TData, TError = Error>(
       const { refetchIntervalInBackground } = untracked(defaultedOptions)
 
       if (refetchIntervalInBackground || pageVisible()) {
-        resolve(q.key).fetch(options)
+        resolve(q.key).fetch(options, { by: subscriber })
       }
     }
 
@@ -449,7 +463,9 @@ export function createQueryObserver<TData, TError = Error>(
       untracked(() => {
         const options = defaultedOptions()
 
-        return resolve(options.queryKey).refetch(options, subscriber)
+        return resolve(options.queryKey).refetch(options, subscriber, {
+          byHand: true,
+        })
       })
         .catch(() => undefined)
         .then(() => ({ data: result.data(), error: result.error() })),
@@ -457,6 +473,9 @@ export function createQueryObserver<TData, TError = Error>(
 
   return {
     result,
-    destroy: () => refs.forEach((ref) => ref.destroy()),
+    destroy: () => {
+      destroyed = true
+      refs.forEach((ref) => ref.destroy())
+    },
   }
 }
