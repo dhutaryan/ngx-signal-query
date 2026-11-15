@@ -1,10 +1,10 @@
 A query function is the thing that actually fetches. Its contract is small:
 
 ```ts
-queryFn: () => Observable<TData> | Promise<TData>
+queryFn: (context: QueryFunctionContext) => Observable<TData> | Promise<TData>
 ```
 
-It takes **no arguments** and returns either an `Observable` or a `Promise`. That's the whole interface.
+It's called with the key of the query it fetches and an `AbortSignal`, `{ queryKey, signal }`, and returns either an `Observable` or a `Promise`. That's the whole interface. A function that needs neither can take no arguments, as most examples here do.
 
 ## Observables are first-class
 
@@ -103,22 +103,38 @@ Failures are retried before the query settles into `'error'` — see the retry o
 
 ## Cancellation: `Observable` or `Promise`
 
-The library cancels an in-flight fetch by **unsubscribing** from it. What that does depends on what `queryFn` returned:
+The library cancels an in-flight fetch by **unsubscribing** from it and aborting the `signal` it handed the query function. What that does depends on what `queryFn` returned:
 
 - **`Observable`** — unsubscribing propagates all the way down, and `HttpClient` **aborts the actual HTTP request**. Nothing is left in flight.
-- **`Promise`** — a promise can't be cancelled. Unsubscribing only means its result is ignored; the request still runs to completion.
+- **`Promise` made with the signal** — the request is aborted with it, as `fetch()` aborts one it was given the signal for, and its result is ignored.
+- **Any other `Promise`** — a promise can't be cancelled. Unsubscribing only means its result is ignored; the request still runs to completion.
 
-So when no component shows a key any more (the last one showing it is destroyed, or its reactive key moves on), a fetch still running stops only if it's an `Observable`. A `Promise` fetch runs on, and its response is cached as usual: come back before the query is [removed](/query-client/caching), and the data shows at once. Until then it still counts as fetching, in `injectIsFetching()` too, and keeps the app busy: a server render and `whenStable()` wait for it. Nobody is left to want a failure tried again, though, so a failed attempt isn't retried, unless a component shows the key again before the fetch ends.
+```ts
+injectQuery(() => ({
+  queryKey: ['todos'],
+  queryFn: async ({ signal }) => {
+    const response = await fetch('/api/todos', { signal })
 
-`refetch()` cancels a fetch in flight to start a fresh one, and so do `invalidateQueries()` and `refetchQueries()` for a query a component shows, and `fetchQuery()` with `cancelRefetch`; `cancelQueries()` and `removeQueries()` cancel it outright. Whatever `queryFn` returned, a promise's response is ignored then. A query with no data yet is the exception to the first group: its fetch in flight lands, then a fresh one goes out, unless a retry of it already did after the call. So a first load that hangs isn't restarted that way: stop it with `cancelQueries()` first, or give the request a timeout.
+    if (!response.ok) {
+      throw new Error(`Request failed: ${response.status}`)
+    }
 
-So pick per query. To leave no requests behind (rapid typing in a search box, say), use `HttpClient` and its `Observable`. To keep a response the user may come back for, return a promise, e.g. `lastValueFrom(this.#http.get(...))`. Don't wrap a promise in an `Observable` (`from(fetch(...))`): unsubscribing can't abort the request, and its response is thrown away. Return the promise itself.
+    return (await response.json()) as Todo[]
+  },
+}))
+```
+
+So when no component shows a key any more (the last one showing it is destroyed, or its reactive key moves on), a fetch still running stops if it's an `Observable`, or if its query function read the `signal`: reading it tells the library that aborting it stops the request. Any other `Promise` fetch runs on, and its response is cached as usual: come back before the query is [removed](/query-client/caching), and the data shows at once. Until then it still counts as fetching, in `injectIsFetching()` too, and keeps the app busy: a server render and `whenStable()` wait for it. Nobody is left to want a failure tried again, though, so a failed attempt isn't retried, unless a component shows the key again before the fetch ends.
+
+`refetch()` cancels a fetch in flight to start a fresh one, and so do `invalidateQueries()` and `refetchQueries()` for a query a component shows, and `fetchQuery()` with `cancelRefetch`; `cancelQueries()` and `removeQueries()` cancel it outright. Whatever `queryFn` returned, its signal is aborted then, and a promise's response is ignored. A query with no data yet is the exception to the first group: its fetch in flight lands, then a fresh one goes out, unless a retry of it already did after the call. So a first load that hangs isn't restarted that way: stop it with `cancelQueries()` first, or give the request a timeout.
+
+So pick per query. To leave no requests behind (rapid typing in a search box, say), use `HttpClient` and its `Observable`, or hand `fetch()` the `signal`. To keep a response the user may come back for, return a promise and leave the `signal` alone, e.g. `lastValueFrom(this.#http.get(...))`. Don't wrap a promise in an `Observable` (`from(fetch(...))`): unsubscribing can't abort the request, and its response is thrown away. Return the promise itself.
 
 Whichever it returns, each call should make a new request: a refetch or a retry calls `queryFn` again for data read then. One that hands out the same `Observable` every time may get nothing new: shared with `share()`, the refetch that follows a first load joins the request that is just answering, gets no value from it, and fails; replayed with `shareReplay(1)`, it answers with the response it already gave; a `Subject` that has completed ends the fetch without a value, and the fetch fails.
 
 ## Where do the variables come from?
 
-There is **no context argument** — the query function is never handed the `queryKey`. Instead you close over whatever you need, and since keys are reactive, a signal read inside both the key and the function keeps them in lockstep:
+Close over whatever you need. Since keys are reactive, a signal read inside both the key and the function keeps them in lockstep:
 
 ```ts
 export class TodoComponent {
@@ -135,11 +151,24 @@ export class TodoComponent {
 
 Which is exactly why the rule from [Query Keys](/queries/query-keys) matters: **every variable the query function reads must also appear in the key.** Miss one, and different data ends up sharing a cache entry.
 
+Or read them from the key the function is handed, so the key is the only place they come from. Written `as const`, the key keeps the type of each element, so `id` below is a `number`:
+
+```ts
+protected readonly todo = injectQuery(() => ({
+  queryKey: ['todo', this.todoId()] as const,
+  queryFn: ({ queryKey: [, id] }) => this.#http.get<Todo>(`/api/todos/${id}`),
+}))
+```
+
+Without `as const`, `queryKey` is typed as an array of whatever its elements are, here `(string | number)[]`.
+
+Keep such a key to plain values, as [Query Keys](/queries/query-keys) asks: a query a [server render](/server-rendering) brings over hands its function the key as JSON brought it back, so a `Date` in it arrives as a string.
+
 ## Retries re-invoke the function
 
 `queryFn` is called again on every retry attempt — it isn't invoked once and replayed. This is what makes retrying a `Promise` work at all (a promise is one-shot; retrying it would just hand back the same rejection), and it means your function should be safe to call more than once.
 
-A retry calls the `queryFn` of a component showing the key at that moment, when there is one, rather than always the one the fetch started with. So a function that reads a signal when it runs, as the one above does, still fetches the key it's retried for, even if its own component has moved on to another key by then.
+A retry calls the `queryFn` of a component showing the key at that moment, when there is one, rather than always the one the fetch started with. So a function that reads an Angular signal when it runs, as the one in `TodoComponent` above does, still fetches the key it's retried for, even if its own component has moved on to another key by then.
 
 ## With zone.js
 

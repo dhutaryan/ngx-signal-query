@@ -1,4 +1,4 @@
-import type { QueryOptions } from './types'
+import type { QueryKey, QueryOptions } from './types'
 
 /**
  * Identity helper that defines a typed, reusable set of {@link QueryOptions}.
@@ -14,6 +14,8 @@ import type { QueryOptions } from './types'
  *
  * @typeParam TData - Type of the data resolved by `queryFn`.
  * @typeParam TError - Type of the error thrown by `queryFn`.
+ * @typeParam TQueryKey - Type of `queryKey`, which `queryFn` gets the key
+ *   with.
  * @param options - The {@link QueryOptions} to define.
  * @returns The same `options`, typed.
  *
@@ -36,8 +38,12 @@ import type { QueryOptions } from './types'
  * // readonly todos = injectQuery(() => this.queries.todos())
  * ```
  */
-export function queryOptions<TData, TError = Error>(
-  options: QueryOptions<TData, TError>,
-): QueryOptions<TData, TError> {
+export function queryOptions<
+  TData,
+  TError = Error,
+  TQueryKey extends QueryKey = QueryKey,
+>(
+  options: QueryOptions<TData, TError, TQueryKey>,
+): QueryOptions<TData, TError, TQueryKey> {
   return options
 }

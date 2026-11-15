@@ -15,6 +15,7 @@ import { type Deferred, deferred, isValidTimeout, replaceData } from './utils'
 import { requestOutsideZone } from './zone'
 import type {
   DefaultedQueryOptions,
+  QueryFunctionContext,
   QueryKey,
   QueryOptions,
   QueryState,
@@ -104,6 +105,10 @@ interface InFlightFetch<TData, TError> {
   readonly outcome: Deferred<TData>
   // Its attempts: unsubscribing stops them.
   readonly subscription: Subscription
+  // Gives the signal each request of the fetch is made with: one for all its
+  // attempts, as in TanStack (see #request). Aborted when the fetch is
+  // stopped or replaced, not when it lands or fails.
+  readonly abortController: AbortController
   // The state the fetch started from, or the last write made during it:
   // stopping the fetch with nothing in its place goes back to it (see
   // #stop).
@@ -113,9 +118,11 @@ interface InFlightFetch<TData, TError> {
   // #retryQueryFn).
   queryFn: QueryOptions<TData, TError>['queryFn']
   // Whether stopping the fetch aborts its request: unsubscribing tears an
-  // Observable down (HttpClient aborts the request), while a promise runs to
-  // the end anyway. Each request sets it (see #request), so while the fetch
-  // waits to retry, the last one decides.
+  // Observable down (HttpClient aborts the request), and aborting the signal
+  // stops a request made with it, as fetch() makes one; any other promise
+  // runs to the end anyway. A query function that reads the signal is taken
+  // to make its request with it. Each request sets it (see #request), so
+  // while the fetch waits to retry, the last one decides.
   abortable: boolean
   // Set once the last observer leaves while the request runs on: the request
   // lands as usual, but a failure isn't tried again. Whoever joins the fetch
@@ -317,6 +324,7 @@ export class Query<TData, TError = Error> {
     const inFlight: InFlightFetch<TData, TError> = {
       outcome,
       subscription: new Subscription(),
+      abortController: new AbortController(),
       // A fetch that replaces one in flight keeps the state the first one
       // started from.
       before: running?.before ?? this.state(),
@@ -441,6 +449,11 @@ export class Query<TData, TError = Error> {
         },
       }),
     )
+    // Stopping the fetch or replacing it unsubscribes it, and only that does:
+    // its signal is aborted then. After its attempts are let go of, so a
+    // request that fails as the signal aborts it doesn't fail the fetch:
+    // whoever waits for it gets what stopping or replacing it settles it with.
+    inFlight.subscription.add(() => inFlight.abortController.abort())
 
     return outcome.promise
   }
@@ -682,17 +695,31 @@ export class Query<TData, TError = Error> {
   // brought back to where the fetch was asked for from (see
   // requestOutsideZone): with zone.js, what the request waits on mustn't
   // keep the app from counting as stable. The task the fetch holds keeps the
-  // app busy until the outcome is in all the same. It takes the first value
+  // app busy until the outcome is in all the same. It hands the query
+  // function the query's key and the fetch's signal, takes the first value
   // an Observable gives and lets go of it, and sets whether stopping the
-  // fetch aborts it.
+  // fetch aborts it: it does for an Observable, and for a request whose
+  // query function reads the signal.
   #request(
     queryFn: QueryOptions<TData, TError>['queryFn'],
     inFlight: InFlightFetch<TData, TError>,
   ): Observable<TData> {
     return requestOutsideZone(this.#zone, () => {
-      const request = queryFn()
+      const context: QueryFunctionContext = {
+        queryKey: this.key,
+        // Read during the call or after it, an await later say.
+        get signal() {
+          inFlight.abortable = true
 
-      inFlight.abortable = isObservable(request)
+          return inFlight.abortController.signal
+        },
+      }
+
+      inFlight.abortable = false
+
+      const request = queryFn(context)
+
+      if (isObservable(request)) inFlight.abortable = true
 
       return request
     }).pipe(take(1))

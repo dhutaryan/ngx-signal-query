@@ -19,7 +19,7 @@ import {
   tick,
 } from '@angular/core/testing'
 import { createApplication } from '@angular/platform-browser'
-import { of, Subject, throwError } from 'rxjs'
+import { Observable, of, Subject, throwError } from 'rxjs'
 
 import { settled } from '../../spec-helpers/promises'
 import { appIsStable } from '../../spec-helpers/stability'
@@ -30,6 +30,7 @@ import { injectMutation } from './inject-mutation'
 import { injectQuery } from './inject-query'
 import { provideQueryClient } from './provider'
 import { QueryClient } from './query-client'
+import type { QueryFunctionContext } from './types'
 import { deferred } from './utils'
 
 // Runs `body` in an effect of a mounted component, the way an app calls the
@@ -335,6 +336,21 @@ describe('QueryClient', () => {
       expect(client.getQueryData(['n'])).toBe(10)
     })
 
+    it('hands queryFn the key and a signal', () => {
+      const contexts: QueryFunctionContext[] = []
+
+      client.fetchQuery(['todo', 1], (context) => {
+        contexts.push(context)
+
+        return of('todo 1')
+      })
+
+      expect(contexts.length).toBe(1)
+      expect(contexts[0].queryKey).toEqual(['todo', 1])
+      expect(contexts[0].signal).toBeInstanceOf(AbortSignal)
+      expect(contexts[0].signal.aborted).toBe(false)
+    })
+
     it('does not refetch fresh data within staleTime', () => {
       const queryFn = jasmine.createSpy('queryFn').and.returnValue(of(1))
 
@@ -372,6 +388,34 @@ describe('QueryClient', () => {
       expect(first).toHaveBeenCalledTimes(1)
       expect(second).toHaveBeenCalledTimes(1)
       expect(client.getQueryData(['n'])).toBe(2)
+    }))
+
+    it("cancelRefetch doesn't let a request that fails as its signal is aborted fail the fetch it replaces", fakeAsync(() => {
+      // The key holds data, stale at once, so fetchQuery() refetches it.
+      client.setQueryData(['todos'], 'cached')
+
+      const first = settled(
+        client.fetchQuery(
+          ['todos'],
+          ({ signal }) =>
+            new Observable<string>((subscriber) => {
+              signal.addEventListener('abort', () =>
+                subscriber.error(new Error('aborted')),
+              )
+            }),
+        ),
+      )
+      const second = settled(
+        client.fetchQuery(['todos'], () => of('fresh'), {
+          cancelRefetch: true,
+        }),
+      )
+
+      flushMicrotasks()
+
+      // Whoever waited for the replaced fetch gets the one that replaced it.
+      expect(first).toEqual({ value: 'fresh' })
+      expect(second).toEqual({ value: 'fresh' })
     }))
 
     it('cancelRefetch lets a fetch of a key with no data land, then fetches once more with its own queryFn', fakeAsync(() => {
@@ -947,6 +991,42 @@ describe('QueryClient', () => {
       expect(client.isFetching()).toBe(0)
     })
 
+    it('aborts the signal of the fetch it stops', () => {
+      const contexts: QueryFunctionContext[] = []
+
+      client.fetchQuery(['todos'], (context) => {
+        contexts.push(context)
+
+        return new Promise<string>(() => {})
+      })
+      client.cancelQueries({ queryKey: ['todos'] })
+
+      expect(contexts[0].signal.aborted).toBe(true)
+    })
+
+    it("doesn't let a request that fails as its signal is aborted fail the fetch it stops", fakeAsync(() => {
+      // The key holds data, stale at once, so fetchQuery() refetches it.
+      client.setQueryData(['todos'], 'cached')
+
+      const waiting = settled(
+        client.fetchQuery(
+          ['todos'],
+          ({ signal }) =>
+            new Observable<string>((subscriber) => {
+              signal.addEventListener('abort', () =>
+                subscriber.error(new Error('aborted')),
+              )
+            }),
+        ),
+      )
+
+      client.cancelQueries({ queryKey: ['todos'] })
+      flushMicrotasks()
+
+      // Whoever waits gets what cancelling says: the data the key holds.
+      expect(waiting).toEqual({ value: 'cached' })
+    }))
+
     it('puts back the failure count and reason the fetch it stops had changed', fakeAsync(() => {
       const error = new Error('down')
 
@@ -1024,6 +1104,19 @@ describe('QueryClient', () => {
       client.removeQueries()
 
       expect(client.getQueryCache().getAll().length).toBe(0)
+    })
+
+    it('aborts the signal of a fetch in flight', () => {
+      const contexts: QueryFunctionContext[] = []
+
+      client.fetchQuery(['todos'], (context) => {
+        contexts.push(context)
+
+        return new Promise<string>(() => {})
+      })
+      client.removeQueries({ queryKey: ['todos'] })
+
+      expect(contexts[0].signal.aborted).toBe(true)
     })
 
     // e.g. a list keyed by a status the user hasn't picked yet

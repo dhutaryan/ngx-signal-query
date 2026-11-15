@@ -243,6 +243,18 @@ it('builds the right key', () => {
   expect(queries.detail(5).queryKey).toEqual(['todos', 'detail', 5])
 })
 
+it('asks for the todo it names', () => {
+  const detail = TestBed.inject(TodoQueries).detail(5)
+
+  // Called as the query calls it: with the key and a signal.
+  detail.queryFn({
+    queryKey: detail.queryKey,
+    signal: new AbortController().signal,
+  })
+
+  expect(httpMock.get).toHaveBeenCalledWith('/api/todos/5')
+})
+
 it('invalidates on success', () => {
   const invalidate = spyOn(TestBed.inject(QueryClient), 'invalidateQueries')
   const options = TestBed.inject(TodoMutations).add()

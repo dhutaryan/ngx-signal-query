@@ -9,7 +9,7 @@ Cancels any fetch currently running for the matching queries. The **data stays**
 this.#client.cancelQueries({ queryKey: ['todos'] })
 ```
 
-Because a query's `queryFn` is usually an `HttpClient` `Observable`, cancelling unsubscribes and the underlying HTTP request is genuinely aborted (see [Query Functions](/queries/query-functions)). Afterwards `isFetching()` for those queries drops back to `false` — nothing is running.
+Because a query's `queryFn` is usually an `HttpClient` `Observable`, cancelling unsubscribes and the underlying HTTP request is genuinely aborted, and so is a `fetch()` made with the `signal` the query function is handed (see [Query Functions](/queries/query-functions#cancellation-observable-or-promise)). Afterwards `isFetching()` for those queries drops back to `false`. A promise made without the signal still runs to the end, but its response is ignored.
 
 Each query goes back to how it was before the fetch started. That shows when a query that failed was being tried again: it's back in `'error'` with the same `error()`, `failureCount()` and `failureReason()`, rather than stuck in a loading state with nothing in flight. What changed in the cache meanwhile stays: data written with `setQueryData`, and a stale mark from `invalidateQueries`, so the query still refetches the next time a component shows it.
 

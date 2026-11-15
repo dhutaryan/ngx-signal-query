@@ -53,6 +53,7 @@ import { provideQueryClient } from './provider'
 import { QueryClient } from './query-client'
 import type {
   DefaultQueryOptions,
+  QueryFunctionContext,
   QueryKey,
   QueryOptions,
   QueryResult,
@@ -189,6 +190,34 @@ function promiseRequests<T>(): {
     })
 
   return { queryFn, requests }
+}
+
+// A queryFn whose requests are made as fetch() makes them with the signal it
+// is handed: aborting the signal rejects the request with an AbortError.
+// requests[n] settles the n-th request sent, made with signals[n].
+function fetchRequests<T>(): {
+  queryFn: (context: QueryFunctionContext) => Promise<T>
+  requests: Array<Deferred<T>>
+  signals: AbortSignal[]
+} {
+  const requests: Array<Deferred<T>> = []
+  const signals: AbortSignal[] = []
+
+  return {
+    queryFn: ({ signal }) => {
+      const request = deferred<T>()
+
+      signal.addEventListener('abort', () =>
+        request.reject(new DOMException('Aborted', 'AbortError')),
+      )
+      requests.push(request)
+      signals.push(signal)
+
+      return request.promise
+    },
+    requests,
+    signals,
+  }
 }
 
 // A queryFn whose requests take `latency` ms each. `starts` records when each
@@ -2044,9 +2073,117 @@ describe('injectQuery', () => {
     })
   })
 
+  // queryFn is called with the key of the query it fetches and a signal: one
+  // per fetch, for all its attempts, aborted only when the fetch is stopped
+  // (see below).
+  describe('the context queryFn gets', () => {
+    it('holds the key of the query it fetches, after a key switch too', () => {
+      const keys: QueryKey[] = []
+      const { fixture, value } = mount(
+        (id) => ({
+          queryKey: ['todo', id()],
+          queryFn: ({ queryKey }) => {
+            keys.push(queryKey)
+
+            return of(`todo ${id()}`)
+          },
+        }),
+        1,
+      )
+
+      value.set(2)
+      fixture.detectChanges()
+
+      expect(keys).toEqual([
+        ['todo', 1],
+        ['todo', 2],
+      ])
+    })
+
+    it('gives every attempt of a fetch the same signal', fakeAsync(() => {
+      const contexts: QueryFunctionContext[] = []
+      const { queryFn, fail } = requests<string>()
+
+      mount(() => ({
+        queryKey: ['todos'],
+        queryFn: (context) => {
+          contexts.push(context)
+
+          return queryFn()
+        },
+        retry: 1,
+        retryDelay: 100,
+      }))
+      fail(new Error('down'))
+      tick(100)
+
+      expect(contexts.length).toBe(2)
+      expect(contexts[1].signal).toBe(contexts[0].signal)
+      expect(contexts[0].signal.aborted).toBe(false)
+    }))
+
+    it('leaves the signal of a fetch that is done alone, as the component leaves after it too', () => {
+      const contexts: QueryFunctionContext[] = []
+      const { fixture, value } = mount(
+        (id) => ({
+          queryKey: ['todo', id()],
+          queryFn: (context) => {
+            contexts.push(context)
+
+            return id() === 1
+              ? of('todo 1')
+              : throwError(() => new Error('down'))
+          },
+          retry: false,
+        }),
+        1,
+      )
+
+      // Todo 1 lands, todo 2 fails, and the component goes away.
+      value.set(2)
+      fixture.detectChanges()
+      fixture.destroy()
+
+      expect(contexts.map(({ signal }) => signal.aborted)).toEqual([
+        false,
+        false,
+      ])
+    })
+
+    it('leaves the signal alone when another component joins the fetch', fakeAsync(() => {
+      const { queryFn, requests, signals } = fetchRequests<string>()
+      // The second component joins the request the first one started.
+      const { results } = mountMany(2, () => ({ queryKey: ['todos'], queryFn }))
+
+      expect(signals.length).toBe(1)
+      expect(signals[0].aborted).toBe(false)
+
+      requests[0].resolve('a')
+      flushMicrotasks()
+
+      expect(results.map((result) => result.data())).toEqual(['a', 'a'])
+    }))
+
+    it('leaves the signal alone when data is written during the fetch', fakeAsync(() => {
+      const { queryFn, requests, signals } = fetchRequests<string>()
+      const { result } = mount(() => ({ queryKey: ['todos'], queryFn }))
+
+      // E.g. an optimistic update while the list loads.
+      client.setQueryData(['todos'], 'written')
+
+      expect(signals[0].aborted).toBe(false)
+
+      requests[0].resolve('response')
+      flushMicrotasks()
+
+      expect(result.data()).toBe('response')
+    }))
+  })
+
   // The last component showing a query leaves while its request is in
   // flight: it's destroyed, or its key moves on. Unsubscribing aborts an
-  // Observable request, so that one stops. A promise can't be aborted: its
+  // Observable request, so that one stops, and so does a promise made with
+  // the signal queryFn is handed. Any other promise can't be aborted: its
   // request runs to the end, and the response is kept for whoever shows the
   // key next. Nobody is left to want a failure tried again.
   describe('leaving while a request is in flight', () => {
@@ -2115,6 +2252,23 @@ describe('injectQuery', () => {
 
         expect(queryFn).toHaveBeenCalledTimes(1)
       }))
+
+      it('aborts the signal it made the request with', () => {
+        const contexts: QueryFunctionContext[] = []
+        const { queryFn } = requests<string>()
+        const { fixture } = mount(() => ({
+          queryKey: ['todos'],
+          queryFn: (context) => {
+            contexts.push(context)
+
+            return queryFn()
+          },
+        }))
+
+        fixture.destroy()
+
+        expect(contexts[0].signal.aborted).toBe(true)
+      })
     })
 
     describe('with a promise', () => {
@@ -2352,6 +2506,82 @@ describe('injectQuery', () => {
 
         expect(client.getQueryData(['todos'])).toBeUndefined()
         expect(client.isFetching()).toBe(0)
+      }))
+    })
+
+    // Reading the signal tells the query that aborting it stops the request.
+    describe('with a promise that reads its signal', () => {
+      it('aborts the request and goes back to how it was before it', fakeAsync(() => {
+        const { queryFn, signals } = fetchRequests<string>()
+        const { fixture } = mount(() => ({ queryKey: ['todos'], queryFn }))
+
+        fixture.destroy()
+        flushMicrotasks()
+
+        expect(signals[0].aborted).toBe(true)
+        expect(client.isFetching()).toBe(0)
+        expect(client.getQueryCache().get(['todos'])?.state()).toEqual(
+          jasmine.objectContaining({
+            status: 'pending',
+            error: null,
+            isFetching: false,
+          }),
+        )
+      }))
+
+      it('aborts the request of the key it moves away from', fakeAsync(() => {
+        const { queryFn, signals } = fetchRequests<string>()
+        const { fixture, value } = mount(
+          (id) => ({ queryKey: ['todo', id()], queryFn }),
+          1,
+        )
+
+        value.set(2)
+        fixture.detectChanges()
+        flushMicrotasks()
+
+        // Todo 1's request is aborted, todo 2's is in flight.
+        expect(signals.map((signal) => signal.aborted)).toEqual([true, false])
+        expect(client.isFetching()).toBe(1)
+      }))
+
+      it('aborts a request that reads the signal only after awaiting something', fakeAsync(() => {
+        const token = deferred<string>()
+        const signals: AbortSignal[] = []
+        const { fixture } = mount(() => ({
+          queryKey: ['todos'],
+          // E.g. it gets an auth token first, then makes the request.
+          queryFn: async (context) => {
+            await token.promise
+            signals.push(context.signal)
+
+            return new Promise<string>(() => {})
+          },
+        }))
+
+        token.resolve('token')
+        flushMicrotasks()
+        fixture.destroy()
+
+        expect(signals[0].aborted).toBe(true)
+        expect(client.isFetching()).toBe(0)
+      }))
+
+      it('runs on as before when it reads the key but not the signal', fakeAsync(() => {
+        const { queryFn: api, requests } = promiseRequests<string>()
+        const options = (): QueryOptions<string> => ({
+          queryKey: ['todos'],
+          queryFn: ({ queryKey }) => api(queryKey),
+        })
+
+        mount(options).fixture.destroy()
+        requests[0].resolve('a')
+        flushMicrotasks()
+
+        const { result } = mount(options)
+
+        expect(api.calls.argsFor(0)).toEqual([['todos']])
+        expect(result.data()).toBe('a')
       }))
     })
   })
@@ -4991,6 +5221,66 @@ describe('injectQuery', () => {
       expect(cancelled()).toBe(1)
       expect(queryFn).toHaveBeenCalledTimes(3)
     }))
+
+    it('aborts the signal of the fetch it replaces', () => {
+      const contexts: QueryFunctionContext[] = []
+      const { queryFn } = requests<string>()
+
+      client.setQueryData(['c'], 'cached')
+
+      const { result } = mount(() => ({
+        queryKey: ['c'],
+        queryFn: (context) => {
+          contexts.push(context)
+
+          return queryFn()
+        },
+      }))
+
+      result.refetch()
+
+      expect(contexts.map(({ signal }) => signal.aborted)).toEqual([
+        true,
+        false,
+      ])
+    })
+
+    it('lets the fetch it starts run on as the component leaves, though the one it replaced reads its signal late', fakeAsync(() => {
+      const token = deferred()
+      const response = deferred<string>()
+      let calls = 0
+
+      client.setQueryData(['todos'], 'cached')
+
+      const { fixture, result } = mount<string>(() => ({
+        queryKey: ['todos'],
+        queryFn: async (context) => {
+          calls++
+
+          if (calls === 1) {
+            // It checks its signal once it has a token, by when it has been
+            // replaced.
+            await token.promise
+            context.signal.throwIfAborted()
+
+            return new Promise<string>(() => undefined)
+          }
+
+          // It doesn't read its signal, so its request runs to the end.
+          return response.promise
+        },
+      }))
+
+      result.refetch()
+      token.resolve()
+      flushMicrotasks()
+      fixture.destroy()
+      response.resolve('landed')
+      flushMicrotasks()
+
+      expect(calls).toBe(2)
+      expect(client.getQueryData(['todos'])).toBe('landed')
+    }))
   })
 
   // A query with no data yet: a refetch asked for while its first load runs
@@ -5196,6 +5486,33 @@ describe('injectQuery', () => {
 
       expect(result.data()).toBe('retried')
       expect(queryFn).toHaveBeenCalledTimes(3)
+    }))
+
+    it('leaves the signal of the first load alone, and gives the refetch after it a new one', fakeAsync(() => {
+      const contexts: QueryFunctionContext[] = []
+      const { queryFn, resolve } = requests<string>()
+
+      mount(() => ({
+        queryKey: ['todos'],
+        queryFn: (context) => {
+          contexts.push(context)
+
+          return queryFn()
+        },
+      }))
+      client.invalidateQueries({ queryKey: ['todos'] })
+
+      expect(contexts[0].signal.aborted).toBe(false)
+
+      resolve('first')
+      flushMicrotasks()
+
+      expect(contexts.length).toBe(2)
+      expect(contexts[1].signal).not.toBe(contexts[0].signal)
+      expect(contexts.map(({ signal }) => signal.aborted)).toEqual([
+        false,
+        false,
+      ])
     }))
 
     it('drops the refetch when the first load is cancelled', fakeAsync(() => {

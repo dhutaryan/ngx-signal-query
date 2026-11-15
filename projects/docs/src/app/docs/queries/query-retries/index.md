@@ -109,7 +109,7 @@ Tried again after that, with a Retry button calling `refetch()` say, a query tha
 
 ## When nothing shows the query any more
 
-Retries are for the components showing a query. When the last one goes away during a fetch, an `Observable` fetch is cancelled outright. A `Promise` fetch runs on, but a failure isn't tried again: it settles into `'error'` at once, or, if it was waiting for a retry, once the wait is over. A component that shows the key again before then picks the retries up where they were. See [Cancellation](/queries/query-functions#cancellation-observable-or-promise).
+Retries are for the components showing a query. When the last one goes away during a fetch, an `Observable` fetch is cancelled outright, and so is a `Promise` fetch whose query function read the `signal`. Any other `Promise` fetch runs on, but a failure isn't tried again: it settles into `'error'` at once, or, if it was waiting for a retry, once the wait is over. A component that shows the key again before then picks the retries up where they were. See [Cancellation](/queries/query-functions#cancellation-observable-or-promise).
 
 ## Setting it once
 

@@ -5,7 +5,6 @@ import {
   runInInjectionContext,
   untracked,
 } from '@angular/core'
-import type { Observable } from 'rxjs'
 
 import { onReconnect, onWindowFocus } from './browser-events'
 import { transferCache } from './hydration'
@@ -20,6 +19,7 @@ import type {
   DefaultedQueryOptions,
   InvalidateQueryFilters,
   QueryFilters,
+  QueryFunction,
   QueryKey,
   QueryOptions,
   RetryDelayValue,
@@ -170,7 +170,8 @@ export class QueryClient {
    * call's, if several came), unless a retry of it already started after
    * this call. Either way the promise waits for data read after this call,
    * unless the fetch it waits behind is cancelled, as when the last
-   * component showing the key leaves while its `Observable` load runs.
+   * component showing the key leaves while its load runs, an `Observable`
+   * or one whose query function read the signal.
    *
    * Rejects with the error if the fetch fails. A cancelled fetch resolves
    * with the data the cache holds, or rejects with a {@link CancelledError}
@@ -186,9 +187,13 @@ export class QueryClient {
    * A query no component shows is removed `gcTime` after the fetch lands (the
    * configured default, or 5 minutes), as any unused query is.
    *
+   * @typeParam TData - Type of the data resolved by `queryFn`.
+   * @typeParam TQueryKey - Type of `key`, which `queryFn` gets the key with.
    * @param key - The query key to fetch and cache under.
    * @param queryFn - Function returning the data as an `Observable` or
-   *   `Promise`. Return `null` for no data: `undefined` fails the fetch.
+   *   `Promise`, given the key and an abort signal (see
+   *   {@link QueryFunctionContext}). Return `null` for no data: `undefined`
+   *   fails the fetch.
    * @param options - Fetch tuning (`staleTime`, `retry`, `retryDelay`,
    *   `structuralSharing`, `cancelRefetch`).
    * @returns A promise of the data.
@@ -205,9 +210,9 @@ export class QueryClient {
    * }
    * ```
    */
-  fetchQuery<TData>(
-    key: QueryKey,
-    queryFn: () => Observable<TData> | Promise<TData>,
+  fetchQuery<TData, TQueryKey extends QueryKey = QueryKey>(
+    key: TQueryKey,
+    queryFn: QueryFunction<TData, TQueryKey>,
     options: {
       staleTime?: number
       // eslint-disable-next-line @typescript-eslint/no-explicit-any

@@ -1,11 +1,12 @@
 // Type tests for QueryClient: compiled by `pnpm test:types`, never run.
 import type { HttpClient } from '@angular/common/http'
 import { expectTypeOf } from 'expect-type'
-import type { QueryClient } from 'ngx-signal-query'
+import { queryOptions, type QueryClient } from 'ngx-signal-query'
 
 type Todo = { id: number; title: string; done: boolean }
 
 declare const http: HttpClient
+declare const id: number
 declare const client: QueryClient
 declare function shareEqual<T>(oldData: T | undefined, newData: T): T
 declare const newTodo: Todo
@@ -89,3 +90,23 @@ client.setQueryData<Todo[]>(['todos'], null)
 client.setQueryData<Todo[]>(['todos'], (todos) => {
   todos?.push(newTodo)
 })
+
+// fetchQuery's context
+
+// The query function gets the key with the type the key has, and a signal.
+client.fetchQuery(['todo', id] as const, ({ queryKey, signal }) => {
+  expectTypeOf(queryKey).toEqualTypeOf<readonly ['todo', number]>()
+  expectTypeOf(signal).toEqualTypeOf<AbortSignal>()
+
+  return http.get<Todo>(`/api/todos/${queryKey[1]}`)
+})
+
+// A definition's key and query function go in together.
+const todoQuery = queryOptions({
+  queryKey: ['todo', id] as const,
+  queryFn: ({ queryKey: [, todoId] }) => http.get<Todo>(`/api/todos/${todoId}`),
+})
+
+expectTypeOf(
+  client.fetchQuery(todoQuery.queryKey, todoQuery.queryFn),
+).resolves.toEqualTypeOf<Todo>()
