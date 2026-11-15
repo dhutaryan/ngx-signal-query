@@ -2589,21 +2589,38 @@ describe('injectQuery', () => {
   // A queryFn that reads its key's value when it runs, as
   // `() => api(this.id())` does, asks for whatever the signal holds by then.
   // A retry of a key must still ask for that key, whichever component's
-  // queryFn it runs and wherever that component has moved by then.
+  // queryFn it runs and wherever that component has moved by then. With no
+  // queryFn left that asks for it, the retries stop.
   describe('retrying a key a component moved away from', () => {
     const retryOptions = { retry: 1, retryDelay: 100 }
 
     // A panel showing the todo its `id` input names: its queryFn reads the
     // input when it runs. Mounted on todo 1.
-    function panel(api: (id: number) => Promise<string>) {
+    function panel(
+      api: (id: number) => Promise<string>,
+      options: Partial<QueryOptions<string>> = {},
+    ) {
       return mount(
         (id) => ({
           queryKey: ['todo', id()],
           queryFn: () => api(id()),
           ...retryOptions,
+          ...options,
         }),
         1,
       )
+    }
+
+    // A component that shows todo 1 without fetching it, as a cache watcher
+    // does with enabled: false. Its queryFn asks for todo 1, but a disabled
+    // component doesn't fetch, so a retry doesn't run it either.
+    function reader(api: (id: number) => Promise<string>) {
+      return mount(() => ({
+        queryKey: ['todo', 1],
+        queryFn: () => api(1),
+        enabled: false,
+        ...retryOptions,
+      }))
     }
 
     // A widget pinned to todo 1.
@@ -2699,6 +2716,353 @@ describe('injectQuery', () => {
       flushMicrotasks()
 
       expect(prefetched.value).toBe('todo 1')
+    }))
+
+    it('asks for that key when the disabled component that refetched it still shows it', fakeAsync(() => {
+      const { queryFn: api, requests } = promiseRequests<string>()
+      const shown = panel(api, { enabled: false })
+
+      shown.result.refetch()
+      requests[0].reject(new Error('down'))
+      tick(100)
+
+      expect(api.calls.allArgs()).toEqual([[1], [1]])
+
+      requests[1].resolve('todo 1')
+      flushMicrotasks()
+
+      expect(shown.result.data()).toBe('todo 1')
+    }))
+
+    it('asks for that key when a disabled component refetches it as it moves there', fakeAsync(() => {
+      const down = new Error('down')
+      const api = jasmine
+        .createSpy('api')
+        .and.callFake(() => throwError(() => down))
+      // The options read the id from a signal of their own, so refetch()
+      // asks for the new key at once, while the component only moves there
+      // once change detection runs its effects.
+      const id = signal(1)
+      const shown = mount(() => ({
+        queryKey: ['todo', id()],
+        queryFn: () => api(id()),
+        enabled: false,
+        ...retryOptions,
+      }))
+
+      // A click handler picks todo 2 and loads it, and the request fails
+      // before change detection.
+      id.set(2)
+      shown.result.refetch()
+      shown.fixture.detectChanges()
+      tick(100)
+
+      expect(api.calls.allArgs()).toEqual([[2], [2]])
+      expect(shown.result.failureCount()).toBe(2)
+    }))
+
+    it('asks for that key when fetchQuery() asked for a refetch during the first load', fakeAsync(() => {
+      const { queryFn: api, requests } = promiseRequests<string>()
+      const down = new Error('down')
+      const shown = panel(api)
+      const watching = reader(api)
+      // The refetch waits for the panel's first load, and fetchQuery() hands
+      // its queryFn over for that load's retries meanwhile.
+      const refetched = settled(
+        client.fetchQuery(['todo', 1], () => api(1), {
+          cancelRefetch: true,
+          ...retryOptions,
+        }),
+      )
+
+      requests[0].reject(down)
+      tick(50)
+      shown.value.set(2)
+      shown.fixture.detectChanges()
+      requests[1].resolve('todo 2')
+      tick(50)
+
+      expect(api.calls.allArgs()).toEqual([[1], [2], [1]])
+      expect(watching.result.failureCount()).toBe(1)
+
+      requests[2].reject(down)
+      flushMicrotasks()
+
+      expect(refetched.error).toBe(down)
+    }))
+
+    it("asks for that key when fetchQuery() asked for a refetch during the first load after a component's refetch()", fakeAsync(() => {
+      const { queryFn: api, requests } = promiseRequests<string>()
+      const down = new Error('down')
+
+      // A prefetch makes the first load. Both the panel and fetchQuery() ask
+      // for a refetch during it, and the one that runs once the load lands
+      // is fetchQuery()'s, with its queryFn and its retries.
+      settled(client.fetchQuery(['todo', 1], () => api(1)))
+
+      const shown = panel(api, { enabled: false })
+
+      reader(api)
+      shown.result.refetch()
+
+      const refetched = settled(
+        client.fetchQuery(['todo', 1], () => api(1), {
+          cancelRefetch: true,
+          ...retryOptions,
+        }),
+      )
+
+      requests[0].resolve('todo 1')
+      flushMicrotasks()
+      requests[1].reject(down)
+      tick(50)
+      shown.value.set(2)
+      shown.fixture.detectChanges()
+      tick(50)
+
+      expect(api.calls.allArgs()).toEqual([[1], [1], [1]])
+
+      requests[2].resolve('todo 1 again')
+      flushMicrotasks()
+
+      expect(refetched.value).toBe('todo 1 again')
+    }))
+
+    // Once the component that asked for the fetch has moved on, its queryFn
+    // asks for the next key, and a component that doesn't fetch the key has
+    // none to lend: the retries stop, as when the last component leaves, and
+    // the fetch fails with the last error, whatever started it.
+    describe('with only a disabled component left on it', () => {
+      it('fails at once when the component moved on before its request failed', fakeAsync(() => {
+        const { queryFn: api, requests } = promiseRequests<string>()
+        const down = new Error('down')
+        const shown = panel(api)
+        const watching = reader(api)
+
+        shown.value.set(2)
+        shown.fixture.detectChanges()
+        requests[0].reject(down)
+        flushMicrotasks()
+
+        expect(watching.result.error()).toBe(down)
+        expect(watching.result.isFetching()).toBe(false)
+      }))
+
+      it('fails the load of a component that went away', fakeAsync(() => {
+        const { queryFn: api, requests } = promiseRequests<string>()
+        const down = new Error('down')
+        const shown = panel(api)
+        const watching = reader(api)
+
+        requests[0].reject(down)
+        tick(50)
+        shown.fixture.destroy()
+        tick(50)
+
+        expect(api.calls.allArgs()).toEqual([[1]])
+        expect(watching.result.error()).toBe(down)
+      }))
+
+      it("fails the component's load with the last error", fakeAsync(() => {
+        const { queryFn: api, requests } = promiseRequests<string>()
+        const down = new Error('down')
+        const shown = panel(api)
+        const watching = reader(api)
+
+        // Todo 1's request fails, and the panel moves on to todo 2 before
+        // the retry.
+        requests[0].reject(down)
+        tick(50)
+        shown.value.set(2)
+        shown.fixture.detectChanges()
+        requests[1].resolve('todo 2')
+        tick(50)
+
+        expect(api.calls.allArgs()).toEqual([[1], [2]])
+        expect(watching.result.data()).toBeUndefined()
+        expect(watching.result.error()).toBe(down)
+        expect(watching.result.failureCount()).toBe(1)
+      }))
+
+      it('fails a refetch an invalidation started', fakeAsync(() => {
+        const { queryFn: api, requests } = promiseRequests<string>()
+        const down = new Error('down')
+        const shown = panel(api)
+        const watching = reader(api)
+
+        requests[0].resolve('todo 1')
+        flushMicrotasks()
+        client.invalidateQueries({ queryKey: ['todo', 1] })
+        requests[1].reject(down)
+        tick(50)
+        shown.value.set(2)
+        shown.fixture.detectChanges()
+        requests[2].resolve('todo 2')
+        tick(50)
+
+        expect(api.calls.allArgs()).toEqual([[1], [1], [2]])
+        expect(watching.result.data()).toBe('todo 1')
+        expect(watching.result.error()).toBe(down)
+      }))
+
+      it('fails a refetch on window focus', fakeAsync(() => {
+        const { queryFn: api, requests } = promiseRequests<string>()
+        const down = new Error('down')
+        const shown = panel(api)
+        const watching = reader(api)
+
+        requests[0].resolve('todo 1')
+        flushMicrotasks()
+        leaveAndComeBack()
+        requests[1].reject(down)
+        tick(50)
+        shown.value.set(2)
+        shown.fixture.detectChanges()
+        requests[2].resolve('todo 2')
+        tick(50)
+
+        expect(api.calls.allArgs()).toEqual([[1], [1], [2]])
+        expect(watching.result.data()).toBe('todo 1')
+        expect(watching.result.error()).toBe(down)
+      }))
+
+      it('fails a poll', fakeAsync(() => {
+        const { queryFn: api, requests } = promiseRequests<string>()
+        const down = new Error('down')
+        const shown = panel(api, { refetchInterval: 1000 })
+        const watching = reader(api)
+
+        requests[0].resolve('todo 1')
+        flushMicrotasks()
+        tick(1000)
+        requests[1].reject(down)
+        tick(50)
+        shown.value.set(2)
+        shown.fixture.detectChanges()
+        requests[2].resolve('todo 2')
+        tick(50)
+
+        expect(api.calls.allArgs()).toEqual([[1], [1], [2]])
+        expect(watching.result.data()).toBe('todo 1')
+        expect(watching.result.error()).toBe(down)
+
+        // Stops polling todo 2.
+        shown.fixture.destroy()
+      }))
+
+      it("fails a disabled component's refetch()", fakeAsync(() => {
+        const { queryFn: api, requests } = promiseRequests<string>()
+        const down = new Error('down')
+        const shown = panel(api, { enabled: false })
+        const watching = reader(api)
+
+        shown.result.refetch()
+        requests[0].reject(down)
+        tick(50)
+        shown.value.set(2)
+        shown.fixture.detectChanges()
+        tick(50)
+
+        expect(api.calls.allArgs()).toEqual([[1]])
+        expect(watching.result.error()).toBe(down)
+      }))
+
+      it('fails a prefetch the component joined', fakeAsync(() => {
+        const { queryFn: api, requests } = promiseRequests<string>()
+        const down = new Error('down')
+        // Hovering a link to todo 1 prefetches it, with a retry, and the
+        // panel opened on todo 1 joins that request. It asked last, so it
+        // takes the retries over, as it would if it left last.
+        const prefetched = settled(
+          client.fetchQuery(['todo', 1], () => api(1), retryOptions),
+        )
+
+        reader(api)
+
+        const shown = panel(api)
+
+        requests[0].reject(down)
+        tick(50)
+        shown.value.set(2)
+        shown.fixture.detectChanges()
+        requests[1].resolve('todo 2')
+        tick(50)
+
+        expect(api.calls.allArgs()).toEqual([[1], [2]])
+        expect(prefetched.error).toBe(down)
+      }))
+
+      it('fails the refetch a disabled component asked for during the first load', fakeAsync(() => {
+        const { queryFn: api, requests } = promiseRequests<string>()
+        const down = new Error('down')
+
+        // A prefetch makes the first load. The panel's refetch() during it
+        // queues one more fetch, made with the panel's queryFn once the load
+        // lands.
+        settled(client.fetchQuery(['todo', 1], () => api(1)))
+
+        const shown = panel(api, { enabled: false })
+        const watching = reader(api)
+
+        shown.result.refetch()
+        requests[0].resolve('todo 1')
+        flushMicrotasks()
+        requests[1].reject(down)
+        tick(50)
+        shown.value.set(2)
+        shown.fixture.detectChanges()
+        tick(50)
+
+        expect(api.calls.allArgs()).toEqual([[1], [1]])
+        expect(watching.result.data()).toBe('todo 1')
+        expect(watching.result.error()).toBe(down)
+      }))
+
+      it('fails the refetch an invalidation queued during the first load', fakeAsync(() => {
+        const { queryFn: api, requests } = promiseRequests<string>()
+        const down = new Error('down')
+        const shown = panel(api)
+        const watching = reader(api)
+
+        // The refetch goes out with the panel's queryFn once the load lands.
+        client.invalidateQueries({ queryKey: ['todo', 1] })
+        requests[0].resolve('todo 1')
+        flushMicrotasks()
+        requests[1].reject(down)
+        tick(50)
+        shown.value.set(2)
+        shown.fixture.detectChanges()
+        requests[2].resolve('todo 2')
+        tick(50)
+
+        expect(api.calls.allArgs()).toEqual([[1], [1], [2]])
+        expect(watching.result.data()).toBe('todo 1')
+        expect(watching.result.error()).toBe(down)
+      }))
+    })
+
+    it("fails with the last error when the component's key moved on before its effects ran", fakeAsync(() => {
+      const { queryFn: api, requests } = promiseRequests<string>()
+      const down = new Error('down')
+      // The options read the id from a signal of their own, so the key moves
+      // on the moment it's set, while the component shows todo 1 until
+      // change detection runs its effects. In an app without zone.js, a
+      // timer that sets it as the retry comes due, a debounce say, runs
+      // before change detection does.
+      const id = signal(1)
+      const shown = mount(() => ({
+        queryKey: ['todo', id()],
+        queryFn: () => api(id()),
+        ...retryOptions,
+      }))
+
+      requests[0].reject(down)
+      tick(50)
+      id.set(2)
+      tick(50)
+
+      expect(api.calls.allArgs()).toEqual([[1]])
+      expect(shown.result.error()).toBe(down)
     }))
   })
 

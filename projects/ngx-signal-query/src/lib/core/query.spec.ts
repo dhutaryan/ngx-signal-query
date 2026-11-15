@@ -47,6 +47,7 @@ function stubObserver(): QuerySubscriber<number> {
   return {
     fetchOptions: () => null,
     refetchOptions: () => null,
+    fetches: () => true,
     structuralSharing: () => true,
   }
 }
@@ -77,6 +78,7 @@ function activeObserver(
   return {
     fetchOptions,
     refetchOptions: fetchOptions,
+    fetches: () => true,
     structuralSharing: () => true,
   }
 }
@@ -1592,6 +1594,7 @@ describe('Query', () => {
       return {
         fetchOptions: () => null,
         refetchOptions: () => null,
+        fetches: () => true,
         structuralSharing: () => sharing,
       }
     }
