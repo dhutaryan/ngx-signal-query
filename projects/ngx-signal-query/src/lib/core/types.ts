@@ -7,6 +7,45 @@ import type { Observable } from 'rxjs'
  */
 export type QueryKey = readonly unknown[]
 
+/** What a query function is called with (see {@link QueryFunction}). */
+export type QueryFunctionContext<TQueryKey extends QueryKey = QueryKey> = {
+  /**
+   * The key of the query being fetched, as the cache holds it. It has the
+   * type of `queryKey`: written `['todo', id] as const`, each element keeps
+   * its own type. A query a server render brought over (see
+   * {@link withHydration}) holds its key as JSON brought it back: a `Date` in
+   * it is a string there.
+   */
+  queryKey: TQueryKey
+  /**
+   * Aborted when the fetch is stopped before it's done: `cancelQueries()`,
+   * `removeQueries()` or `clear()` stops it, a refetch replaces it, or no
+   * component shows the query any more. All the attempts of a fetch get the
+   * same signal, and it isn't aborted once the fetch lands or fails.
+   *
+   * Reading it says that the request is made with it, as
+   * `fetch(url, { signal })` makes one: once no component shows the query,
+   * such a `Promise` fetch is stopped as an `Observable` one is, rather than
+   * left to run to the end.
+   */
+  signal: AbortSignal
+}
+
+/**
+ * Fetches a query's data as an `Observable` or a `Promise`. It's called with
+ * the query's key and an abort signal (see {@link QueryFunctionContext}); a
+ * function that needs neither can take no parameters.
+ */
+export type QueryFunction<TData, TQueryKey extends QueryKey = QueryKey> = {
+  // Declared as a method, whose parameter is checked both ways, unlike a
+  // function's: a definition whose key has a narrower type, as
+  // queryOptions() infers it (`string[]`, or a tuple with `as const`), still
+  // fits where any key is expected, such as an entry of injectQueries.
+  queryFn(
+    context: QueryFunctionContext<TQueryKey>,
+  ): Observable<TData> | Promise<TData>
+}['queryFn']
+
 /**
  * Lifecycle status of a query: no data yet (the first load, or a new attempt
  * after a failure), resolved, or failed.
@@ -120,22 +159,28 @@ export type StructuralSharingValue<TData> =
   | ((oldData: TData | undefined, newData: TData) => TData)
 
 /** Configuration for a query, passed to {@link injectQuery} / {@link queryOptions}. */
-export type QueryOptions<TData, TError = Error> = {
+export type QueryOptions<
+  TData,
+  TError = Error,
+  TQueryKey extends QueryKey = QueryKey,
+> = {
   /** Unique cache key for this query. See {@link QueryKey}. */
-  queryKey: QueryKey
+  queryKey: TQueryKey
   /**
-   * Fetcher returning the data as an `Observable` or `Promise`. Return `null`
-   * for no data: `undefined` fails the fetch, with no retry. Once no
-   * component shows the query, an `Observable` fetch in flight is
-   * unsubscribed, which aborts an `HttpClient` request; a `Promise` one runs
-   * to the end, and its response is kept. Either way, Angular counts the app
-   * as busy until the fetch is done: a server render and `whenStable()` wait
-   * for it. With zone.js, it runs outside Angular's zone, as `HttpClient`
-   * sends its requests: what it starts, a timer say, neither keeps the app
-   * busy nor runs change detection. Its data comes back into the zone when
-   * the fetch was asked for from there.
+   * Fetcher returning the data as an `Observable` or `Promise`, given the
+   * query's key and an abort signal (see {@link QueryFunctionContext}).
+   * Return `null` for no data: `undefined` fails the fetch, with no retry.
+   * Once no component shows the query, an `Observable` fetch in flight is
+   * unsubscribed, which aborts an `HttpClient` request, and so is a `Promise`
+   * one whose function read the signal, which is aborted; any other
+   * `Promise` one runs to the end, and its response is kept. Either way,
+   * Angular counts the app as busy until the fetch is done: a server render
+   * and `whenStable()` wait for it. With zone.js, it runs outside Angular's
+   * zone, as `HttpClient` sends its requests: what it starts, a timer say,
+   * neither keeps the app busy nor runs change detection. Its data comes back
+   * into the zone when the fetch was asked for from there.
    */
-  queryFn: () => Observable<TData> | Promise<TData>
+  queryFn: QueryFunction<TData, TQueryKey>
   /** How long fetched data stays fresh before refetching, in ms. Default `0`. */
   staleTime?: number
   /**

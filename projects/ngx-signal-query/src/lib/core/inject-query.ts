@@ -6,7 +6,7 @@ import {
 } from '@angular/core'
 
 import { createQueryObserver } from './query-observer'
-import type { QueryOptions, QueryResult } from './types'
+import type { QueryKey, QueryOptions, QueryResult } from './types'
 
 /**
  * Runs a cached, reactive query and exposes its state as signals.
@@ -25,6 +25,8 @@ import type { QueryOptions, QueryResult } from './types'
  *
  * @typeParam TData - Type of the data resolved by `queryFn`.
  * @typeParam TError - Type of the error thrown by `queryFn`.
+ * @typeParam TQueryKey - Type of `queryKey`, which `queryFn` gets the key
+ *   with.
  * @param optionsFn - Factory returning the {@link QueryOptions}. Re-evaluated
  *   reactively: a new `queryKey` switches to that query and fetches it, and
  *   turning `enabled` on starts the fetch. Re-evaluating with the same key
@@ -55,8 +57,12 @@ import type { QueryOptions, QueryResult } from './types'
  * }
  * ```
  */
-export function injectQuery<TData, TError = Error>(
-  optionsFn: () => QueryOptions<TData, TError>,
+export function injectQuery<
+  TData,
+  TError = Error,
+  TQueryKey extends QueryKey = QueryKey,
+>(
+  optionsFn: () => QueryOptions<TData, TError, TQueryKey>,
   options?: { injector?: Injector },
 ): QueryResult<TData, TError> {
   if (!options?.injector) assertInInjectionContext(injectQuery)

@@ -30,7 +30,7 @@ import { injectQueries, type InjectQueriesOptions } from './inject-queries'
 import { injectQuery } from './inject-query'
 import { provideQueryClient } from './provider'
 import { QueryClient } from './query-client'
-import type { QueryResult } from './types'
+import type { QueryKey, QueryResult } from './types'
 
 // Mounts injectQueries in a host component, as mountHost() mounts anything:
 // its options may read the host's input.required `value`. Returns the results
@@ -84,6 +84,26 @@ describe('injectQueries', () => {
       'todo-3',
     ])
     expect(results().every((todo) => todo.isSuccess())).toBe(true)
+  })
+
+  it('hands each queryFn the key of its own query', () => {
+    const keys: QueryKey[] = []
+
+    mount(() => ({
+      queries: [1, 2].map((id) => ({
+        queryKey: ['todo', id],
+        queryFn: ({ queryKey }) => {
+          keys.push(queryKey)
+
+          return of(`todo-${id}`)
+        },
+      })),
+    }))
+
+    expect(keys).toEqual([
+      ['todo', 1],
+      ['todo', 2],
+    ])
   })
 
   it('returns an empty array for no queries', () => {

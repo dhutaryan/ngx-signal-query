@@ -6,12 +6,14 @@ import {
   keepPreviousData,
   queryOptions,
   withDefaultOptions,
+  type QueryKey,
 } from 'ngx-signal-query'
 
 type Todo = { id: number; title: string; done: boolean }
 type Ticket = { id: number; status: 'open' | 'done' }
 
 declare const http: HttpClient
+declare const id: number
 
 // The data type comes from queryFn.
 const todos = injectQuery(() => ({
@@ -165,3 +167,29 @@ const mistyped = injectQuery(() => ({
 }))
 
 expectTypeOf(mistyped.data()).toEqualTypeOf<Todo[] | undefined>()
+
+// queryFn's context
+
+// The query function gets the key with the type queryKey has, and a signal,
+// and the data type still comes from what it returns.
+const todo = injectQuery(() => ({
+  queryKey: ['todo', id] as const,
+  queryFn: ({ queryKey, signal }) => {
+    expectTypeOf(queryKey).toEqualTypeOf<readonly ['todo', number]>()
+    expectTypeOf(signal).toEqualTypeOf<AbortSignal>()
+
+    return http.get<Todo>(`/api/todos/${queryKey[1]}`)
+  },
+}))
+
+expectTypeOf(todo.data()).toEqualTypeOf<Todo | undefined>()
+
+// With the generics written out, the key is any key.
+injectQuery<Todo>(() => ({
+  queryKey: ['todo', id],
+  queryFn: ({ queryKey }) => {
+    expectTypeOf(queryKey).toEqualTypeOf<QueryKey>()
+
+    return http.get<Todo>(`/api/todos/${id}`)
+  },
+}))
