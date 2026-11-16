@@ -990,6 +990,28 @@ describe('injectQuery', () => {
       expect(inFlight()).toBe(1)
     })
 
+    it("retries a refetch that fails as the component's retry says", fakeAsync(() => {
+      const { queryFn, fail, resolve } = requests<string>()
+      const { result } = mount(() => ({
+        queryKey: ['todos'],
+        queryFn,
+        retry: 1,
+        retryDelay: 10,
+      }))
+
+      resolve('v1')
+      client.invalidateQueries({ queryKey: ['todos'] })
+      fail(new Error('blip'))
+      tick(10)
+
+      expect(queryFn).toHaveBeenCalledTimes(3)
+
+      resolve('v2')
+
+      expect(result.data()).toBe('v2')
+      expect(result.error()).toBeNull()
+    }))
+
     it('does not refetch for a disabled observer until it is enabled', () => {
       const queryFn = jasmine.createSpy('queryFn').and.returnValue(of('fresh'))
 
@@ -4305,6 +4327,34 @@ describe('injectQuery', () => {
       flush()
     }))
 
+    it("retries a poll that fails as the component's retry says", fakeAsync(() => {
+      const { queryFn, fail, resolve } = requests<string>()
+      const { fixture, result } = mount(() => ({
+        queryKey: ['p'],
+        queryFn,
+        refetchInterval: 1000,
+        retry: 1,
+        retryDelay: 10,
+      }))
+
+      resolve('v1')
+      tick(1000)
+
+      expect(queryFn).toHaveBeenCalledTimes(2)
+
+      fail(new Error('blip'))
+      tick(10)
+
+      expect(queryFn).toHaveBeenCalledTimes(3)
+
+      resolve('v2')
+
+      expect(result.data()).toBe('v2')
+
+      fixture.destroy()
+      flush()
+    }))
+
     // The timer restarts when the observed query, enabled or the interval
     // changes, not whenever the options re-evaluate.
     describe('timer restarts', () => {
@@ -5233,6 +5283,27 @@ describe('injectQuery', () => {
         expect(queryFn).toHaveBeenCalledTimes(2)
         expect(result.data()).toBe('v1')
       })
+
+      it("retries a refetch that fails as the component's retry says", fakeAsync(() => {
+        const { queryFn, fail, resolve } = requests<string>()
+        const { result } = mount(() => ({
+          queryKey: ['todos'],
+          queryFn,
+          retry: 1,
+          retryDelay: 10,
+        }))
+
+        resolve('v1')
+        leaveAndComeBack()
+        fail(new Error('blip'))
+        tick(10)
+
+        expect(queryFn).toHaveBeenCalledTimes(3)
+
+        resolve('v2')
+
+        expect(result.data()).toBe('v2')
+      }))
 
       it('takes the default from withDefaultOptions', () => {
         reprovide(
@@ -6163,6 +6234,32 @@ describe('injectQuery', () => {
       expect(last.result.data()).toBe('a, fresh')
     }))
 
+    it("retries the refetch an invalidation queued as the component's retry says", fakeAsync(() => {
+      const { queryFn, fail, resolve } = requests<string>()
+      const { result } = mount(() => ({
+        queryKey: ['todos'],
+        queryFn,
+        retry: 1,
+        retryDelay: 10,
+      }))
+
+      client.invalidateQueries({ queryKey: ['todos'] })
+      resolve('first')
+      flushMicrotasks()
+
+      expect(queryFn).toHaveBeenCalledTimes(2)
+
+      fail(new Error('blip'))
+      tick(10)
+
+      expect(queryFn).toHaveBeenCalledTimes(3)
+
+      resolve('fresh')
+      flushMicrotasks()
+
+      expect(result.data()).toBe('fresh')
+    }))
+
     it("runs a component's refetch() as that component would, not as another one shown first", fakeAsync(() => {
       const load = new Subject<string>()
       const shownFirst = jasmine
@@ -6183,6 +6280,32 @@ describe('injectQuery', () => {
       expect(shownFirst).toHaveBeenCalledTimes(1)
       expect(shownLast).toHaveBeenCalledTimes(1)
       expect(refetched.value).toEqual({ data: 'b', error: null })
+    }))
+
+    it("retries the refetch a component's refetch() queued as its retry says", fakeAsync(() => {
+      const { queryFn, fail, resolve } = requests<string>()
+      const { result } = mount(() => ({
+        queryKey: ['todos'],
+        queryFn,
+        retry: 1,
+        retryDelay: 10,
+      }))
+      const refetched = settled(result.refetch())
+
+      resolve('first')
+      flushMicrotasks()
+
+      expect(queryFn).toHaveBeenCalledTimes(2)
+
+      fail(new Error('blip'))
+      tick(10)
+
+      expect(queryFn).toHaveBeenCalledTimes(3)
+
+      resolve('fresh')
+      flushMicrotasks()
+
+      expect(refetched.value).toEqual({ data: 'fresh', error: null })
     }))
 
     it('runs the refetch as the component that asked last would, when several ask by hand', fakeAsync(() => {
@@ -7073,6 +7196,23 @@ describe('injectQuery', () => {
       const first = result.data()
 
       client.invalidateQueries({ queryKey: ['rows'] })
+      fixture.detectChanges()
+
+      expect(queryFn).toHaveBeenCalledTimes(2)
+      expect(result.data()).toBe(first)
+    })
+
+    it('keeps data() when a refetch on window focus brings the same data', () => {
+      const queryFn = jasmine
+        .createSpy('queryFn')
+        .and.callFake(() => of(rows()))
+      const { fixture, result } = mount(() => ({
+        queryKey: ['rows'],
+        queryFn,
+      }))
+      const first = result.data()
+
+      leaveAndComeBack()
       fixture.detectChanges()
 
       expect(queryFn).toHaveBeenCalledTimes(2)
