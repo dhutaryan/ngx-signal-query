@@ -4,8 +4,10 @@
  * key changes (e.g. pagination, search).
  *
  * While the placeholder is shown, `status` reads `'success'` and
- * `isPlaceholderData()` is `true`; `isFetching()` stays `true` so the UI can
- * indicate the data is stale.
+ * `isPlaceholderData()` is `true`: use it to show that the data is the
+ * previous key's. `isFetching()` is `true` while the next key's data loads,
+ * but not when that key doesn't fetch (`enabled: false`) or its fetch was
+ * cancelled.
  *
  * @example
  * ```ts
