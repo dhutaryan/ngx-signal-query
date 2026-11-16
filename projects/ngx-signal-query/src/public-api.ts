@@ -1,5 +1,5 @@
 /*
- * Public API Surface of ngx-query
+ * Public API Surface of ngx-signal-query
  */
 
 export * from './lib/core/query-client'

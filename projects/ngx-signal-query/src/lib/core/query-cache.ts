@@ -32,14 +32,14 @@ export class QueryCache extends Cache<Query<unknown, unknown>> {
 
   // The hash is the key's, unless the caller brings the one the query had
   // elsewhere, as a query the server hands over does.
-  getOrCreate<TData, TError = Error>(
+  getOrCreate<TData, TError = Error, TQueryFnData = TData>(
     key: QueryKey,
     gcTime: number,
     queryHash = hashKey(key),
-  ): Query<TData, TError> {
+  ): Query<TData, TError, TQueryFnData> {
     const exist = this.getEntry(queryHash)
 
-    if (exist) return exist as Query<TData, TError>
+    if (exist) return exist as Query<TData, TError, TQueryFnData>
 
     return this.addEntry(
       queryHash,
@@ -51,21 +51,27 @@ export class QueryCache extends Cache<Query<unknown, unknown>> {
         pendingTasks: this.#pendingTasks,
         zone: this.#zone,
       }),
-    ) as Query<TData, TError>
+    ) as Query<TData, TError, TQueryFnData>
   }
 
-  get<TData, TError = Error>(key: QueryKey): Query<TData, TError> | undefined {
-    return this.getEntry(hashKey(key)) as Query<TData, TError> | undefined
+  get<TData, TError = Error, TQueryFnData = TData>(
+    key: QueryKey,
+  ): Query<TData, TError, TQueryFnData> | undefined {
+    return this.getEntry(hashKey(key)) as
+      | Query<TData, TError, TQueryFnData>
+      | undefined
   }
 
   /**
    * Like get(), but reactive, as findAll() is: a computed or an effect that
    * calls it re-runs when an entry is added or removed.
    */
-  find<TData, TError = Error>(key: QueryKey): Query<TData, TError> | undefined {
+  find<TData, TError = Error, TQueryFnData = TData>(
+    key: QueryKey,
+  ): Query<TData, TError, TQueryFnData> | undefined {
     this.entries()
 
-    return this.get<TData, TError>(key)
+    return this.get<TData, TError, TQueryFnData>(key)
   }
 
   findAll(filters: QueryFilters = {}): Array<Query<unknown, unknown>> {
@@ -87,7 +93,9 @@ export class QueryCache extends Cache<Query<unknown, unknown>> {
 
   // Generic: a query is invariant in TError (its observers' retry options take
   // the error as an argument), so a typed one isn't a Query<unknown, unknown>.
-  remove<TData, TError>(query: Query<TData, TError>): void {
+  remove<TData, TError, TQueryFnData = TData>(
+    query: Query<TData, TError, TQueryFnData>,
+  ): void {
     // Guard on identity, not just the hash: a stale instance (already removed
     // and recreated under the same key) must not evict the current query.
     if (this.getEntry(query.queryHash) === query) {

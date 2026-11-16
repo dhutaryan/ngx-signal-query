@@ -40,11 +40,12 @@ export function resolveRetryDelay<TError>(
 // The failure fields of a fetch or a run that ends with `error`. The retries
 // count each failed attempt as it happens, the last one included, so the
 // failure they saw last is the failureReason already and isn't counted
-// twice. Any other failure is one more: one found once the response is in
-// (an Observable that completes empty, undefined, a structuralSharing
-// function that throws), or an onMutate that throws. Until a failure is
-// counted, failureReason is null, and an error may be null too: hence the
-// check on the count.
+// twice: a failure a check of a response found, among them (see
+// RetryerConfig.final). Any other failure is one more: one found after the
+// attempts (a structuralSharing function that throws, a mutationFn whose
+// Observable completes empty), or an onMutate that throws. Until a failure
+// is counted, failureReason is null, and an error may be null too: hence
+// the check on the count.
 /** @internal */
 export function countFailure<TError>(
   state: { failureCount: number; failureReason: TError | null },
@@ -68,13 +69,20 @@ export interface RetryerConfig<T, TError> {
   retryDelay: RetryDelayValue<TError>
   // Each failed attempt as it comes in, the last one included.
   onFail: (failureCount: number, error: TError) => void
-  // Whether a failure ends the attempts at once: asked when one comes in,
-  // and again once the wait for the retry is over.
+  // Whether a failure ends the attempts at once: asked when one that isn't
+  // final comes in, and again once the wait for the retry is over.
   stopped?: () => boolean
+  // Whether a failure is one another attempt would only bring again, as a
+  // response a check of the caller's rejects: it ends the attempts at once,
+  // counted, and nothing else is asked about it. Only the caller can tell:
+  // the same error may reach other attempts too, those of a query function
+  // that passes it on, which are retried as any failure is.
+  final?: (error: TError) => boolean
 }
 
 // Makes the attempts of a fetch or a run until one succeeds, retrying a
-// failure as `retry` allows, after the wait `retryDelay` gives.
+// failure as `retry` allows, after the wait `retryDelay` gives. A final
+// failure ends them at once.
 /** @internal */
 export function retryer<T, TError>({
   attempt,
@@ -82,6 +90,7 @@ export function retryer<T, TError>({
   retryDelay,
   onFail,
   stopped = () => false,
+  final = () => false,
 }: RetryerConfig<T, TError>): Observable<T> {
   let attemptIndex = 0
 
@@ -96,7 +105,14 @@ export function retryer<T, TError>({
         // when the first retry is to be decided.
         const retriesMade = retryCount - 1
 
-        if (stopped() || !shouldRetry(retry, retriesMade, error)) throw error
+        // A final failure first: nothing else is asked about it.
+        if (
+          final(error) ||
+          stopped() ||
+          !shouldRetry(retry, retriesMade, error)
+        ) {
+          throw error
+        }
 
         // The retry goes out when the wait is over, unless the attempts were
         // stopped meanwhile: an error thrown when the timer fires ends them

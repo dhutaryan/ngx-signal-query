@@ -1,14 +1,24 @@
 import { fakeAsync, flushMicrotasks, tick } from '@angular/core/testing'
-import { type Observable, of, Subject, throwError } from 'rxjs'
+import {
+  type Observable,
+  concatMap,
+  filter,
+  map,
+  of,
+  Subject,
+  throwError,
+} from 'rxjs'
 
 import { settled } from '../../spec-helpers/promises'
 import { CancelledError } from './cancelled-error'
-import { Query, type QuerySubscriber } from './query'
+import { type FetchBehavior, Query, type QuerySubscriber } from './query'
 import type { QueryCache } from './query-cache'
 import type { QueryState } from './types'
 import { deferred } from './utils'
 
-function createQuery<TData, TError = Error>(gcTime = 5 * 60_000) {
+function createQuery<TData, TError = Error, TQueryFnData = TData>(
+  gcTime = 5 * 60_000,
+) {
   // Query only calls cache.remove(this) on gc; a stub is enough.
   const cache = { remove: jasmine.createSpy('remove') }
   // The app's pending tasks: `held` counts those the query's fetches hold
@@ -18,7 +28,11 @@ function createQuery<TData, TError = Error>(gcTime = 5 * 60_000) {
     held: 0,
     removals: [] as Array<{ state: QueryState<TData, TError>; held: number }>,
   }
-  const query: Query<TData, TError> = new Query<TData, TError>({
+  const query: Query<TData, TError, TQueryFnData> = new Query<
+    TData,
+    TError,
+    TQueryFnData
+  >({
     key: ['key'],
     queryHash: '["key"]',
     cache: cache as unknown as QueryCache,
@@ -229,6 +243,19 @@ describe('Query', () => {
       expect(query.state().status).toBe('error')
     }))
 
+    // Nor is retry asked about it: the failure is the query's own finding,
+    // not the server's, which a retry function reading a status expects.
+    it("doesn't ask retry about it", fakeAsync(() => {
+      const { query } = createQuery<number | undefined>()
+      const retry = jasmine.createSpy('retry').and.returnValue(true)
+
+      query.fetch({ queryFn: () => of(undefined), retry, retryDelay: 10 })
+      tick(100)
+
+      expect(retry).not.toHaveBeenCalled()
+      expect(query.state().status).toBe('error')
+    }))
+
     it('keeps the data the query holds', () => {
       const { query } = createQuery<number | undefined>()
 
@@ -391,6 +418,281 @@ describe('Query', () => {
       expect(replacing).toHaveBeenCalledTimes(2)
       expect(query.state().data).toBe(2)
     }))
+  })
+
+  // A caller may say how a fetch gets its data from its requests, as the
+  // pages of a list are fetched one request each.
+  describe('a fetch with a behavior', () => {
+    it('starts the behavior once, with the data the query holds as the fetch starts, and makes its attempt again for each retry', fakeAsync(() => {
+      const { query } = createQuery<number>()
+      const starts: Array<number | undefined> = []
+      // What an attempt gives says how many attempts it has seen: they count
+      // in the behavior, as one that fetches pages keeps those it has.
+      const behavior: FetchBehavior<number, number> = (data) => {
+        let attempts = 0
+
+        starts.push(data)
+
+        return (request) => {
+          attempts++
+
+          return request().pipe(map((value) => value * 10 + attempts))
+        }
+      }
+      let requests = 0
+
+      query.setData(1)
+      query.fetch({
+        queryFn: () =>
+          ++requests === 1 ? throwError(() => new Error('blip')) : of(2),
+        retry: 1,
+        retryDelay: 10,
+        behavior,
+      })
+      // A write during the fetch starts nothing.
+      query.setData(5)
+      tick(10)
+
+      expect(starts).toEqual([1])
+      expect(query.state().data).toBe(22)
+    }))
+
+    it("hands the query function what the behavior adds for a request, on top of the key and the signal, which it can't replace", () => {
+      const { query } = createQuery<number>()
+      const contexts: Array<Record<string, unknown>> = []
+      const behavior: FetchBehavior<number, number> = () => (request) =>
+        request({ pageParam: 2, queryKey: ['other'], signal: 'not a signal' })
+
+      query.fetch({
+        queryFn: (context) => {
+          contexts.push({ ...context })
+
+          return of(1)
+        },
+        behavior,
+      })
+
+      expect(contexts.length).toBe(1)
+      expect(contexts[0]['pageParam']).toBe(2)
+      expect(contexts[0]['queryKey']).toEqual(['key'])
+      expect(contexts[0]['signal']).toBeInstanceOf(AbortSignal)
+    })
+
+    it('checks each request it makes: one that gives undefined fails the fetch, with no retry', fakeAsync(() => {
+      const { query } = createQuery<
+        Array<number | undefined>,
+        Error,
+        number | undefined
+      >()
+      // Two requests an attempt, as two pages, combined into what the query
+      // stores.
+      const behavior: FetchBehavior<
+        number | undefined,
+        Array<number | undefined>
+      > = () => (request) =>
+        request().pipe(
+          concatMap((first) =>
+            request().pipe(map((second) => [first, second])),
+          ),
+        )
+      let requests = 0
+
+      query.fetch({
+        queryFn: () => of(++requests === 2 ? undefined : requests),
+        retry: 3,
+        retryDelay: 10,
+        behavior,
+      })
+      tick(100)
+
+      expect(requests).toBe(2)
+      expect(query.state().status).toBe('error')
+      expect(query.state().error?.message).toBe(
+        'Query function for ["key"] produced undefined; return null for no data',
+      )
+      expect(query.state().failureCount).toBe(1)
+    }))
+
+    // Whatever the behavior makes of its requests, a fetch lands data or
+    // fails: it never waits on an attempt that ended with nothing.
+    it('fails the fetch when an attempt gives no data, with no retry', fakeAsync(() => {
+      const { query, tasks } = createQuery<number>()
+      const behavior: FetchBehavior<number, number> = () => (request) =>
+        request().pipe(filter(() => false))
+      let requests = 0
+      const fetched = settled(
+        query.fetch({
+          queryFn: () => of(++requests),
+          retry: 3,
+          retryDelay: 10,
+          behavior,
+        }),
+      )
+
+      tick(100)
+
+      expect(requests).toBe(1)
+      expect(query.state().status).toBe('error')
+      expect(query.state().error?.message).toBe(
+        'Query function for ["key"] completed without emitting a value',
+      )
+      expect(query.state().isFetching).toBe(false)
+      expect(fetched.error).toBe(query.state().error)
+      expect(tasks.held).toBe(0)
+    }))
+
+    it('fails the fetch when an attempt gives undefined, with no retry, and keeps the data', fakeAsync(() => {
+      const { query } = createQuery<number | undefined, Error, number>()
+      const behavior: FetchBehavior<number, number | undefined> =
+        () => (request) =>
+          request().pipe(map(() => undefined))
+      const structuralSharing = jasmine
+        .createSpy('structuralSharing')
+        .and.callFake((_oldData: unknown, newData: number) => newData)
+      let requests = 0
+
+      query.setData(5)
+      query.fetch({
+        queryFn: () => of(++requests),
+        retry: 3,
+        retryDelay: 10,
+        structuralSharing,
+        behavior,
+      })
+      tick(100)
+
+      expect(requests).toBe(1)
+      expect(query.state().status).toBe('error')
+      expect(query.state().error?.message).toBe(
+        'Query function for ["key"] produced undefined; return null for no data',
+      )
+      expect(query.state().data).toBe(5)
+      expect(structuralSharing).not.toHaveBeenCalled()
+    }))
+
+    // As a request that fails does: the call itself doesn't throw, so
+    // whoever asks for the fetch along with others, as an invalidation
+    // does, goes on to them.
+    it('fails the fetch when the behavior throws as it starts', fakeAsync(() => {
+      const { query, tasks } = createQuery<number>()
+      const error = new Error('no next page')
+      const behavior: FetchBehavior<number, number> = () => {
+        throw error
+      }
+      let fetched: ReturnType<typeof settled> | undefined
+
+      expect(() => {
+        fetched = settled(query.fetch({ queryFn: () => of(1), behavior }))
+      }).not.toThrow()
+      flushMicrotasks()
+
+      expect(query.state().status).toBe('error')
+      expect(query.state().error).toBe(error)
+      expect(query.state().isFetching).toBe(false)
+      expect(fetched?.error).toBe(error)
+      expect(tasks.held).toBe(0)
+
+      // Nothing is left in flight for the next fetch to join.
+      query.fetch({ queryFn: () => of(2) })
+
+      expect(query.state().data).toBe(2)
+    }))
+
+    describe('whose retry goes on from what an earlier attempt read', () => {
+      // Two requests a fetch, the first kept once it's in: a retry after the
+      // second one failed makes only that one again, as a list resumes at
+      // the page that failed. Only an attempt that makes both starts over.
+      const resuming: FetchBehavior<number, number[]> = () => {
+        let kept: number | undefined
+
+        return (request, startOver) => {
+          if (kept !== undefined) {
+            const first = kept
+
+            return request().pipe(map((second) => [first, second]))
+          }
+
+          startOver()
+
+          return request().pipe(
+            concatMap((first) => {
+              kept = first
+
+              return request().pipe(map((second) => [first, second]))
+            }),
+          )
+        }
+      }
+      // The second request fails once.
+      const flaky = (): { queryFn: () => Observable<number> } => {
+        let requests = 0
+
+        return {
+          queryFn: () =>
+            ++requests === 2
+              ? throwError(() => new Error('down'))
+              : of(requests),
+        }
+      }
+
+      it('keeps the stale mark when the query is invalidated during the wait', fakeAsync(() => {
+        const { query } = createQuery<number[], Error, number>()
+        const { queryFn } = flaky()
+
+        query.fetch({ queryFn, retry: 1, retryDelay: 10, behavior: resuming })
+        // The first request's data predates this.
+        query.invalidate()
+        tick(10)
+
+        expect(query.state().data).toEqual([1, 3])
+        expect(query.state().isInvalidated).toBe(true)
+      }))
+
+      it('runs the refetch asked for during the wait once it lands', fakeAsync(() => {
+        const { query } = createQuery<number[], Error, number>()
+        const { queryFn } = flaky()
+
+        query.fetch({ queryFn, retry: 1, retryDelay: 10, behavior: resuming })
+
+        const refetched = settled(
+          query.refetch({ queryFn, behavior: resuming }, 'caller'),
+        )
+
+        tick(10)
+        flushMicrotasks()
+
+        // The refetch, made after the first load landed with [1, 3].
+        expect(refetched.value).toEqual([4, 5])
+      }))
+    })
+
+    // A fetch that adds to the data the query holds, as the next page of a
+    // list does, makes none of it anew: the data's stale mark stays as it is.
+    describe('that goes on from the data the query holds', () => {
+      const appending: FetchBehavior<number, number[]> = (data) => (request) =>
+        request().pipe(map((value) => [...(data ?? []), value]))
+
+      it('keeps the stale mark of that data', () => {
+        const { query } = createQuery<number[], Error, number>()
+
+        query.setData([1])
+        query.invalidate()
+        query.fetch({ queryFn: () => of(2), behavior: appending })
+
+        expect(query.state().data).toEqual([1, 2])
+        expect(query.state().isInvalidated).toBe(true)
+      })
+
+      it("leaves that data unmarked when it isn't marked", () => {
+        const { query } = createQuery<number[], Error, number>()
+
+        query.setData([1])
+        query.fetch({ queryFn: () => of(2), behavior: appending })
+
+        expect(query.state().data).toEqual([1, 2])
+        expect(query.state().isInvalidated).toBe(false)
+      })
+    })
   })
 
   describe('fetching after a failure', () => {

@@ -690,6 +690,55 @@ describe('QueryClient', () => {
       expect(client.getQueryData(['n'])).toBe(cached)
     })
 
+    it('keeps the cached data when cancelRefetch refetches the same data', () => {
+      client.setQueryData(['n'], { id: 1, tags: ['a'] })
+
+      const cached = client.getQueryData(['n'])
+
+      client.fetchQuery(['n'], () => of({ id: 1, tags: ['a'] }), {
+        cancelRefetch: true,
+      })
+
+      expect(client.getQueryData(['n'])).toBe(cached)
+    })
+
+    it('keeps what a first load brought when cancelRefetch fetches the same data once it lands', fakeAsync(() => {
+      const load = new Subject<{ id: number; tags: string[] }>()
+      const first = { id: 1, tags: ['a'] }
+
+      client.fetchQuery(['n'], () => load)
+      client.fetchQuery(['n'], () => of({ id: 1, tags: ['a'] }), {
+        cancelRefetch: true,
+      })
+      load.next(first)
+      load.complete()
+      flushMicrotasks()
+
+      expect(client.getQueryData(['n'])).toBe(first)
+    }))
+
+    // Only the options it fetches with reach the fetch. An options object
+    // built elsewhere, rather than written in the call, may hold other
+    // fields too, such as a scroll setting shared with it.
+    it('fetches with the options it knows, whatever else its options object holds', fakeAsync(() => {
+      const shared = { staleTime: 0, behavior: 'smooth' }
+      const fetched = settled(client.fetchQuery(['n'], () => of(1), shared))
+
+      flushMicrotasks()
+
+      // And so does the refetch it asks for with cancelRefetch.
+      const refetching = { ...shared, cancelRefetch: true }
+      const refetched = settled(
+        client.fetchQuery(['n'], () => of(2), refetching),
+      )
+
+      flushMicrotasks()
+
+      expect(fetched.value).toBe(1)
+      expect(refetched.value).toBe(2)
+      expect(client.isFetching()).toBe(0)
+    }))
+
     // A server render and whenStable() wait for it as for a component's
     // query, so the data is in the cache by then.
     it('keeps the app busy until the fetch lands, though no component shows the key', fakeAsync(() => {

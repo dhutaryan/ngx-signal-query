@@ -1,6 +1,7 @@
 import { type NgZone, type PendingTasks, signal } from '@angular/core'
 import {
   type Observable,
+  defer,
   isObservable,
   map,
   take,
@@ -15,6 +16,7 @@ import { type Deferred, deferred, isValidTimeout, replaceData } from './utils'
 import { requestOutsideZone } from './zone'
 import type {
   DefaultedQueryOptions,
+  QueryFunction,
   QueryFunctionContext,
   QueryKey,
   QueryOptions,
@@ -29,30 +31,34 @@ import type {
  *
  * @internal
  */
-export interface QuerySubscriber<TData, TError = Error> {
+export interface QuerySubscriber<TData, TError = Error, TQueryFnData = TData> {
   /**
    * How this observer would fetch the query right now, and when it wants it
    * refetched, read from its live options; `null` while it doesn't want the
    * query fetched: it is disabled, its options throw, or its key has already
    * moved on to another query.
    */
-  fetchOptions(): Pick<
-    DefaultedQueryOptions<TData, TError>,
-    | 'queryFn'
-    | 'retry'
-    | 'retryDelay'
-    | 'structuralSharing'
-    | 'staleTime'
-    | 'refetchOnWindowFocus'
-    | 'refetchOnReconnect'
-  > | null
+  fetchOptions():
+    | (FetchArgs<TData, TError, TQueryFnData> &
+        Pick<
+          DefaultedQueryOptions<TData, TError>,
+          | 'retry'
+          | 'retryDelay'
+          | 'structuralSharing'
+          | 'staleTime'
+          | 'refetchOnWindowFocus'
+          | 'refetchOnReconnect'
+        >)
+    | null
 
   /**
    * How this observer would refetch the query by hand, as its refetch()
    * does, enabled or not; `null` while its options throw, or once its key has
    * moved on to another query.
    */
-  refetchOptions(): ReturnType<QuerySubscriber<TData, TError>['fetchOptions']>
+  refetchOptions(): ReturnType<
+    QuerySubscriber<TData, TError, TQueryFnData>['fetchOptions']
+  >
 
   /**
    * Whether this observer's queryFn fetches the query with this hash right
@@ -88,32 +94,94 @@ export interface QueryConfig {
   zone: Pick<NgZone, 'run' | 'runOutsideAngular'>
 }
 
-// What a fetch runs with, as its caller asks for it.
-type FetchArgs<TData, TError> = Pick<
-  QueryOptions<TData, TError>,
+/**
+ * One attempt of a fetch: makes its requests with `request` and gives the
+ * data the query stores. `request` calls the attempt's query function with
+ * `context` added to the query's key and the fetch's signal, which it can't
+ * replace (see Query#request). An attempt that makes all its requests anew,
+ * rather than going on from what an earlier attempt or the query's data
+ * holds, calls `startOver()` first: what was read before it no longer keeps
+ * the query marked stale, nor asks for the refetch queued during a first
+ * load.
+ *
+ * @internal
+ */
+export type FetchAttempt<TQueryFnData, TData> = (
+  request: (context?: Record<string, unknown>) => Observable<TQueryFnData>,
+  startOver: () => void,
+) => Observable<TData>
+
+/**
+ * How a fetch gets the data the query stores from its query function. Called
+ * once, as the fetch starts, with the data the query holds then. The attempt
+ * it gives is made again for each retry, so what the attempts keep, as the
+ * pages fetched so far, carries over from one to the next.
+ *
+ * @internal
+ */
+export type FetchBehavior<TQueryFnData, TData> = (
+  data: TData | undefined,
+) => FetchAttempt<TQueryFnData, TData>
+
+/**
+ * What a fetch runs with, as its caller asks for it: the query function and
+ * the retry policy, as a query's options give them; how the response merges
+ * with the data the query holds; and how the fetch gets that data from the
+ * query function.
+ *
+ * @internal
+ */
+export type FetchArgs<TData, TError = Error, TQueryFnData = TData> = Pick<
+  QueryOptions<TQueryFnData, TError>,
+  'queryFn' | 'retry' | 'retryDelay'
+> & {
+  structuralSharing?: StructuralSharingValue<TData>
+  behavior?: FetchBehavior<TQueryFnData, TData>
+}
+
+/**
+ * What a fetch made with a query's options runs with: its query function,
+ * its retry policy and how its data merges, taken field by field, so nothing
+ * else an options object holds reaches the fetch.
+ *
+ * @internal
+ */
+export function fetchArgsOf<TData, TError>(
+  options: DefaultedQueryOptions<TData, TError>,
+): Pick<
+  DefaultedQueryOptions<TData, TError>,
   'queryFn' | 'retry' | 'retryDelay' | 'structuralSharing'
->
+> {
+  return {
+    queryFn: options.queryFn,
+    retry: options.retry,
+    retryDelay: options.retryDelay,
+    structuralSharing: options.structuralSharing,
+  }
+}
 
 // Who asks for a fetch: a component, by the handle it shows the query with,
 // or 'caller', a caller no component owns, as fetchQuery().
-type Asker<TData, TError> = QuerySubscriber<TData, TError> | 'caller'
+type Asker<TData, TError, TQueryFnData> =
+  | QuerySubscriber<TData, TError, TQueryFnData>
+  | 'caller'
 
 // A refetch asked for while a fetch of a query with no data yet runs, to run
 // once that fetch ends (see refetch).
-interface QueuedRefetch<TData, TError> {
+interface QueuedRefetch<TData, TError, TQueryFnData> {
   // Settles the promise that everyone who asked for the refetch shares.
   readonly outcome: Deferred<TData>
   // What the last caller that isn't a component, as fetchQuery, asked to
   // fetch with, if one asked.
-  callerArgs: FetchArgs<TData, TError> | undefined
+  callerArgs: FetchArgs<TData, TError, TQueryFnData> | undefined
   // The component that asked last by hand, with its refetch(), if one did.
-  byHand: QuerySubscriber<TData, TError> | undefined
+  byHand: QuerySubscriber<TData, TError, TQueryFnData> | undefined
 }
 
 // The fetch in flight, from its first attempt until it lands, fails or is
 // stopped. What it needs lives here and goes with it, so nothing carries over
 // to the next fetch.
-interface InFlightFetch<TData, TError> {
+interface InFlightFetch<TData, TError, TQueryFnData> {
   // Settles the promise that every caller joining the fetch shares.
   readonly outcome: Deferred<TData>
   // Its attempts: unsubscribing stops them.
@@ -132,8 +200,8 @@ interface InFlightFetch<TData, TError> {
   // retry falls back to that queryFn while it still fetches this query (see
   // #retryQueryFn). Replaced whole, so the two always belong together.
   lastAsked: {
-    readonly by: Asker<TData, TError>
-    readonly queryFn: QueryOptions<TData, TError>['queryFn']
+    readonly by: Asker<TData, TError, TQueryFnData>
+    readonly queryFn: QueryFunction<TQueryFnData>
   }
   // Whether stopping the fetch aborts its request: unsubscribing tears an
   // Observable down (HttpClient aborts the request), and aborting the signal
@@ -146,26 +214,35 @@ interface InFlightFetch<TData, TError> {
   // lands as usual, but a failure isn't tried again. Whoever joins the fetch
   // wants its data, so joining clears it.
   retriesStopped: boolean
-  // Set when the query is invalidated while the fetch is in flight: the
-  // attempt running then may have read the data before the change, so its
-  // response leaves the query marked stale. Each attempt clears it as it
-  // starts: a retry reads the data after the change.
+  // Set when the query is invalidated while the fetch is in flight, or from
+  // the start if the data the fetch goes on from is marked: what was read
+  // before the change leaves the query marked stale once the response
+  // lands. An attempt that starts over clears it (see FetchAttempt): it
+  // reads the data after the change.
   invalidated: boolean
   // The refetch to run once the fetch ends; null while nobody asked for one.
-  queuedRefetch: QueuedRefetch<TData, TError> | null
+  queuedRefetch: QueuedRefetch<TData, TError, TQueryFnData> | null
   // Set when a refetch is asked for while the fetch is in flight, for the
   // same reason, and cleared the same way: the refetch runs only if it was
-  // asked for during the attempt the fetch ends with.
+  // asked for since the last attempt that started over began.
   refetchAsked: boolean
   // Removes the app's pending task the fetch holds. While it's held, Angular
   // counts the app as busy: a server render and whenStable() wait for the
   // fetch, whatever its queryFn gets the data with. Removed once the outcome
   // is in the state, or when the fetch stops.
   readonly removeTask: () => void
+  // The failures the checks of its responses found (see #checked): another
+  // attempt would bring the same, so each ends the attempts at once. This
+  // fetch's own only: a query function that passes another query's failure
+  // on is retried as any failure is.
+  readonly checkFailures: WeakSet<object>
 }
 
+// TData is what the query stores, TQueryFnData what its query function gives.
+// They're the same unless a fetch makes the data out of several responses,
+// as the pages of a list.
 /** @internal */
-export class Query<TData, TError = Error> {
+export class Query<TData, TError = Error, TQueryFnData = TData> {
   readonly key: QueryKey
   readonly queryHash: string
 
@@ -186,10 +263,10 @@ export class Query<TData, TError = Error> {
   readonly state = this.#state.asReadonly()
 
   // The fetch in flight; null while nothing is.
-  #inFlight: InFlightFetch<TData, TError> | null = null
+  #inFlight: InFlightFetch<TData, TError, TQueryFnData> | null = null
   // The structuralSharing of the fetch whose response the query holds.
   #fetchedStructuralSharing: StructuralSharingValue<TData> | undefined
-  readonly #observers = new Set<QuerySubscriber<TData, TError>>()
+  readonly #observers = new Set<QuerySubscriber<TData, TError, TQueryFnData>>()
   #gcTime = 0
   #gcTimer: ReturnType<typeof setTimeout> | null = null
   readonly #cache: QueryCache
@@ -229,12 +306,12 @@ export class Query<TData, TError = Error> {
     this.#gcTime = Math.max(this.#gcTime || 0, ms)
   }
 
-  addObserver(observer: QuerySubscriber<TData, TError>): void {
+  addObserver(observer: QuerySubscriber<TData, TError, TQueryFnData>): void {
     this.#observers.add(observer)
     this.#clearGcTimer()
   }
 
-  removeObserver(observer: QuerySubscriber<TData, TError>): void {
+  removeObserver(observer: QuerySubscriber<TData, TError, TQueryFnData>): void {
     // An observer this query doesn't have changes nothing: it mustn't cancel
     // the fetch or schedule gc while others still watch.
     if (!this.#observers.delete(observer)) return
@@ -292,7 +369,8 @@ export class Query<TData, TError = Error> {
   }
 
   // Without a structuralSharing setting the response is stored as is: the
-  // default is the client's to resolve.
+  // default is the client's to resolve. Without a behavior, the fetch makes
+  // one request, whose data the query stores.
   //
   // Returns a promise of the data as the query stores it, which every caller
   // that joins the fetch shares. A fetch that replaces this one settles it
@@ -307,14 +385,15 @@ export class Query<TData, TError = Error> {
       retry = 0,
       retryDelay = defaultRetryDelay,
       structuralSharing = false,
-    }: Pick<
-      QueryOptions<TData, TError>,
-      'queryFn' | 'retry' | 'retryDelay' | 'structuralSharing'
-    >,
+      behavior,
+    }: FetchArgs<TData, TError, TQueryFnData>,
     {
       cancelRefetch = false,
       by = 'caller',
-    }: { cancelRefetch?: boolean; by?: Asker<TData, TError> } = {},
+    }: {
+      cancelRefetch?: boolean
+      by?: Asker<TData, TError, TQueryFnData>
+    } = {},
   ): Promise<TData> {
     const running = this.#inFlight
 
@@ -345,7 +424,7 @@ export class Query<TData, TError = Error> {
     running?.outcome.resolve(outcome.promise)
     running?.queuedRefetch?.outcome.resolve(outcome.promise)
 
-    const inFlight: InFlightFetch<TData, TError> = {
+    const inFlight: InFlightFetch<TData, TError, TQueryFnData> = {
       outcome,
       subscription: new Subscription(),
       abortController: new AbortController(),
@@ -355,10 +434,13 @@ export class Query<TData, TError = Error> {
       lastAsked: { by, queryFn },
       abortable: false,
       retriesStopped: false,
-      invalidated: false,
+      // The data the query holds keeps its mark while a fetch that goes on
+      // from it, rather than starting over, lands.
+      invalidated: this.state().isInvalidated,
       queuedRefetch: null,
       refetchAsked: false,
       removeTask: this.#pendingTasks.add(),
+      checkFailures: new WeakSet(),
     }
 
     this.#inFlight = inFlight
@@ -378,59 +460,69 @@ export class Query<TData, TError = Error> {
       failureReason: null,
     }))
 
-    // The first attempt runs the caller's queryFn, each retry the one
-    // #retryQueryFn picks: it has one, as stopped() below has just found when
-    // the wait for the retry ended. Each attempt makes a fresh request (a
-    // Promise is one-shot), and only the request leaves Angular's zone: see
-    // #request.
-    const attempts = retryer<TData, TError>({
-      attempt: (attemptIndex) => {
-        const attemptQueryFn =
-          attemptIndex === 0 ? queryFn : this.#retryQueryFn(inFlight)!
+    // Started as the fetch is subscribed to, inside it: a behavior that
+    // throws as it starts fails the fetch at once, with no retry, and the
+    // call itself doesn't throw.
+    const attempts = defer(() => {
+      // How each attempt gets the data from its requests, as the behavior
+      // says, from the data the query holds as the fetch starts. Without
+      // one, each attempt starts over and makes one request, and the query
+      // stores what it gives: the query function gives the query's own data
+      // then (TQueryFnData is TData), though the types can't tell.
+      const attemptWith: FetchAttempt<TQueryFnData, TData> =
+        behavior?.(this.state().data) ??
+        ((request, startOver) => {
+          startOver()
 
-        // This attempt reads the data after any invalidation or refetch
-        // asked for so far.
+          return request() as unknown as Observable<TData>
+        })
+
+      // An attempt that starts over reads the data after any invalidation
+      // or refetch asked for so far.
+      const startOver = (): void => {
         inFlight.invalidated = false
         inFlight.refetchAsked = false
+      }
 
-        return this.#request(attemptQueryFn, inFlight)
-      },
-      retry,
-      retryDelay,
-      onFail: (failureCount, failureReason) =>
-        this.#state.update((state) => ({
-          ...state,
-          failureCount,
-          failureReason,
-        })),
-      // A failure ends the fetch at once, and so does the end of a wait for
-      // a retry, once the last observer left, as in TanStack, or once no
-      // queryFn fetches this query any more (see #retryQueryFn). Whoever
-      // joins meanwhile hands a queryFn over and clears the flag, and the
-      // retry goes out on time.
-      stopped: () =>
-        inFlight.retriesStopped || this.#retryQueryFn(inFlight) === null,
-    }).pipe(
-      throwIfEmpty(
-        () =>
-          new Error(
-            `Query function for ${this.queryHash} completed without emitting a value`,
-          ),
-      ),
-      // undefined is what a query holds while it has no data, so a response
-      // can't be undefined: null says "nothing here". After the retries, as
-      // the check above: the request went through, and another one would
-      // bring the same. Before the merge, so a structuralSharing function
-      // only ever gets data.
-      map((data) => {
-        if (data === undefined) {
-          throw new Error(
-            `Query function for ${this.queryHash} produced undefined; return null for no data`,
+      // The first attempt runs the caller's queryFn, each retry the one
+      // #retryQueryFn picks: it has one, as stopped() below has just found
+      // when the wait for the retry ended. Each attempt makes fresh
+      // requests, as many as the behavior asks for (a Promise is one-shot),
+      // and only the requests leave Angular's zone: see #request. Whatever
+      // the behavior makes of its requests, an attempt gives one value, and
+      // not undefined, as each request does (see #checked).
+      return retryer<TData, TError>({
+        attempt: (attemptIndex) => {
+          const attemptQueryFn =
+            attemptIndex === 0 ? queryFn : this.#retryQueryFn(inFlight)!
+
+          return this.#checked(
+            attemptWith(
+              (context) => this.#request(attemptQueryFn, inFlight, context),
+              startOver,
+            ),
+            inFlight,
           )
-        }
-
-        return data
-      }),
+        },
+        retry,
+        retryDelay,
+        onFail: (failureCount, failureReason) =>
+          this.#state.update((state) => ({
+            ...state,
+            failureCount,
+            failureReason,
+          })),
+        // A failure ends the fetch at once, and so does the end of a wait
+        // for a retry, once the last observer left, as in TanStack, or once
+        // no queryFn fetches this query any more (see #retryQueryFn).
+        // Whoever joins meanwhile hands a queryFn over and clears the flag,
+        // and the retry goes out on time.
+        stopped: () =>
+          inFlight.retriesStopped || this.#retryQueryFn(inFlight) === null,
+        final: (error) =>
+          error instanceof Object && inFlight.checkFailures.has(error),
+      })
+    }).pipe(
       // Keeps what didn't change from the data the query holds when the
       // response lands, a write made during the fetch included. After the
       // retries: a structuralSharing function that throws fails the fetch
@@ -448,8 +540,8 @@ export class Query<TData, TError = Error> {
             status: 'success',
             error: null,
             isFetching: false,
-            // Still stale if invalidated while this attempt ran: the data
-            // may predate the change.
+            // Still stale if invalidated after some of this data was read:
+            // it may predate the change.
             isInvalidated: inFlight.invalidated,
             failureCount: 0,
             failureReason: null,
@@ -497,8 +589,8 @@ export class Query<TData, TError = Error> {
   // promise. A caller hands its queryFn over for the retries to come, as a
   // caller that joins does.
   refetch(
-    args: FetchArgs<TData, TError>,
-    by: Asker<TData, TError>,
+    args: FetchArgs<TData, TError, TQueryFnData>,
+    by: Asker<TData, TError, TQueryFnData>,
     { byHand = false }: { byHand?: boolean } = {},
   ): Promise<TData> {
     const running = this.#inFlight
@@ -650,7 +742,7 @@ export class Query<TData, TError = Error> {
   // #queuedRefetchArgs). Not if the attempt the fetch ended with started
   // after the last request, as it read the data after the reason for the
   // refetch. Whoever asked gets the refetch's outcome, or the fetch's.
-  #refetchIfAsked(inFlight: InFlightFetch<TData, TError>): void {
+  #refetchIfAsked(inFlight: InFlightFetch<TData, TError, TQueryFnData>): void {
     const queued = inFlight.queuedRefetch
 
     if (!queued) return
@@ -671,9 +763,12 @@ export class Query<TData, TError = Error> {
   // the query fetched would fetch it, as an invalidation refetches. With none
   // of them, the refetch is dropped: an invalidation leaves a query that only
   // disabled components show alone.
-  #queuedRefetchArgs({ callerArgs, byHand }: QueuedRefetch<TData, TError>): {
-    args: FetchArgs<TData, TError>
-    by: Asker<TData, TError>
+  #queuedRefetchArgs({
+    callerArgs,
+    byHand,
+  }: QueuedRefetch<TData, TError, TQueryFnData>): {
+    args: FetchArgs<TData, TError, TQueryFnData>
+    by: Asker<TData, TError, TQueryFnData>
   } | null {
     if (callerArgs) return { args: callerArgs, by: 'caller' }
 
@@ -722,8 +817,8 @@ export class Query<TData, TError = Error> {
   // fetches it any more: the retries stop then, as when the last observer
   // leaves (see fetch).
   #retryQueryFn(
-    inFlight: InFlightFetch<TData, TError>,
-  ): QueryOptions<TData, TError>['queryFn'] | null {
+    inFlight: InFlightFetch<TData, TError, TQueryFnData>,
+  ): QueryFunction<TQueryFnData> | null {
     for (const observer of this.#observers) {
       const options = observer.fetchOptions()
 
@@ -740,16 +835,19 @@ export class Query<TData, TError = Error> {
   // requestOutsideZone): with zone.js, what the request waits on mustn't
   // keep the app from counting as stable. The task the fetch holds keeps the
   // app busy until the outcome is in all the same. It hands the query
-  // function the query's key and the fetch's signal, takes the first value
-  // an Observable gives and lets go of it, and sets whether stopping the
-  // fetch aborts it: it does for an Observable, and for a request whose
-  // query function reads the signal.
+  // function the query's key and the fetch's signal, on top of what the
+  // behavior adds for this request (`extra`), takes the first value an
+  // Observable gives and lets go of it, and sets whether stopping the fetch
+  // aborts it: it does for an Observable, and for a request whose query
+  // function reads the signal.
   #request(
-    queryFn: QueryOptions<TData, TError>['queryFn'],
-    inFlight: InFlightFetch<TData, TError>,
-  ): Observable<TData> {
-    return requestOutsideZone(this.#zone, () => {
+    queryFn: QueryFunction<TQueryFnData>,
+    inFlight: InFlightFetch<TData, TError, TQueryFnData>,
+    extra?: Record<string, unknown>,
+  ): Observable<TQueryFnData> {
+    const response = requestOutsideZone(this.#zone, () => {
       const context: QueryFunctionContext = {
+        ...extra,
         queryKey: this.key,
         // Read during the call or after it, an await later say.
         get signal() {
@@ -766,7 +864,40 @@ export class Query<TData, TError = Error> {
       if (isObservable(request)) inFlight.abortable = true
 
       return request
-    }).pipe(take(1))
+    })
+
+    return this.#checked(response, inFlight)
+  }
+
+  // A response gives one value, and not undefined, or it fails the fetch: it
+  // went through, and another one would bring the same, so the failure
+  // counts but isn't tried again (see InFlightFetch.checkFailures). undefined
+  // is what a query holds while it has no data: null says "nothing here".
+  // Checked before the merge, so a structuralSharing function only ever gets
+  // data.
+  #checked<T>(
+    response: Observable<T>,
+    inFlight: InFlightFetch<TData, TError, TQueryFnData>,
+  ): Observable<T> {
+    const failure = (reason: string): Error => {
+      const error = new Error(`Query function for ${this.queryHash} ${reason}`)
+
+      inFlight.checkFailures.add(error)
+
+      return error
+    }
+
+    return response.pipe(
+      take(1),
+      throwIfEmpty(() => failure('completed without emitting a value')),
+      map((data) => {
+        if (data === undefined) {
+          throw failure('produced undefined; return null for no data')
+        }
+
+        return data
+      }),
+    )
   }
 
   // Removes the query gcTime from now, unless something uses it by then: an

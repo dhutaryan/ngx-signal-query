@@ -13,7 +13,7 @@ import {
 import { pageVisibility } from './browser-events'
 import { startPolling } from './polling'
 import { QueryClient } from './query-client'
-import type { Query, QuerySubscriber } from './query'
+import { type Query, type QuerySubscriber, fetchArgsOf } from './query'
 import type {
   PlaceholderDataFunction,
   QueryKey,
@@ -202,6 +202,10 @@ export function createQueryObserver<TData, TError = Error>(
     }
   }
 
+  // What a fetch this observer asks for, or is asked about, runs with: every
+  // fetch made on its behalf goes by it, whoever starts it.
+  const fetchArgs = fetchArgsOf<TData, TError>
+
   // How this observer would refetch q by hand, as refetch() does, enabled or
   // not, from the live options; null while they throw, or once the key has
   // moved on. Before the key effect above catches up, queryFn already fetches
@@ -213,21 +217,10 @@ export function createQueryObserver<TData, TError = Error>(
 
     if (!options || hashKey(options.queryKey) !== q.queryHash) return null
 
-    const {
-      queryFn,
-      retry,
-      retryDelay,
-      structuralSharing,
-      staleTime,
-      refetchOnWindowFocus,
-      refetchOnReconnect,
-    } = options
+    const { staleTime, refetchOnWindowFocus, refetchOnReconnect } = options
 
     return {
-      queryFn,
-      retry,
-      retryDelay,
-      structuralSharing,
+      ...fetchArgs(options),
       staleTime,
       refetchOnWindowFocus,
       refetchOnReconnect,
@@ -316,7 +309,9 @@ export function createQueryObserver<TData, TError = Error>(
       const options = defaultedOptions()
       const q = resolve(options.queryKey)
 
-      if (q.shouldFetch(options.staleTime)) q.fetch(options, { by: subscriber })
+      if (q.shouldFetch(options.staleTime)) {
+        q.fetch(fetchArgs(options), { by: subscriber })
+      }
     })
   })
 
@@ -463,9 +458,11 @@ export function createQueryObserver<TData, TError = Error>(
       untracked(() => {
         const options = defaultedOptions()
 
-        return resolve(options.queryKey).refetch(options, subscriber, {
-          byHand: true,
-        })
+        return resolve(options.queryKey).refetch(
+          fetchArgs(options),
+          subscriber,
+          { byHand: true },
+        )
       })
         .catch(() => undefined)
         .then(() => ({ data: result.data(), error: result.error() })),
