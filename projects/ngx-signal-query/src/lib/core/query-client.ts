@@ -10,6 +10,7 @@ import { onReconnect, onWindowFocus } from './browser-events'
 import { transferCache } from './hydration'
 import { isDestroyed } from './injector'
 import { inBrowser } from './platform'
+import { fetchArgsOf } from './query'
 import { QueryCache } from './query-cache'
 import { MutationCache } from './mutation-cache'
 import type { MutationOptions } from './mutation'
@@ -250,9 +251,9 @@ export class QueryClient {
 
       // A refetch asked for by a caller, not a component: run with this
       // call's options.
-      return cancelRefetch
-        ? query.refetch(defaulted, 'caller')
-        : query.fetch(defaulted)
+      const args = fetchArgsOf(defaulted)
+
+      return cancelRefetch ? query.refetch(args, 'caller') : query.fetch(args)
     })
   }
 

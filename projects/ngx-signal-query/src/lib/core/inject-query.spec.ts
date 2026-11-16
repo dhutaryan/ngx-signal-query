@@ -556,6 +556,32 @@ describe('injectQuery', () => {
       expect(result.failureCount()).toBe(2)
       expect(result.failureReason()).toBe(result.error())
     }))
+
+    // The response failed another query, the one fetched for it: this
+    // query's queryFn just passes that failure on, and is retried as any
+    // failure is.
+    it("retries a failure its queryFn passes on from another query's fetch", fakeAsync(() => {
+      const user = jasmine
+        .createSpy<() => Observable<string>>('user')
+        .and.returnValues(EMPTY, of('ann'))
+      const projects = jasmine
+        .createSpy<() => Promise<string[]>>('projects')
+        .and.callFake(() =>
+          client.fetchQuery(['me'], user).then((me) => [`${me}'s project`]),
+        )
+      const { result } = mount(() => ({
+        queryKey: ['projects'],
+        queryFn: projects,
+        retry: 1,
+        retryDelay: 10,
+      }))
+
+      tick(10)
+      flushMicrotasks()
+
+      expect(projects).toHaveBeenCalledTimes(2)
+      expect(result.data()).toEqual(["ann's project"])
+    }))
   })
 
   describe('enabled', () => {
@@ -6595,6 +6621,34 @@ describe('injectQuery', () => {
     })
   })
 
+  // Only the options a fetch runs with reach it. Options built on an object
+  // shared with something else, a scroll setting say, may hold other fields
+  // too, which a literal couldn't.
+  it('fetches with the options it knows, whatever else its options object holds', fakeAsync(() => {
+    const shared = { behavior: 'smooth' }
+    const queryFn = jasmine
+      .createSpy('queryFn')
+      .and.returnValues(of(1), of(2), of(3))
+    const { result } = mount(() => ({
+      ...shared,
+      queryKey: ['todos'],
+      queryFn,
+    }))
+
+    expect(result.data()).toBe(1)
+
+    result.refetch()
+    flushMicrotasks()
+
+    expect(result.data()).toBe(2)
+
+    client.invalidateQueries({ queryKey: ['todos'] })
+    flushMicrotasks()
+
+    expect(result.data()).toBe(3)
+    expect(result.error()).toBeNull()
+  }))
+
   // optionsFn may read what a component only has once it's rendered: its
   // inputs, and fields declared after the query. So it must not run while the
   // host is being constructed.
@@ -7218,6 +7272,40 @@ describe('injectQuery', () => {
       expect(queryFn).toHaveBeenCalledTimes(2)
       expect(result.data()).toBe(first)
     })
+
+    it('keeps data() when the refetch an invalidation queued during the first load brings the same data', fakeAsync(() => {
+      const load = new Subject<Row[]>()
+      const queryFn = jasmine
+        .createSpy('queryFn')
+        .and.returnValues(load, of(rows()))
+      const { result } = mount(() => ({ queryKey: ['rows'], queryFn }))
+      const first = rows()
+
+      client.invalidateQueries({ queryKey: ['rows'] })
+      load.next(first)
+      load.complete()
+      flushMicrotasks()
+
+      expect(queryFn).toHaveBeenCalledTimes(2)
+      expect(result.data()).toBe(first)
+    }))
+
+    it("keeps data() when the refetch a component's refetch() queued during the first load brings the same data", fakeAsync(() => {
+      const load = new Subject<Row[]>()
+      const queryFn = jasmine
+        .createSpy('queryFn')
+        .and.returnValues(load, of(rows()))
+      const { result } = mount(() => ({ queryKey: ['rows'], queryFn }))
+      const first = rows()
+
+      result.refetch()
+      load.next(first)
+      load.complete()
+      flushMicrotasks()
+
+      expect(queryFn).toHaveBeenCalledTimes(2)
+      expect(result.data()).toBe(first)
+    }))
 
     it('merges a response with the data the query holds when it lands, a write made during the fetch included', () => {
       const server = requests<Row[]>()

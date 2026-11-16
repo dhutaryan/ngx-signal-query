@@ -27,7 +27,14 @@ import {
   tick,
 } from '@angular/core/testing'
 import { createApplication } from '@angular/platform-browser'
-import { EMPTY, firstValueFrom, of, Subject, throwError } from 'rxjs'
+import {
+  type Observable,
+  EMPTY,
+  firstValueFrom,
+  of,
+  Subject,
+  throwError,
+} from 'rxjs'
 
 import { mountHost } from '../../spec-helpers/host'
 import { settled } from '../../spec-helpers/promises'
@@ -374,6 +381,27 @@ describe('injectMutation', () => {
       )
       expect(m.failureCount()).toBe(2)
       expect(m.failureReason()).toBe(m.error())
+    }))
+
+    // The response failed the query fetched for the write: the mutationFn
+    // just passes that failure on, and is retried as any failure is.
+    it("retries a failure its mutationFn passes on from a query's fetch", fakeAsync(() => {
+      const user = jasmine
+        .createSpy<() => Observable<string>>('user')
+        .and.returnValues(EMPTY, of('ann'))
+      const m = setup<string, Error, string>(() => ({
+        mutationFn: (title) =>
+          client.fetchQuery(['me'], user).then((me) => `${title} by ${me}`),
+        retry: 1,
+        retryDelay: 10,
+      }))
+
+      m.mutate('Buy milk')
+      tick(10)
+      flushMicrotasks()
+
+      expect(user).toHaveBeenCalledTimes(2)
+      expect(m.data()).toBe('Buy milk by ann')
     }))
   })
 
