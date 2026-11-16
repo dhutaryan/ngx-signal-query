@@ -37,15 +37,17 @@ export function resolveRetryDelay<TError>(
     : retryDelay
 }
 
-// The failure fields of a fetch or a run that ends with `error`. The retries
-// count each failed attempt as it happens, the last one included, so the
-// failure they saw last is the failureReason already and isn't counted
-// twice: a failure a check of a response found, among them (see
-// RetryerConfig.final). Any other failure is one more: one found after the
-// attempts (a structuralSharing function that throws, a mutationFn whose
-// Observable completes empty), or an onMutate that throws. Until a failure
-// is counted, failureReason is null, and an error may be null too: hence
-// the check on the count.
+// The failure fields of a query's fetch or a mutation's run that ends with
+// `error`. Each failed attempt is counted when it comes in, the last one
+// included (see RetryerConfig.onFail). So when the fetch or run ends with the
+// failure of its last attempt, that failure is already the failureReason and
+// isn't counted again. A response that one of the caller's checks rejects is
+// such a failure too (see RetryerConfig.final). Any other failure counts one
+// more: an onMutate that throws before the attempts, or a failure found after
+// them, such as a structuralSharing function that throws or a mutationFn
+// whose Observable completes without a value. The count is checked as well
+// because an error can be null, and failureReason is null until a failure is
+// counted.
 /** @internal */
 export function countFailure<TError>(
   state: { failureCount: number; failureReason: TError | null },
@@ -72,11 +74,13 @@ export interface RetryerConfig<T, TError> {
   // Whether a failure ends the attempts at once: asked when one that isn't
   // final comes in, and again once the wait for the retry is over.
   stopped?: () => boolean
-  // Whether a failure is one another attempt would only bring again, as a
-  // response a check of the caller's rejects: it ends the attempts at once,
-  // counted, and nothing else is asked about it. Only the caller can tell:
-  // the same error may reach other attempts too, those of a query function
-  // that passes it on, which are retried as any failure is.
+  // Whether a failure is one that another attempt would only bring again,
+  // such as a response that one of the caller's checks rejects. Such a
+  // failure is counted and ends the attempts at once: neither `stopped` nor
+  // `retry` is asked about it. Only the caller can tell which failures are
+  // final: the same error object can reach the attempts of another fetch or
+  // of a mutation, through a function that passes it on, and there it is
+  // retried like any other failure.
   final?: (error: TError) => boolean
 }
 

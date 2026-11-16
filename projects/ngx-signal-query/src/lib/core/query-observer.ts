@@ -228,9 +228,13 @@ export function createQueryObserver<TData, TError = Error>(
   }
 
   // How this observer would fetch q right now, and when it wants q
-  // refetched: the same while it is enabled, null while it is disabled. Every
-  // refetch made on our behalf goes by it: through the subscriber below the
-  // invalidation one and the window focus and reconnect ones, and polling.
+  // refetched: what refetchOptionsFor(q) gives while it is enabled, null
+  // while it is disabled. Polling goes by it, and so does every fetch that
+  // the query makes for this observer through the subscriber below: the
+  // refetch that invalidateQueries() or refetchQueries() asks for, one on
+  // window focus or on reconnect, the refetch an invalidation queues during a
+  // first load, and the queryFn of a retry. Only refetch(), and the refetch
+  // it queues, go by the options whether the observer is enabled or not.
   const fetchOptionsFor = (
     q: Query<TData, TError>,
   ): ReturnType<QuerySubscriber<TData, TError>['fetchOptions']> =>
@@ -431,7 +435,7 @@ export function createQueryObserver<TData, TError = Error>(
     // updatedAt only along with data, so it's 0 while there's none.
     dataUpdatedAt: computed(() => query().state().updatedAt),
     status: computed(() => resolved().status),
-    error: computed(() => query().state().error as TError | null),
+    error: computed(() => query().state().error),
     isFetching: computed(() => query().state().isFetching),
     // A fetch in flight with no data to show: the first one, or a new attempt
     // after a failure. An active placeholder counts as data — the UI shows it,
@@ -444,9 +448,7 @@ export function createQueryObserver<TData, TError = Error>(
     isError: computed(() => resolved().status === 'error'),
     isPlaceholderData: computed(() => resolved().isPlaceholderData),
     failureCount: computed(() => query().state().failureCount),
-    failureReason: computed(
-      () => query().state().failureReason as TError | null,
-    ),
+    failureReason: computed(() => query().state().failureReason),
     // Force a fresh fetch regardless of staleTime and enabled (explicit user
     // intent — get current data): a fetch in flight is replaced, or, with no
     // data yet, let land first (see Query#refetch).

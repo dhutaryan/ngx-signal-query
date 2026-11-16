@@ -512,11 +512,12 @@ export class Query<TData, TError = Error, TQueryFnData = TData> {
             failureCount,
             failureReason,
           })),
-        // A failure ends the fetch at once, and so does the end of a wait
-        // for a retry, once the last observer left, as in TanStack, or once
-        // no queryFn fetches this query any more (see #retryQueryFn).
-        // Whoever joins meanwhile hands a queryFn over and clears the flag,
-        // and the retry goes out on time.
+        // The retries stop once the last observer has left (retriesStopped,
+        // as in TanStack) or once no queryFn fetches this query any more (see
+        // #retryQueryFn). From then on, a failure ends the fetch at once, and
+        // so does the end of a wait for a retry. Whoever joins the fetch
+        // meanwhile hands its queryFn over and clears retriesStopped, so the
+        // retry goes out on time.
         stopped: () =>
           inFlight.retriesStopped || this.#retryQueryFn(inFlight) === null,
         final: (error) =>
@@ -739,9 +740,10 @@ export class Query<TData, TError = Error, TQueryFnData = TData> {
   }
 
   // Runs the refetch queued after the fetch that just ended (see
-  // #queuedRefetchArgs). Not if the attempt the fetch ended with started
-  // after the last request, as it read the data after the reason for the
-  // refetch. Whoever asked gets the refetch's outcome, or the fetch's.
+  // #queuedRefetchArgs), unless an attempt that started over began after the
+  // refetch was last asked for: then all the data the fetch lands with was
+  // read after the reason for the refetch (see InFlightFetch.refetchAsked).
+  // Whoever asked gets the refetch's outcome, or the fetch's.
   #refetchIfAsked(inFlight: InFlightFetch<TData, TError, TQueryFnData>): void {
     const queued = inFlight.queuedRefetch
 
