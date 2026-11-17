@@ -10,50 +10,10 @@ import {
 } from 'rxjs'
 
 import { settled } from '../../spec-helpers/promises'
+import { createQuery } from '../../spec-helpers/query'
 import { CancelledError } from './cancelled-error'
-import { type FetchBehavior, Query, type QuerySubscriber } from './query'
-import type { QueryCache } from './query-cache'
-import type { QueryState } from './types'
+import type { FetchBehavior, QuerySubscriber } from './query'
 import { deferred } from './utils'
-
-function createQuery<TData, TError = Error, TQueryFnData = TData>(
-  gcTime = 5 * 60_000,
-) {
-  // Query only calls cache.remove(this) on gc; a stub is enough.
-  const cache = { remove: jasmine.createSpy('remove') }
-  // The app's pending tasks: `held` counts those the query's fetches hold
-  // now. As each is removed, `removals` records the query's state and how
-  // many are still held.
-  const tasks = {
-    held: 0,
-    removals: [] as Array<{ state: QueryState<TData, TError>; held: number }>,
-  }
-  const query: Query<TData, TError, TQueryFnData> = new Query<
-    TData,
-    TError,
-    TQueryFnData
-  >({
-    key: ['key'],
-    queryHash: '["key"]',
-    cache: cache as unknown as QueryCache,
-    gcTime,
-    pendingTasks: {
-      add: () => {
-        tasks.held++
-
-        return () => {
-          tasks.held--
-          tasks.removals.push({ state: query.state(), held: tasks.held })
-        }
-      },
-    },
-    // Angular's zone as an app without zone.js has it: both run what they're
-    // given as is.
-    zone: { run: (fn) => fn(), runOutsideAngular: (fn) => fn() },
-  })
-
-  return { query, cache, tasks }
-}
 
 // An observer that never wants the query fetched, for specs that only count
 // observers.
@@ -61,6 +21,7 @@ function stubObserver(): QuerySubscriber<number> {
   return {
     fetchOptions: () => null,
     refetchOptions: () => null,
+    asksFor: () => true,
     fetches: () => true,
     structuralSharing: () => true,
   }
@@ -92,6 +53,7 @@ function activeObserver(
   return {
     fetchOptions,
     refetchOptions: fetchOptions,
+    asksFor: () => true,
     fetches: () => true,
     structuralSharing: () => true,
   }
@@ -428,15 +390,15 @@ describe('Query', () => {
       const starts: Array<number | undefined> = []
       // What an attempt gives says how many attempts it has seen: they count
       // in the behavior, as one that fetches pages keeps those it has.
-      const behavior: FetchBehavior<number, number> = (data) => {
+      const behavior: FetchBehavior<number, number> = ({ data }) => {
         let attempts = 0
 
         starts.push(data)
 
-        return (request) => {
+        return ({ request }) => {
           attempts++
 
-          return request().pipe(map((value) => value * 10 + attempts))
+          return request()!.pipe(map((value) => value * 10 + attempts))
         }
       }
       let requests = 0
@@ -460,8 +422,14 @@ describe('Query', () => {
     it("hands the query function what the behavior adds for a request, on top of the key and the signal, which it can't replace", () => {
       const { query } = createQuery<number>()
       const contexts: Array<Record<string, unknown>> = []
-      const behavior: FetchBehavior<number, number> = () => (request) =>
-        request({ pageParam: 2, queryKey: ['other'], signal: 'not a signal' })
+      const behavior: FetchBehavior<number, number> =
+        () =>
+        ({ request }) =>
+          request({
+            pageParam: 2,
+            queryKey: ['other'],
+            signal: 'not a signal',
+          })!
 
       query.fetch({
         queryFn: (context) => {
@@ -489,12 +457,14 @@ describe('Query', () => {
       const behavior: FetchBehavior<
         number | undefined,
         Array<number | undefined>
-      > = () => (request) =>
-        request().pipe(
-          concatMap((first) =>
-            request().pipe(map((second) => [first, second])),
-          ),
-        )
+      > =
+        () =>
+        ({ request }) =>
+          request()!.pipe(
+            concatMap((first) =>
+              request()!.pipe(map((second) => [first, second])),
+            ),
+          )
       let requests = 0
 
       query.fetch({
@@ -517,8 +487,10 @@ describe('Query', () => {
     // fails: it never waits on an attempt that ended with nothing.
     it('fails the fetch when an attempt gives no data, with no retry', fakeAsync(() => {
       const { query, tasks } = createQuery<number>()
-      const behavior: FetchBehavior<number, number> = () => (request) =>
-        request().pipe(filter(() => false))
+      const behavior: FetchBehavior<number, number> =
+        () =>
+        ({ request }) =>
+          request()!.pipe(filter(() => false))
       let requests = 0
       const fetched = settled(
         query.fetch({
@@ -544,8 +516,9 @@ describe('Query', () => {
     it('fails the fetch when an attempt gives undefined, with no retry, and keeps the data', fakeAsync(() => {
       const { query } = createQuery<number | undefined, Error, number>()
       const behavior: FetchBehavior<number, number | undefined> =
-        () => (request) =>
-          request().pipe(map(() => undefined))
+        () =>
+        ({ request }) =>
+          request()!.pipe(map(() => undefined))
       const structuralSharing = jasmine
         .createSpy('structuralSharing')
         .and.callFake((_oldData: unknown, newData: number) => newData)
@@ -605,20 +578,20 @@ describe('Query', () => {
       const resuming: FetchBehavior<number, number[]> = () => {
         let kept: number | undefined
 
-        return (request, startOver) => {
+        return ({ request, startOver }) => {
           if (kept !== undefined) {
             const first = kept
 
-            return request().pipe(map((second) => [first, second]))
+            return request()!.pipe(map((second) => [first, second]))
           }
 
           startOver()
 
-          return request().pipe(
+          return request()!.pipe(
             concatMap((first) => {
               kept = first
 
-              return request().pipe(map((second) => [first, second]))
+              return request()!.pipe(map((second) => [first, second]))
             }),
           )
         }
@@ -655,7 +628,7 @@ describe('Query', () => {
         query.fetch({ queryFn, retry: 1, retryDelay: 10, behavior: resuming })
 
         const refetched = settled(
-          query.refetch({ queryFn, behavior: resuming }, 'caller'),
+          query.refetch({ queryFn, behavior: resuming }, { by: 'caller' }),
         )
 
         tick(10)
@@ -669,8 +642,10 @@ describe('Query', () => {
     // A fetch that adds to the data the query holds, as the next page of a
     // list does, makes none of it anew: the data's stale mark stays as it is.
     describe('that goes on from the data the query holds', () => {
-      const appending: FetchBehavior<number, number[]> = (data) => (request) =>
-        request().pipe(map((value) => [...(data ?? []), value]))
+      const appending: FetchBehavior<number, number[]> =
+        ({ data }) =>
+        ({ request }) =>
+          request()!.pipe(map((value) => [...(data ?? []), value]))
 
       it('keeps the stale mark of that data', () => {
         const { query } = createQuery<number[], Error, number>()
@@ -692,6 +667,274 @@ describe('Query', () => {
         expect(query.state().data).toEqual([1, 2])
         expect(query.state().isInvalidated).toBe(false)
       })
+    })
+
+    // Each request after the first one of a fetch picks its query function
+    // anew, as a retry does: a component may have moved on to another key
+    // since the fetch started.
+    describe('whose attempt makes more than one request', () => {
+      // Two requests an attempt, as two pages of a list. When no query
+      // function asks for the key by the second one, the attempt ends with
+      // the first.
+      const twoPages: FetchBehavior<string, string[]> =
+        () =>
+        ({ request, startOver }) => {
+          startOver()
+
+          return request()!.pipe(
+            concatMap((first) => {
+              const second = request()
+
+              return second
+                ? second.pipe(map((page) => [first, page]))
+                : of([first])
+            }),
+          )
+        }
+
+      // A component showing the key ["key"] as id 'a', as its handle answers
+      // the query. Its queryFn reads the id its options ask for when it's
+      // called, as `() => api(this.id())` does. Its first request is answered
+      // by hand, unless `answered` says otherwise; any other at once.
+      function component(
+        name: string,
+        { enabled = true, answered = false } = {},
+      ) {
+        let id = 'a'
+        let destroyed = false
+        const calls: string[] = []
+        const first = deferred<string>()
+        const queryFn = (): Promise<string> => {
+          calls.push(id)
+
+          return calls.length === 1 && !answered
+            ? first.promise
+            : Promise.resolve(`${id} page ${calls.length} from ${name}`)
+        }
+        const handle: QuerySubscriber<string[], Error, string> = {
+          fetchOptions: () =>
+            enabled && !destroyed && id === 'a'
+              ? {
+                  queryFn,
+                  retry: 0,
+                  retryDelay: 0,
+                  structuralSharing: false,
+                  staleTime: 0,
+                  refetchOnWindowFocus: false,
+                  refetchOnReconnect: false,
+                }
+              : null,
+          refetchOptions: () => null,
+          asksFor: () => id === 'a',
+          fetches: () => !destroyed && id === 'a',
+          structuralSharing: () => false,
+        }
+
+        return {
+          handle,
+          queryFn,
+          calls,
+          first,
+          moveTo: (next: string) => (id = next),
+          goAway: () => (destroyed = true),
+        }
+      }
+
+      it('ends the attempt with what it has once no query function asks for the key', fakeAsync(() => {
+        const { query } = createQuery<string[], Error, string>()
+        const shown = component('shown')
+        const watching = component('watching', { enabled: false })
+
+        query.addObserver(shown.handle)
+        query.addObserver(watching.handle)
+
+        const fetched = settled(
+          query.fetch(
+            { queryFn: shown.queryFn, behavior: twoPages },
+            { by: shown.handle },
+          ),
+        )
+
+        // The component moves on to id 'b' before the first page is in.
+        shown.moveTo('b')
+        shown.first.resolve('a page 1 from shown')
+        flushMicrotasks()
+
+        expect(shown.calls).toEqual(['a'])
+        expect(query.state().data).toEqual(['a page 1 from shown'])
+        expect(fetched.value).toEqual(['a page 1 from shown'])
+      }))
+
+      it('makes the next request with the queryFn of an enabled component that shows the key, once the one that asked moved on', fakeAsync(() => {
+        const { query } = createQuery<string[], Error, string>()
+        const moving = component('moving')
+        const staying = component('staying', { answered: true })
+
+        query.addObserver(moving.handle)
+        query.addObserver(staying.handle)
+        query.fetch(
+          { queryFn: moving.queryFn, behavior: twoPages },
+          { by: moving.handle },
+        )
+        moving.moveTo('b')
+        moving.first.resolve('a page 1 from moving')
+        flushMicrotasks()
+
+        expect(moving.calls).toEqual(['a'])
+        expect(staying.calls).toEqual(['a'])
+        expect(query.state().data).toEqual([
+          'a page 1 from moving',
+          'a page 1 from staying',
+        ])
+      }))
+
+      // Once nothing shows the query, a fetch that leaving can't stop runs on
+      // to its end, every request of it: its response is kept for whoever
+      // comes back.
+      it('goes on with the queryFn of a component that went away, which still asks for the key', fakeAsync(() => {
+        const { query } = createQuery<string[], Error, string>()
+        const leaving = component('leaving')
+
+        query.addObserver(leaving.handle)
+        query.fetch(
+          { queryFn: leaving.queryFn, behavior: twoPages },
+          { by: leaving.handle },
+        )
+        leaving.goAway()
+        query.removeObserver(leaving.handle)
+        leaving.first.resolve('a page 1 from leaving')
+        flushMicrotasks()
+
+        expect(leaving.calls).toEqual(['a', 'a'])
+        expect(query.state().data).toEqual([
+          'a page 1 from leaving',
+          'a page 2 from leaving',
+        ])
+      }))
+    })
+  })
+
+  // A fetch that adds a page says which way, and the query keeps it, so every
+  // component that shows the query can tell what the fetch in flight, or the
+  // one that failed, was for.
+  describe('the direction of a fetch', () => {
+    it('is none for a new query', () => {
+      const { query } = createQuery<number>()
+
+      expect(query.state().fetchDirection).toBeNull()
+    })
+
+    it('is recorded as the fetch starts', () => {
+      const { query } = createQuery<number>()
+
+      query.fetch({
+        queryFn: () => new Subject<number>(),
+        direction: 'forward',
+      })
+
+      expect(query.state()).toEqual(
+        jasmine.objectContaining({
+          isFetching: true,
+          fetchDirection: 'forward',
+        }),
+      )
+    })
+
+    it('is kept once the fetch fails', () => {
+      const { query } = createQuery<number>()
+
+      query.setData(1)
+      query.fetch({
+        queryFn: () => throwError(() => new Error('down')),
+        direction: 'backward',
+      })
+
+      expect(query.state()).toEqual(
+        jasmine.objectContaining({
+          status: 'error',
+          isFetching: false,
+          fetchDirection: 'backward',
+        }),
+      )
+    })
+
+    it('is none for a fetch that adds no page', () => {
+      const { query } = createQuery<number>()
+
+      query.fetch({ queryFn: () => of(1), direction: 'forward' })
+      query.fetch({ queryFn: () => new Subject<number>() })
+
+      expect(query.state().fetchDirection).toBeNull()
+    })
+
+    it('goes back to that of the fetch that failed when the next one is stopped with nothing in its place', () => {
+      const { query } = createQuery<number>()
+
+      query.setData(1)
+      query.fetch({
+        queryFn: () => throwError(() => new Error('down')),
+        direction: 'forward',
+      })
+      query.fetch({ queryFn: () => new Subject<number>() })
+      query.cancel()
+
+      expect(query.state()).toEqual(
+        jasmine.objectContaining({
+          status: 'error',
+          isFetching: false,
+          fetchDirection: 'forward',
+        }),
+      )
+    })
+
+    it('is that of the fetch that replaces the one in flight', () => {
+      const { query } = createQuery<number>()
+
+      query.setData(1)
+      query.fetch({
+        queryFn: () => new Subject<number>(),
+        direction: 'forward',
+      })
+      query.fetch(
+        { queryFn: () => new Subject<number>() },
+        { cancelRefetch: true },
+      )
+
+      expect(query.state().fetchDirection).toBeNull()
+    })
+
+    it("isn't changed by a fetch that joins the one in flight", () => {
+      const { query } = createQuery<number>()
+
+      query.fetch({
+        queryFn: () => new Subject<number>(),
+        direction: 'forward',
+      })
+      query.fetch({
+        queryFn: () => new Subject<number>(),
+        direction: 'backward',
+      })
+
+      expect(query.state().fetchDirection).toBe('forward')
+    })
+
+    it('is handed to the behavior, along with the data the query holds', () => {
+      const { query } = createQuery<number>()
+      const starts: Array<Parameters<FetchBehavior<number, number>>[0]> = []
+      const behavior: FetchBehavior<number, number> = (start) => {
+        starts.push(start)
+
+        return ({ request }) => request()!
+      }
+
+      query.setData(1)
+      query.fetch({ queryFn: () => of(2), behavior, direction: 'backward' })
+      query.fetch({ queryFn: () => of(3), behavior })
+
+      expect(starts).toEqual([
+        { data: 1, direction: 'backward' },
+        { data: 2, direction: undefined },
+      ])
     })
   })
 
@@ -1212,7 +1455,7 @@ describe('Query', () => {
       const load = new Subject<number>()
 
       query.fetch({ queryFn: () => load })
-      query.refetch({ queryFn: () => new Subject<number>() }, 'caller')
+      query.refetch({ queryFn: () => new Subject<number>() }, { by: 'caller' })
 
       load.next(1)
       load.complete()
@@ -1232,7 +1475,7 @@ describe('Query', () => {
         .and.returnValue(new Subject<number>())
 
       query.fetch({ queryFn: () => load })
-      query.refetch({ queryFn: refetch }, 'caller')
+      query.refetch({ queryFn: refetch }, { by: 'caller' })
 
       expect(refetch).not.toHaveBeenCalled()
 
@@ -1896,6 +2139,7 @@ describe('Query', () => {
       return {
         fetchOptions: () => null,
         refetchOptions: () => null,
+        asksFor: () => true,
         fetches: () => true,
         structuralSharing: () => sharing,
       }

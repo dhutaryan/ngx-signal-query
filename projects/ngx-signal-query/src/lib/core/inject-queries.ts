@@ -11,6 +11,7 @@ import {
   untracked,
 } from '@angular/core'
 
+import { fetchArgsOf } from './query'
 import { type QueryObserver, createQueryObserver } from './query-observer'
 import type { QueryOptions, QueryResult } from './types'
 import { hashKey } from './utils'
@@ -118,7 +119,11 @@ export function injectQueries<TData, TError = Error>(
       return {
         hash,
         options: optionsSignal,
-        observer: createQueryObserver(() => optionsSignal(), injector),
+        observer: createQueryObserver<TData, TError>(
+          () => optionsSignal(),
+          injector,
+          fetchArgsOf,
+        ),
       }
     })
 

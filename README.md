@@ -18,6 +18,7 @@ A data fetching, caching and mutation library for Angular, built on signals and 
 - ♻️ Invalidation, cancellation and manual cache updates
 - 🔗 Dependent, parallel (`injectQueries`) and disabled queries
 - 🖼️ Seed and placeholder data while a query loads (`initialData`, `placeholderData`, `keepPreviousData`)
+- 📜 Lists that load page by page, for "Load more" and infinite scroll (`injectInfiniteQuery`)
 - 🔁 Retries, polling, and refetch on window focus and reconnect
 - ✏️ Mutations with async lifecycle hooks and optimistic updates
 - 🌍 App-wide defaults and global indicators (`injectIsFetching()`, `injectIsMutating()`)
@@ -25,7 +26,7 @@ A data fetching, caching and mutation library for Angular, built on signals and 
 
 ## Not here (yet)
 
-Infinite queries, devtools and persistence. If you need them today, TanStack Query has them.
+Devtools and persistence. If you need them today, TanStack Query has them.
 
 ## Installation
 

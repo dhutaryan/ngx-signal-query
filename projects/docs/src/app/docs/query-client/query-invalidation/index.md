@@ -9,7 +9,7 @@ Two steps, both right away:
 1. **Mark stale.** The matching queries are flagged — regardless of their `staleTime`. Invalidation overrides it; that's the point.
 2. **Refetch, if anyone's looking.** A query that's currently observed starts refetching in the background — one request, however many components observe it — and keeps its old data visible until the new data lands (`isFetching()` goes `true`, `data()` doesn't blank). A request already in flight is cancelled and restarted, since it may have read the data before the change. While the query has no data yet, as on its first load, the request in flight is let land and show instead, and the query refetches once right after it, however many invalidations come meanwhile (a retry that already went out after them takes the refetch's place): restarting it would keep the loading state on longer, and for good while invalidations come faster than the server answers. The refetch is dropped if that load is cancelled or removed, or if by then no enabled component shows the query; the stale mark stays. A query nobody is observing just keeps the stale mark and refetches the next time a component uses it. A fetch of it that was already running still lands, but the query stays marked, as that data may predate the change: a component that starts using the query meanwhile waits for that fetch, and the query refetches the next time stale data would.
 
-So it's cheap: nothing hits the network unless it's actually needed on screen.
+So it's cheap: nothing hits the network unless it's actually needed on screen. An [infinite query](/queries/infinite-queries#how-a-refetch-works) refetches every page it holds, one after the other.
 
 ## Choosing what to invalidate
 

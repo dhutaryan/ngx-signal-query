@@ -253,7 +253,9 @@ export class QueryClient {
       // call's options.
       const args = fetchArgsOf(defaulted)
 
-      return cancelRefetch ? query.refetch(args, 'caller') : query.fetch(args)
+      return cancelRefetch
+        ? query.refetch(args, { by: 'caller' })
+        : query.fetch(args)
     })
   }
 

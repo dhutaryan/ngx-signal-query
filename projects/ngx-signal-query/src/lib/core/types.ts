@@ -47,6 +47,112 @@ export type QueryFunction<TData, TQueryKey extends QueryKey = QueryKey> = {
 }['queryFn']
 
 /**
+ * What the query function of an infinite query is called with: the query's
+ * key and an abort signal, as for any query (see {@link QueryFunctionContext}),
+ * and the param of the page to fetch.
+ */
+export type InfiniteQueryFunctionContext<
+  TQueryKey extends QueryKey = QueryKey,
+  TPageParam = unknown,
+> = QueryFunctionContext<TQueryKey> & {
+  /**
+   * The param of the page to fetch: `initialPageParam` for the first page,
+   * then what `getNextPageParam` or `getPreviousPageParam` gives (see
+   * {@link InfinitePageOptions}).
+   */
+  pageParam: TPageParam
+}
+
+/**
+ * Fetches one page of an infinite query as an `Observable` or a `Promise`.
+ * It's called with the query's key, an abort signal and the page's param
+ * (see {@link InfiniteQueryFunctionContext}); a function that needs none of
+ * them can take no parameters.
+ */
+export type InfiniteQueryFunction<
+  TPage,
+  TQueryKey extends QueryKey = QueryKey,
+  TPageParam = unknown,
+> = {
+  // Declared as a method, as QueryFunction is: a definition whose key or
+  // param has a narrower type still fits where any is expected.
+  queryFn(
+    context: InfiniteQueryFunctionContext<TQueryKey, TPageParam>,
+  ): Observable<TPage> | Promise<TPage>
+}['queryFn']
+
+/**
+ * The data of an infinite query: the pages fetched so far, in order, and the
+ * param each one was fetched with, at the same index.
+ */
+export interface InfiniteData<TPage, TPageParam = unknown> {
+  /** The pages, in the order they're shown. */
+  pages: TPage[]
+  /** The param each page was fetched with: `pageParams[i]` for `pages[i]`. */
+  pageParams: TPageParam[]
+}
+
+/**
+ * Gives the param of the page after the last one, from that page, all the
+ * pages, the last page's param and all the params; `null` or `undefined`
+ * when there is no next page.
+ */
+export type GetNextPageParamFunction<TPageParam, TPage = unknown> = (
+  lastPage: TPage,
+  allPages: TPage[],
+  lastPageParam: TPageParam,
+  allPageParams: TPageParam[],
+) => TPageParam | null | undefined
+
+/**
+ * Gives the param of the page before the first one, from that page, all the
+ * pages, the first page's param and all the params; `null` or `undefined`
+ * when there is no previous page.
+ */
+export type GetPreviousPageParamFunction<TPageParam, TPage = unknown> = (
+  firstPage: TPage,
+  allPages: TPage[],
+  firstPageParam: TPageParam,
+  allPageParams: TPageParam[],
+) => TPageParam | null | undefined
+
+/**
+ * How an infinite query pages: the param its first page is fetched with,
+ * how the params of the pages around those it holds are found, and how many
+ * pages it keeps.
+ */
+export interface InfinitePageOptions<TPage, TPageParam> {
+  /**
+   * The param the first page is fetched with while the query holds no
+   * pages. Once it holds some, a refetch starts from the first page's own
+   * param, whatever it is, `null` included.
+   */
+  initialPageParam: TPageParam
+  /**
+   * Gives the param of the next page, or `null` or `undefined` when there is
+   * none. A refetch uses it too: it fetches each page after the first with
+   * the param this gives for the page just fetched, as many pages as the
+   * query held, and stops early when there is no next one.
+   */
+  getNextPageParam: GetNextPageParamFunction<TPageParam, TPage>
+  /**
+   * Gives the param of the page before the first one, or `null` or
+   * `undefined` when there is none. Without it, there is no previous page.
+   */
+  getPreviousPageParam?: GetPreviousPageParamFunction<TPageParam, TPage>
+  /**
+   * How many pages the query keeps: a page added past it drops pages at the
+   * other end, down to that many, and a refetch fetches the pages kept.
+   * Lowered while the query holds more, it takes effect as the next page
+   * comes, or with a refetch, which fetches the pages held and keeps the last
+   * of them. Unset, or not above `0`, it keeps them all. Give
+   * `getPreviousPageParam` along with it, or the pages dropped from the start
+   * can't be fetched again.
+   */
+  maxPages?: number
+}
+
+/**
  * Lifecycle status of a query: no data yet (the first load, or a new attempt
  * after a failure), resolved, or failed.
  */
@@ -67,9 +173,10 @@ export interface QueryState<TData, TError = Error> {
   /** Whether a fetch is currently in flight. */
   isFetching: boolean
   /**
-   * Whether the query has been marked stale via `invalidateQueries`. Data
-   * requested after the invalidation clears it as it lands, and so does a
-   * `setQueryData` write.
+   * Whether the query has been marked stale via `invalidateQueries`. A fetch
+   * that gets all of the query's data again after the invalidation clears it
+   * as it lands, and so does a `setQueryData` write. A page that an infinite
+   * query adds to pages read before the invalidation doesn't.
    */
   isInvalidated: boolean
   /** Number of consecutive failed attempts in the current fetch. */
@@ -245,8 +352,8 @@ export type QueryOptions<
    * or a function of the previous query's data (see {@link keepPreviousData}).
    * Unlike `initialData` it is never written to the cache: the query stays
    * `'pending'` underneath, and `isPlaceholderData` is `true` while shown. It
-   * has the data type `queryFn` gives: a placeholder that doesn't fit is an
-   * error, not a wider `data()`.
+   * has the query's data type: a placeholder that doesn't fit is an error,
+   * not a wider `data()`.
    */
   placeholderData?: NoInfer<TData> | PlaceholderDataFunction<NoInfer<TData>>
   /** Timestamp (ms) for `initialData`; older data is considered stale. */
@@ -255,7 +362,7 @@ export type QueryOptions<
    * Whether new data keeps the parts of the cached data that didn't change,
    * so `data()` keeps its reference when a refetch brings the same data.
    * Default `true`; turn it off for large responses refetched often. A
-   * function merges data of the type `queryFn` gives. See
+   * function merges data of the query's data type. See
    * {@link StructuralSharingValue}.
    */
   structuralSharing?: StructuralSharingValue<NoInfer<TData>>
@@ -265,13 +372,17 @@ export type QueryOptions<
 
 /**
  * {@link QueryOptions} with defaults resolved (internal, set by {@link QueryClient}).
+ * `TQueryFnData` is what `queryFn` gives: the data itself, unless a fetch
+ * makes the data out of several responses, such as the pages of a list.
  *
  * @internal
  */
-export type DefaultedQueryOptions<TData, TError = Error> = QueryOptions<
+export type DefaultedQueryOptions<
   TData,
-  TError
-> & {
+  TError = Error,
+  TQueryFnData = TData,
+> = Omit<QueryOptions<TData, TError>, 'queryFn'> & {
+  queryFn: QueryFunction<TQueryFnData>
   staleTime: number
   gcTime: number
   retry: RetryValue<TError>
@@ -336,6 +447,94 @@ export type QueryResult<TData, TError = Error> = {
    * it's done. It never rejects: a failure shows in `error`.
    */
   refetch: () => Promise<{ data: TData | undefined; error: TError | null }>
+}
+
+/**
+ * Configuration for an infinite query, passed to {@link injectInfiniteQuery}
+ * / {@link infiniteQueryOptions}: those of a query (see {@link QueryOptions}),
+ * whose data is the pages (see {@link InfiniteData}), and how it pages (see
+ * {@link InfinitePageOptions}).
+ */
+export type InfiniteQueryOptions<
+  TPage,
+  TError = Error,
+  TQueryKey extends QueryKey = QueryKey,
+  TPageParam = unknown,
+> = Omit<
+  QueryOptions<InfiniteData<TPage, TPageParam>, TError, TQueryKey>,
+  'queryFn'
+> &
+  InfinitePageOptions<TPage, TPageParam> & {
+    /**
+     * Fetches one page as an `Observable` or `Promise`, given the query's
+     * key, an abort signal and the page's param (see
+     * {@link InfiniteQueryFunctionContext}). Return `null` for a page with no
+     * data: `undefined` fails the fetch, with no retry. Otherwise it behaves
+     * as a query's `queryFn` does, page by page (see {@link QueryOptions}).
+     */
+    queryFn: InfiniteQueryFunction<TPage, TQueryKey, TPageParam>
+  }
+
+/**
+ * Reactive result returned by {@link injectInfiniteQuery}: a query's result
+ * (see {@link QueryResult}), whose data is the pages, and what fetches the
+ * pages around them. Every field but the functions is a signal.
+ */
+export type InfiniteQueryResult<
+  TPage,
+  TError = Error,
+  TPageParam = unknown,
+> = QueryResult<InfiniteData<TPage, TPageParam>, TError> & {
+  /**
+   * Fetches the page after the last one, with the param `getNextPageParam`
+   * gives, and adds it to the pages. A fetch of the query already in flight
+   * is waited for instead, and no page is added: call it again once that
+   * one is done. With no next page it does nothing, and with no pages yet it
+   * fetches the first one. Resolves with `data` and `error` as the signals
+   * hold them once done; it never rejects: a failure shows in `error`.
+   */
+  fetchNextPage: () => Promise<{
+    data: InfiniteData<TPage, TPageParam> | undefined
+    error: TError | null
+  }>
+  /**
+   * Fetches the page before the first one, with the param
+   * `getPreviousPageParam` gives, and adds it to the pages, as
+   * `fetchNextPage()` does the next one.
+   */
+  fetchPreviousPage: () => Promise<{
+    data: InfiniteData<TPage, TPageParam> | undefined
+    error: TError | null
+  }>
+  /**
+   * Whether there is a page after the last one: `getNextPageParam` gives a
+   * param for it. `false` while there are no pages.
+   */
+  hasNextPage: Signal<boolean>
+  /**
+   * Whether there is a page before the first one: `getPreviousPageParam`
+   * gives a param for it. `false` while there are no pages, and without
+   * `getPreviousPageParam`.
+   */
+  hasPreviousPage: Signal<boolean>
+  /** Whether the fetch in flight is that of the next page. */
+  isFetchingNextPage: Signal<boolean>
+  /** Whether the fetch in flight is that of the previous page. */
+  isFetchingPreviousPage: Signal<boolean>
+  /**
+   * Whether the query failed fetching the next page: `isError()` is `true`,
+   * and the pages it had stay. Also `true` while the next page loads with
+   * the query still in `'error'`, until that fetch lands, as `isError()` is:
+   * check `isFetchingNextPage()` first.
+   */
+  isFetchNextPageError: Signal<boolean>
+  /**
+   * Whether the query failed fetching the previous page: `isError()` is
+   * `true`, and the pages it had stay. Also `true` while the previous page
+   * loads with the query still in `'error'`, until that fetch lands, as
+   * `isError()` is: check `isFetchingPreviousPage()` first.
+   */
+  isFetchPreviousPageError: Signal<boolean>
 }
 
 /** Default query options applied to every query unless overridden per-query. */
