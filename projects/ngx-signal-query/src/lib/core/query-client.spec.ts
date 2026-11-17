@@ -21,6 +21,11 @@ import {
 import { createApplication } from '@angular/platform-browser'
 import { Observable, of, Subject, throwError } from 'rxjs'
 
+import { mountHost } from '../../spec-helpers/host'
+import {
+  goOfflineAndBack,
+  leaveAndComeBack,
+} from '../../spec-helpers/page-events'
 import { settled } from '../../spec-helpers/promises'
 import { appIsStable } from '../../spec-helpers/stability'
 import { provideZonelessChangeDetection } from '../../spec-helpers/zoneless'
@@ -251,6 +256,34 @@ describe('QueryClient', () => {
       // The first try, then 5 retries 100 ms apart.
       expect(sent).toEqual([0, 100, 200, 300, 400, 500])
     }))
+
+    it('applies the configured staleTime in query()', () => {
+      const queryFn = jasmine.createSpy('queryFn').and.returnValue(of(1))
+
+      client.query({ queryKey: ['n'], queryFn })
+      client.query({ queryKey: ['n'], queryFn })
+
+      // staleTime 1234 keeps the data fresh, so no second fetch.
+      expect(queryFn).toHaveBeenCalledTimes(1)
+    })
+
+    it('applies the configured retry and retryDelay in query()', fakeAsync(() => {
+      const start = Date.now()
+      const sent: number[] = []
+
+      client.query({
+        queryKey: ['n'],
+        queryFn: () => {
+          sent.push(Date.now() - start)
+
+          return throwError(() => new Error('down'))
+        },
+      })
+      tick(1_000)
+
+      // The first try, then 5 retries 100 ms apart.
+      expect(sent).toEqual([0, 100, 200, 300, 400, 500])
+    }))
   })
 
   describe('setQueryData / getQueryData', () => {
@@ -330,6 +363,394 @@ describe('QueryClient', () => {
     })
   })
 
+  // query() takes a query's options as they are, such as a queryOptions()
+  // definition: what fetching the query needs comes from them, and what only
+  // a component does with a query doesn't apply.
+  describe('query', () => {
+    it("doesn't refetch data that's fresh for the options' staleTime", fakeAsync(() => {
+      const queryFn = jasmine.createSpy('queryFn').and.returnValue(of(1))
+      const todos = { queryKey: ['todos'], queryFn, staleTime: 60_000 }
+
+      client.query(todos)
+      tick(59_999)
+
+      const result = settled(client.query(todos))
+
+      flushMicrotasks()
+
+      expect(queryFn).toHaveBeenCalledTimes(1)
+      expect(result.value).toBe(1)
+    }))
+
+    it("removes a query nobody shows the options' gcTime after its fetch lands", fakeAsync(() => {
+      client.query({
+        queryKey: ['todos'],
+        queryFn: () => of('v1'),
+        gcTime: 1000,
+      })
+
+      tick(999)
+      expect(client.getQueryData(['todos'])).toBe('v1')
+
+      tick(1)
+      expect(client.getQueryData(['todos'])).toBeUndefined()
+    }))
+
+    it('retries a failing fetch as the options say', fakeAsync(() => {
+      const start = Date.now()
+      const sent: number[] = []
+
+      client.query({
+        queryKey: ['n'],
+        queryFn: () => {
+          sent.push(Date.now() - start)
+
+          return throwError(() => new Error('down'))
+        },
+        retry: 2,
+        retryDelay: 10,
+      })
+      tick(60_000)
+
+      expect(sent).toEqual([0, 10, 20])
+    }))
+
+    it("doesn't retry a failing fetch unless asked", fakeAsync(() => {
+      const start = Date.now()
+      const sent: number[] = []
+
+      client.query({
+        queryKey: ['n'],
+        queryFn: () => {
+          sent.push(Date.now() - start)
+
+          return throwError(() => new Error('down'))
+        },
+      })
+      tick(60_000)
+
+      expect(sent).toEqual([0])
+    }))
+
+    it("doesn't retry with retry: undefined written out, as with none", fakeAsync(() => {
+      const start = Date.now()
+      const sent: number[] = []
+
+      client.query({
+        queryKey: ['n'],
+        queryFn: () => {
+          sent.push(Date.now() - start)
+
+          return throwError(() => new Error('down'))
+        },
+        retry: undefined,
+      })
+      tick(60_000)
+
+      expect(sent).toEqual([0])
+    }))
+
+    it("waits out the retries of a fetch it joins, such as a component's", fakeAsync(() => {
+      const start = Date.now()
+      const sent: number[] = []
+      const failing = (): Observable<string> => {
+        sent.push(Date.now() - start)
+
+        return throwError(() => new Error('down'))
+      }
+      const { fixture } = mountHost(() =>
+        injectQuery(() => ({
+          queryKey: ['todos'],
+          queryFn: failing,
+          retry: 2,
+          retryDelay: 100,
+        })),
+      )
+      const result = settled(
+        client.query({ queryKey: ['todos'], queryFn: failing }),
+      )
+
+      tick(199)
+      expect(result).toEqual({})
+
+      tick(1)
+      expect(result.error).toEqual(new Error('down'))
+      expect(sent).toEqual([0, 100, 200])
+
+      fixture.destroy()
+    }))
+
+    // A call that fails before any fetch settles its promise all the same,
+    // so a caller that handles the promise hears of it there.
+    it('rejects, rather than throwing, when an initialData function throws', fakeAsync(() => {
+      const error = new Error('boom')
+      let result: { value?: string; error?: unknown } = {}
+
+      expect(() => {
+        result = settled(
+          client.query({
+            queryKey: ['todos'],
+            queryFn: () => of('v1'),
+            initialData: (): string => {
+              throw error
+            },
+          }),
+        )
+      }).not.toThrow()
+      flushMicrotasks()
+
+      expect(result.error).toBe(error)
+    }))
+
+    it("rejects, rather than throwing, when the key can't be hashed", fakeAsync(() => {
+      let result: { value?: string; error?: unknown } = {}
+
+      expect(() => {
+        result = settled(
+          client.query({ queryKey: ['todo', 1n], queryFn: () => of('v1') }),
+        )
+      }).not.toThrow()
+      flushMicrotasks()
+
+      expect(result.error).toBeInstanceOf(TypeError)
+    }))
+
+    it("stores the response as is with the options' structuralSharing: false", () => {
+      client.setQueryData(['n'], { id: 1, tags: ['a'] })
+
+      const cached = client.getQueryData(['n'])
+
+      client.query({
+        queryKey: ['n'],
+        queryFn: () => of({ id: 1, tags: ['a'] }),
+        structuralSharing: false,
+      })
+
+      expect(client.getQueryData(['n'])).not.toBe(cached)
+      expect(client.getQueryData(['n'])).toEqual({ id: 1, tags: ['a'] })
+    })
+
+    it('waits for a fetch of the key in flight rather than fetching again', fakeAsync(() => {
+      const response = new Subject<string>()
+      const second = jasmine.createSpy('second')
+
+      client.query({ queryKey: ['todos'], queryFn: () => response })
+
+      const result = settled(
+        client.query({ queryKey: ['todos'], queryFn: second }),
+      )
+
+      response.next('v1')
+      response.complete()
+      flushMicrotasks()
+
+      expect(result.value).toBe('v1')
+      expect(second).not.toHaveBeenCalled()
+    }))
+
+    it("fetches whatever the options' enabled says", () => {
+      const queryFn = jasmine.createSpy('queryFn').and.returnValue(of('v1'))
+
+      client.query({ queryKey: ['todos'], queryFn, enabled: false })
+
+      expect(queryFn).toHaveBeenCalledTimes(1)
+      expect(client.getQueryData(['todos'])).toBe('v1')
+    })
+
+    it("doesn't poll with the options' refetchInterval", fakeAsync(() => {
+      const queryFn = jasmine.createSpy('queryFn').and.returnValue(of('v1'))
+
+      client.query({ queryKey: ['todos'], queryFn, refetchInterval: 10 })
+      tick(1000)
+
+      expect(queryFn).toHaveBeenCalledTimes(1)
+    }))
+
+    it("doesn't refetch on focus or reconnect, whatever the options say", fakeAsync(() => {
+      const queryFn = jasmine.createSpy('queryFn').and.returnValue(of('v1'))
+
+      client.query({
+        queryKey: ['todos'],
+        queryFn,
+        refetchOnWindowFocus: 'always',
+        refetchOnReconnect: 'always',
+      })
+      leaveAndComeBack()
+      goOfflineAndBack()
+
+      expect(queryFn).toHaveBeenCalledTimes(1)
+    }))
+
+    it("leaves the options' placeholderData out of the cache", () => {
+      client.query({
+        queryKey: ['todos'],
+        queryFn: () => new Subject<string>(),
+        placeholderData: 'placeholder',
+      })
+
+      expect(client.getQueryData(['todos'])).toBeUndefined()
+    })
+
+    // As for a component showing the key: initialData seeds a key with no
+    // data, and staleTime decides whether the seed is fetched over.
+    describe('with initialData', () => {
+      it('resolves with it, without a request, while it is fresh', fakeAsync(() => {
+        const queryFn = jasmine.createSpy('queryFn').and.returnValue(of('v1'))
+        const result = settled(
+          client.query({
+            queryKey: ['todos'],
+            queryFn,
+            initialData: 'seed',
+            staleTime: 60_000,
+          }),
+        )
+
+        flushMicrotasks()
+
+        expect(result.value).toBe('seed')
+        expect(queryFn).not.toHaveBeenCalled()
+        expect(client.getQueryData(['todos'])).toBe('seed')
+      }))
+
+      it('seeds the key, then fetches over the seed once it is stale', fakeAsync(() => {
+        const response = new Subject<string>()
+        const result = settled(
+          client.query({
+            queryKey: ['todos'],
+            queryFn: () => response,
+            initialData: 'seed',
+          }),
+        )
+
+        expect(client.getQueryData(['todos'])).toBe('seed')
+
+        response.next('v1')
+        response.complete()
+        flushMicrotasks()
+
+        expect(result.value).toBe('v1')
+        expect(client.getQueryData(['todos'])).toBe('v1')
+      }))
+
+      it('takes initialDataUpdatedAt as when the seed was fetched', () => {
+        const queryFn = jasmine
+          .createSpy('queryFn')
+          .and.returnValue(new Subject<string>())
+
+        client.query({
+          queryKey: ['todos'],
+          queryFn,
+          initialData: 'seed',
+          initialDataUpdatedAt: Date.now() - 60_000,
+          staleTime: 60_000,
+        })
+
+        // Fetched a minute ago, the seed is stale for a staleTime of a minute.
+        expect(client.getQueryData(['todos'])).toBe('seed')
+        expect(queryFn).toHaveBeenCalledTimes(1)
+      })
+
+      it("seeds nothing when it's a function that gives undefined", fakeAsync(() => {
+        const queryFn = jasmine.createSpy('queryFn').and.returnValue(of('v1'))
+        const result = settled(
+          client.query({
+            queryKey: ['todos'],
+            queryFn,
+            initialData: () => undefined,
+            staleTime: 60_000,
+          }),
+        )
+
+        flushMicrotasks()
+
+        expect(result.value).toBe('v1')
+        expect(queryFn).toHaveBeenCalledTimes(1)
+      }))
+
+      it("doesn't seed a key that holds data", () => {
+        client.setQueryData(['todos'], 'cached')
+        client.query({
+          queryKey: ['todos'],
+          queryFn: () => new Subject<string>(),
+          initialData: 'seed',
+        })
+
+        expect(client.getQueryData(['todos'])).toBe('cached')
+      })
+
+      it("resolves with a fresh seed at once, while the key's first load is in flight", fakeAsync(() => {
+        const load = new Subject<string>()
+        const { fixture } = mountHost(() =>
+          injectQuery(() => ({ queryKey: ['todos'], queryFn: () => load })),
+        )
+        const result = settled(
+          client.query({
+            queryKey: ['todos'],
+            queryFn: () => of('not asked'),
+            initialData: 'seed',
+            staleTime: 60_000,
+          }),
+        )
+
+        flushMicrotasks()
+        expect(result.value).toBe('seed')
+
+        load.next('first')
+        load.complete()
+        expect(client.getQueryData(['todos'])).toBe('first')
+
+        fixture.destroy()
+      }))
+
+      it('seeds a key whose fetch failed before it had any data', fakeAsync(() => {
+        client.query({
+          queryKey: ['todos'],
+          queryFn: () => throwError(() => new Error('down')),
+        })
+        flushMicrotasks()
+
+        const queryFn = jasmine.createSpy('queryFn').and.returnValue(of('v1'))
+        const result = settled(
+          client.query({
+            queryKey: ['todos'],
+            queryFn,
+            initialData: 'seed',
+            staleTime: 60_000,
+          }),
+        )
+
+        flushMicrotasks()
+
+        expect(result.value).toBe('seed')
+        expect(queryFn).not.toHaveBeenCalled()
+      }))
+
+      it("keeps a key it seeds for the options' gcTime, when that's longer than the key's", fakeAsync(() => {
+        // A first load that fails leaves the key with no data, kept for 1 s.
+        client.query({
+          queryKey: ['todos'],
+          queryFn: () => throwError(() => new Error('down')),
+          gcTime: 1000,
+        })
+        flushMicrotasks()
+
+        client.query({
+          queryKey: ['todos'],
+          queryFn: () => of('v1'),
+          initialData: 'seed',
+          staleTime: 60_000,
+          gcTime: 10_000,
+        })
+
+        tick(9_999)
+        expect(client.getQueryData(['todos'])).toBe('seed')
+
+        tick(1)
+        expect(client.getQueryData(['todos'])).toBeUndefined()
+      }))
+    })
+  })
+
   describe('fetchQuery', () => {
     it('populates the cache from the queryFn', () => {
       client.fetchQuery(['n'], () => of(10))
@@ -359,6 +780,16 @@ describe('QueryClient', () => {
 
       expect(queryFn).toHaveBeenCalledTimes(1)
     })
+
+    it('removes a query nobody shows the gcTime it asks for after the fetch lands', fakeAsync(() => {
+      client.fetchQuery(['todos'], () => of('v1'), { gcTime: 1000 })
+
+      tick(999)
+      expect(client.getQueryData(['todos'])).toBe('v1')
+
+      tick(1)
+      expect(client.getQueryData(['todos'])).toBeUndefined()
+    }))
 
     it('dedupes an in-flight fetch without cancelRefetch', () => {
       const first = jasmine
@@ -690,6 +1121,19 @@ describe('QueryClient', () => {
       expect(client.getQueryData(['n'])).toBe(cached)
     })
 
+    it('stores the response as is with structuralSharing: false', () => {
+      client.setQueryData(['n'], { id: 1, tags: ['a'] })
+
+      const cached = client.getQueryData(['n'])
+
+      client.fetchQuery(['n'], () => of({ id: 1, tags: ['a'] }), {
+        structuralSharing: false,
+      })
+
+      expect(client.getQueryData(['n'])).not.toBe(cached)
+      expect(client.getQueryData(['n'])).toEqual({ id: 1, tags: ['a'] })
+    })
+
     it('keeps the cached data when cancelRefetch refetches the same data', () => {
       client.setQueryData(['n'], { id: 1, tags: ['a'] })
 
@@ -737,6 +1181,39 @@ describe('QueryClient', () => {
       expect(fetched.value).toBe(1)
       expect(refetched.value).toBe(2)
       expect(client.isFetching()).toBe(0)
+    }))
+
+    // A whole definition passed as its options, say: only the options
+    // fetchQuery takes reach the fetch, not the definition's initialData, key
+    // or queryFn.
+    it('takes only its own options from an options object that holds a whole definition', fakeAsync(() => {
+      const definition = {
+        queryKey: ['other'],
+        queryFn: () => of('from the definition'),
+        initialData: 'seed',
+        staleTime: 60_000,
+      }
+      const queryFn = jasmine
+        .createSpy('queryFn')
+        .and.returnValue(of('fetched'))
+      const result = settled(client.fetchQuery(['todos'], queryFn, definition))
+
+      flushMicrotasks()
+
+      expect(result.value).toBe('fetched')
+      expect(queryFn).toHaveBeenCalledTimes(1)
+      expect(client.getQueryData(['other'])).toBeUndefined()
+    }))
+
+    it("rejects, rather than throwing, when the key can't be hashed", fakeAsync(() => {
+      let result: { value?: string; error?: unknown } = {}
+
+      expect(() => {
+        result = settled(client.fetchQuery(['todo', 1n], () => of('v1')))
+      }).not.toThrow()
+      flushMicrotasks()
+
+      expect(result.error).toBeInstanceOf(TypeError)
     }))
 
     // A server render and whenStable() wait for it as for a component's

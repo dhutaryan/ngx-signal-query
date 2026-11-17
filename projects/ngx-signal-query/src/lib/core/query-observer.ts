@@ -14,11 +14,12 @@ import {
 import { pageVisibility } from './browser-events'
 import { startPolling } from './polling'
 import { QueryClient } from './query-client'
-import type {
-  FetchArgs,
-  InternalQueryState,
-  Query,
-  QuerySubscriber,
+import {
+  applyInitialData,
+  type FetchArgs,
+  type InternalQueryState,
+  type Query,
+  type QuerySubscriber,
 } from './query'
 import type {
   DefaultedQueryOptions,
@@ -169,45 +170,18 @@ export function createQueryObserver<
       >,
   )
 
-  // Seed a query that has no data yet with initialData so it renders
-  // immediately as 'success': a new one ('pending'), and one whose fetch
-  // failed before it had any ('error'), as in TanStack. Without an explicit
-  // initialDataUpdatedAt the seed is treated as fetched right now, so
-  // staleTime applies to it as it would to any other data (a staleTime of 0
-  // still means "stale immediately" → background refetch). A function that
-  // returns undefined has nothing to seed, so the query loads as it would
-  // without one; it is asked again whenever the key is resolved while the
-  // query still has no data, and seeds it if it has data by then.
-  const applyInitialData = (q: Query<TData, TError, TQueryFnData>): void => {
-    const { initialData, initialDataUpdatedAt } = untracked(defaultedOptions)
-
-    if (initialData === undefined || q.state().data !== undefined) return
-
-    const data =
-      typeof initialData === 'function'
-        ? (initialData as () => TData | undefined)()
-        : initialData
-
-    if (data === undefined) return
-
-    const updatedAt =
-      typeof initialDataUpdatedAt === 'function'
-        ? initialDataUpdatedAt()
-        : (initialDataUpdatedAt ?? Date.now())
-
-    q.setData(data, { updatedAt })
-  }
-
-  // Resolves the query for a key, seeding a fresh one with initialData. It
+  // Resolves the query for a key, seeding one with no data yet with
+  // initialData (see applyInitialData), each time the key is resolved. It
   // writes signals (the cache's entries, the query's state), so callers run it
   // untracked: reached from a computed, a tracked write throws NG0600.
   const resolve = (key: QueryKey): Query<TData, TError, TQueryFnData> => {
+    const options = untracked(defaultedOptions)
     const q = cache.getOrCreate<TData, TError, TQueryFnData>(
       key,
-      untracked(defaultedOptions).gcTime,
+      options.gcTime,
     )
 
-    applyInitialData(q)
+    applyInitialData(q, options)
 
     return q
   }

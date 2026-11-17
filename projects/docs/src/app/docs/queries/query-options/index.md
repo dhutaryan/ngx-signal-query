@@ -98,6 +98,17 @@ client.setQueryData<Todo[]>(
 
 Rename the key in the service and every call site follows. Nothing to grep for.
 
+## Prefetching it
+
+The client's `query()` takes the whole definition, to prefetch it on hover, say, or to wait for its data in a route resolver. What the definition says about fetching applies there too, `staleTime` and `gcTime` included:
+
+```ts
+// Nothing is fetched while the list is fresh for its staleTime
+client.query(queries.list())
+```
+
+See [Manual Cache Updates](/query-client/manual-cache-updates#prefetching-query).
+
 ## Overriding per component
 
 The returned object is plain, so spread it to tweak one option locally:
@@ -109,17 +120,9 @@ protected readonly todos = injectQuery(() => ({
 }))
 ```
 
-## Two rough edges
+## A rough edge
 
-Worth knowing, because they're places where the pattern doesn't fully pay off yet.
-
-**`fetchQuery` takes positional arguments**, not an options object, so you can't hand it a definition wholesale — you have to take it apart:
-
-```ts
-const { queryKey, queryFn, staleTime } = this.#queries.list()
-
-this.#client.fetchQuery(queryKey, queryFn, { staleTime })
-```
+Worth knowing, because it's a place where the pattern doesn't fully pay off yet.
 
 **`getQueryData` won't infer the data type from the key.** Keys are plain arrays and carry no type information, so the generic stays explicit:
 

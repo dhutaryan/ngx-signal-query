@@ -10,7 +10,7 @@ import { onReconnect, onWindowFocus } from './browser-events'
 import { transferCache } from './hydration'
 import { isDestroyed } from './injector'
 import { inBrowser } from './platform'
-import { fetchArgsOf } from './query'
+import { applyInitialData, fetchArgsOf, type Query } from './query'
 import { QueryCache } from './query-cache'
 import { MutationCache } from './mutation-cache'
 import type { MutationOptions } from './mutation'
@@ -158,35 +158,84 @@ export class QueryClient {
   }
 
   /**
-   * Imperatively fetches and caches a query, unless fresh data already exists
-   * (governed by `staleTime`). Prefer {@link injectQuery} in components; use
-   * this to prefetch, from an event handler or an effect, or to wait for the
-   * data, e.g. in a route resolver.
+   * Fetches and caches a query as its options say, unless the cache already
+   * holds fresh data for it (see `staleTime`), and resolves with the data.
+   * Data that was invalidated, or whose last fetch failed, isn't fresh.
+   * Prefer {@link injectQuery} in components; use this to prefetch, from an
+   * event handler or an effect, or to wait for the data, such as in a route
+   * resolver.
+   *
+   * Takes a {@link queryOptions} definition as it is. Its `staleTime`,
+   * `gcTime`, `retry`, `retryDelay` and `structuralSharing` apply, and its
+   * `initialData` seeds a key that holds no data, the way it does for a
+   * component, before `staleTime` decides whether to fetch: a fresh seed
+   * resolves at once, with no request, even while the key's first load is
+   * still in flight. What only a component does with a query doesn't apply:
+   * it fetches whatever `enabled` says, doesn't poll, doesn't refetch on
+   * focus or reconnect, and leaves `placeholderData` out of the cache.
    *
    * Resolves with the data as the cache holds it: at once if it's fresh,
-   * otherwise once the fetch lands. A key already fetching is waited for,
-   * not fetched again, unless `cancelRefetch` is set: then the fetch in
-   * flight is replaced, or, while the key has no data yet, let land, then
-   * fetched once more with this call's `queryFn` and options (the last such
-   * call's, if several came), unless a retry of it already started after
-   * this call. Either way the promise waits for data read after this call,
-   * unless the fetch it waits behind is cancelled, as when the last
-   * component showing the key leaves while its load runs, an `Observable`
-   * or one whose query function read the signal.
-   *
-   * Rejects with the error if the fetch fails. A cancelled fetch resolves
+   * otherwise once the fetch lands. A fetch already in flight is waited for,
+   * not made again, its retries included. Rejects with the error if the
+   * fetch fails, and rejects, rather than throwing, if the key can't be
+   * hashed or an initialData function throws. A cancelled fetch resolves
    * with the data the cache holds, or rejects with a {@link CancelledError}
-   * if it holds none; a removed query always rejects with one. Nothing has to
-   * wait for the promise: a prefetch that fails only leaves the query in
+   * if it holds none; a removed query always rejects with one. Nothing has
+   * to wait for the promise: a prefetch that fails only leaves the query in
    * `'error'`. A server render and `whenStable()` wait for the fetch all the
-   * same, as for a component's query, so its data is in the cache by then.
+   * same, like they do for a component's query, so its data is in the cache
+   * by then.
    *
-   * Unlike a component's query in the browser, it doesn't retry a failure
-   * unless `retry` is set here or in {@link withDefaultOptions}, so whoever
-   * waits for the data hears of the failure at once.
+   * Unlike a component's query in the browser, a fetch it starts doesn't
+   * retry a failure unless `retry` is set in the options or in
+   * {@link withDefaultOptions}, so whoever waits for the data hears of the
+   * failure at once.
    *
    * A query no component shows is removed `gcTime` after the fetch lands (the
-   * configured default, or 5 minutes), as any unused query is.
+   * options', else the configured default, else 5 minutes), like any unused
+   * query is.
+   *
+   * @typeParam TData - Type of the data resolved by `queryFn`.
+   * @typeParam TError - Type of the error thrown by `queryFn`.
+   * @typeParam TQueryKey - Type of `queryKey`, which `queryFn` gets the key
+   *   with.
+   * @param options - The query's {@link QueryOptions}, such as a
+   *   {@link queryOptions} definition. To change one of them for this call,
+   *   spread the definition: `{ ...queries.detail(id), staleTime: 30_000 }`.
+   * @returns A promise of the data.
+   *
+   * @example
+   * ```ts
+   * export const todoResolver: ResolveFn<Todo> = (route) => {
+   *   const id = Number(route.paramMap.get('id'))
+   *
+   *   return injectQueryClient().query(inject(TodoQueries).detail(id))
+   * }
+   * ```
+   */
+  query<TData, TError = Error, TQueryKey extends QueryKey = QueryKey>(
+    options: QueryOptions<TData, TError, TQueryKey>,
+  ): Promise<TData> {
+    return this.#fetch(options)
+  }
+
+  /**
+   * Fetches and caches a query the way {@link QueryClient.query} does, with
+   * its key, its query function and its options apart. For a
+   * {@link queryOptions} definition, prefer `query()`: taking it apart keeps
+   * only what's passed on, and there's no place here for its `initialData`.
+   *
+   * Takes `staleTime`, `gcTime`, `retry`, `retryDelay` and
+   * `structuralSharing`, and resolves, rejects, retries and caches the way
+   * `query()` does. A key already fetching is waited for, not fetched again,
+   * unless `cancelRefetch` is set: then the fetch in flight is replaced, or,
+   * while the key has no data yet, let land, then fetched once more with this
+   * call's `queryFn` and options (the last such call's, if several came),
+   * unless a retry of it already started after this call. Either way the
+   * promise waits for data read after this call, unless the fetch it waits
+   * behind is cancelled, as when the last component showing the key leaves
+   * while its load runs, an `Observable` or one whose query function read
+   * the signal.
    *
    * @typeParam TData - Type of the data resolved by `queryFn`.
    * @typeParam TQueryKey - Type of `key`, which `queryFn` gets the key with.
@@ -195,8 +244,8 @@ export class QueryClient {
    *   `Promise`, given the key and an abort signal (see
    *   {@link QueryFunctionContext}). Return `null` for no data: `undefined`
    *   fails the fetch.
-   * @param options - Fetch tuning (`staleTime`, `retry`, `retryDelay`,
-   *   `structuralSharing`, `cancelRefetch`).
+   * @param options - Fetch tuning (`staleTime`, `gcTime`, `retry`,
+   *   `retryDelay`, `structuralSharing`, `cancelRefetch`).
    * @returns A promise of the data.
    *
    * @example
@@ -216,6 +265,7 @@ export class QueryClient {
     queryFn: QueryFunction<TData, TQueryKey>,
     options: {
       staleTime?: number
+      gcTime?: number
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       retry?: RetryValue<any>
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -224,39 +274,31 @@ export class QueryClient {
       cancelRefetch?: boolean
     } = {},
   ): Promise<TData> {
-    return untracked(() => {
-      // Resolved as a query's options are, so one set of defaults serves
-      // both, except that a failure isn't retried unless asked: whoever waits
-      // for the data hears of it at once. cancelRefetch is about this call,
-      // not an option of the query.
-      const { cancelRefetch, ...queryOptions } = options
-      const defaulted = this.defaultQueryOptions<TData>({
-        ...queryOptions,
+    // Only the options it takes reach the fetch, whatever else an options
+    // object built elsewhere holds, such as a whole definition with its
+    // initialData. cancelRefetch is about this call, not an option of the
+    // query.
+    const {
+      cancelRefetch,
+      staleTime,
+      gcTime,
+      retry,
+      retryDelay,
+      structuralSharing,
+    } = options
+
+    return this.#fetch<TData>(
+      {
         queryKey: key,
         queryFn,
-        retry:
-          queryOptions.retry ??
-          this.#config.defaultOptions?.queries?.retry ??
-          false,
-      })
-      const query = this.#cache.getOrCreate<TData>(key, defaulted.gcTime)
-
-      // A query already in the cache keeps this call's gcTime if it's
-      // longer, as it does for each component showing it.
-      query.updateGcTime(defaulted.gcTime)
-
-      if (!query.shouldFetch(defaulted.staleTime)) {
-        return Promise.resolve(query.state().data as TData)
-      }
-
-      // A refetch asked for by a caller, not a component: run with this
-      // call's options.
-      const args = fetchArgsOf(defaulted)
-
-      return cancelRefetch
-        ? query.refetch(args, { by: 'caller' })
-        : query.fetch(args)
-    })
+        staleTime,
+        gcTime,
+        retry,
+        retryDelay,
+        structuralSharing,
+      },
+      cancelRefetch,
+    )
   }
 
   /**
@@ -489,6 +531,69 @@ export class QueryClient {
     return untracked(
       () => this.#mutationCache.findAll({ status: 'pending' }).length,
     )
+  }
+
+  /**
+   * Fetches and caches a query with its options, for query() and
+   * fetchQuery(), unless its data is fresh: the options are resolved like a
+   * component's, except that a failure isn't retried unless they or the app
+   * ask, and the query is seeded with initialData first. With cancelRefetch,
+   * a fetch in flight is replaced rather than waited for (see Query#refetch).
+   *
+   * @internal
+   */
+  #fetch<TData, TError = Error>(
+    options: QueryOptions<TData, TError>,
+    cancelRefetch = false,
+  ): Promise<TData> {
+    return untracked(() => {
+      // Resolved like a query's options are, so one set of defaults serves
+      // both, except that a failure isn't retried unless asked: whoever waits
+      // for the data hears of it at once.
+      const defaulted = this.defaultQueryOptions<TData, TError>({
+        ...options,
+        retry:
+          options.retry ?? this.#config.defaultOptions?.queries?.retry ?? false,
+      })
+      let query: Query<TData, TError>
+
+      // A key that can't be hashed, or an initialData function that throws,
+      // rejects the promise rather than throwing from the call, so a caller
+      // that handles the promise hears of it there. Unlike a failed fetch,
+      // nothing else shows it: left alone, it's an unhandled rejection. An
+      // error from starting the fetch below still throws, such as Angular's
+      // NG0200 while the app's ErrorHandler is being created, like it does
+      // for an effect created there.
+      try {
+        query = this.#cache.getOrCreate<TData, TError>(
+          defaulted.queryKey,
+          defaulted.gcTime,
+        )
+
+        // A query already in the cache keeps this call's gcTime if it's
+        // longer, like it does for each component showing it. Before the
+        // seed: a query nobody shows is kept for that long after it's
+        // written.
+        query.updateGcTime(defaulted.gcTime)
+        // Seeded before staleTime decides whether to fetch, like for a
+        // component: a fresh seed isn't fetched over.
+        applyInitialData(query, defaulted)
+      } catch (error) {
+        return Promise.reject(error)
+      }
+
+      if (!query.shouldFetch(defaulted.staleTime)) {
+        return Promise.resolve(query.state().data as TData)
+      }
+
+      // A fetch asked for by a caller, not a component: it runs with this
+      // call's options.
+      const args = fetchArgsOf(defaulted)
+
+      return cancelRefetch
+        ? query.refetch(args, { by: 'caller' })
+        : query.fetch(args)
+    })
   }
 
   /**

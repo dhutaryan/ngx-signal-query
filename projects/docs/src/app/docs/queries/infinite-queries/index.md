@@ -274,7 +274,7 @@ export class TodoQueries {
 
 ## Not here yet
 
-The client can't prefetch an infinite list yet: `fetchQuery()` fetches a plain query, and called with an infinite list's key it stores one page as the list's data, which the list then fails to read. And `injectQueries` runs plain queries only.
+The client can't prefetch an infinite list yet: `query()` takes a plain query's options, so an infinite list's definition doesn't compile there, and `fetchQuery()` called with the list's key stores one page as the list's data, which the list then fails to read. And `injectQueries` runs plain queries only.
 
 ## A note if you're coming from TanStack Query
 

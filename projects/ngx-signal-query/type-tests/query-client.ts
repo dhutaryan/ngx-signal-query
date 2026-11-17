@@ -1,9 +1,16 @@
 // Type tests for QueryClient: compiled by `pnpm test:types`, never run.
 import type { HttpClient } from '@angular/common/http'
 import { expectTypeOf } from 'expect-type'
-import { queryOptions, type QueryClient } from 'ngx-signal-query'
+import {
+  infiniteQueryOptions,
+  keepPreviousData,
+  queryOptions,
+  type QueryClient,
+} from 'ngx-signal-query'
 
 type Todo = { id: number; title: string; done: boolean }
+type TodoPage = { todos: Todo[]; nextCursor: number | null }
+type ApiError = { status: number }
 
 declare const http: HttpClient
 declare const id: number
@@ -110,3 +117,113 @@ const todoQuery = queryOptions({
 expectTypeOf(
   client.fetchQuery(todoQuery.queryKey, todoQuery.queryFn),
 ).resolves.toEqualTypeOf<Todo>()
+
+// query()
+
+// A definition goes in as it is, the options that only a component uses
+// included, and the promise has its data type.
+const list = queryOptions({
+  queryKey: ['todos'],
+  queryFn: () => http.get<Todo[]>('/api/todos'),
+  staleTime: 30_000,
+  placeholderData: keepPreviousData,
+})
+
+expectTypeOf(client.query(list)).resolves.toEqualTypeOf<Todo[]>()
+
+// So does one with an option changed for this call.
+expectTypeOf(
+  client.query({ ...list, staleTime: Infinity }),
+).resolves.toEqualTypeOf<Todo[]>()
+
+// Written in the call, its query function gets the key with the type the key
+// has, and a signal.
+client.query({
+  queryKey: ['todo', id] as const,
+  queryFn: ({ queryKey, signal }) => {
+    expectTypeOf(queryKey).toEqualTypeOf<readonly ['todo', number]>()
+    expectTypeOf(signal).toEqualTypeOf<AbortSignal>()
+
+    return http.get<Todo>(`/api/todos/${queryKey[1]}`)
+  },
+})
+
+// retry and retryDelay get the error with the query's error type.
+const detail = queryOptions<Todo, ApiError>({
+  queryKey: ['todo', id],
+  queryFn: () => http.get<Todo>(`/api/todos/${id}`),
+})
+
+client.query({
+  ...detail,
+  retry: (failureCount, error) => {
+    expectTypeOf(error).toEqualTypeOf<ApiError>()
+
+    return failureCount < 2 && error.status !== 404
+  },
+  retryDelay: (_failureCount, error) => {
+    expectTypeOf(error).toEqualTypeOf<ApiError>()
+
+    return 1_000
+  },
+})
+client.query({
+  ...detail,
+  // @ts-expect-error -- a typo in the error's field
+  retry: (_failureCount, error) => error.statsu !== 404,
+})
+
+// An infinite list's definition doesn't fit: query() fetches a plain query.
+const pages = infiniteQueryOptions({
+  queryKey: ['todos', 'infinite'],
+  queryFn: ({ pageParam }) =>
+    http.get<TodoPage>(`/api/todos?cursor=${pageParam}`),
+  initialPageParam: 0,
+  getNextPageParam: (lastPage) => lastPage.nextCursor,
+})
+
+// @ts-expect-error -- an infinite list's definition
+client.query(pages)
+
+// The generics can be written out.
+expectTypeOf(
+  client.query<Todo>({
+    queryKey: ['todo', id],
+    queryFn: () => http.get<Todo>(`/api/todos/${id}`),
+  }),
+).resolves.toEqualTypeOf<Todo>()
+
+// Written out, the generics leave the error type Error.
+client.query<Todo>({
+  queryKey: ['todo', id],
+  queryFn: () => http.get<Todo>(`/api/todos/${id}`),
+  retry: (_failureCount, error) => {
+    expectTypeOf(error).toEqualTypeOf<Error>()
+
+    return true
+  },
+})
+
+// initialData goes in with the rest of the options.
+expectTypeOf(client.query({ ...list, initialData: [] })).resolves.toEqualTypeOf<
+  Todo[]
+>()
+
+// A query function is needed.
+// @ts-expect-error -- no queryFn
+client.query({ queryKey: ['todos'] })
+
+// cancelRefetch is fetchQuery's, and there's no select.
+// @ts-expect-error -- not an option of query()
+client.query({ ...list, cancelRefetch: true })
+// @ts-expect-error -- no select
+client.query({ ...list, select: (todos: Todo[]) => todos.length })
+
+// fetchQuery takes gcTime, as the client honours it, and only as a number.
+client.fetchQuery(['todos'], () => http.get<Todo[]>('/api/todos'), {
+  gcTime: 60_000,
+})
+client.fetchQuery(['todos'], () => http.get<Todo[]>('/api/todos'), {
+  // @ts-expect-error -- not a number
+  gcTime: '60000',
+})
