@@ -29,7 +29,7 @@ export const appConfig: ApplicationConfig = {
 }
 ```
 
-Once the page is rendered, the server writes every query that succeeded into it, through Angular's `TransferState`. The browser puts them back into the cache before anything can read it, so the first render shows the data, and so does a `fetchQuery()` in a route resolver or an app initializer. It works with Angular's `provideClientHydration()` or without it.
+Once the page is rendered, the server writes every query that succeeded into it, through Angular's `TransferState`. The browser puts them back into the cache before anything can read it, so the first render shows the data, and a `query()` in a route resolver or an app initializer resolves with it while it's fresh for the query's `staleTime`, such as the 30 s above. It works with Angular's `provideClientHydration()` or without it.
 
 A query that failed or never fetched stays on the server, and so does a mutation: the browser fetches the query as it would without a server render.
 

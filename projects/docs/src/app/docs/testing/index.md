@@ -221,7 +221,7 @@ it('adds a todo', async () => {
 })
 ```
 
-A query's `refetch()` and the client's `fetchQuery()` and `invalidateQueries()` return promises too, for a test to await the same way.
+A query's `refetch()` and the client's `query()`, `fetchQuery()` and `invalidateQueries()` return promises too, for a test to await the same way.
 
 ## Test the definitions directly
 

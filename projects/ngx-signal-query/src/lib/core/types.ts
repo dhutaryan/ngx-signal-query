@@ -295,9 +295,9 @@ export type QueryOptions<
    * shows it, no fetch of it is in flight), in ms. Default 5 minutes.
    * `Infinity` keeps it until it's removed, and so does anything over about
    * 24.8 days (2³¹−1 ms), the most a timer can hold. When components showing
-   * it ask for different gcTimes, or fetchQuery asks for the default, the
-   * longest wins for as long as the query stays in the cache. On the server
-   * it's always `Infinity`.
+   * it, `query()` and `fetchQuery()` ask for different gcTimes, the longest
+   * wins for as long as the query stays in the cache. On the server it's
+   * always `Infinity`.
    */
   gcTime?: number
   /**
@@ -344,7 +344,9 @@ export type QueryOptions<
    * Seed data to render immediately (treated as already-resolved). It seeds a
    * query that has no data yet: a new one, or one whose fetch failed before it
    * had any. A function runs only then; returning `undefined` seeds nothing,
-   * so the query loads as it would without it.
+   * so the query loads as it would without it. {@link QueryClient.query}
+   * seeds it too, before `staleTime` decides whether to fetch, so a fresh
+   * seed resolves with no request.
    */
   initialData?: TData | (() => TData | undefined)
   /**
@@ -543,8 +545,8 @@ export interface DefaultQueryOptions {
   staleTime?: number
   /**
    * How long a query stays in the cache once nothing uses it, in ms. Defaults
-   * to 5 minutes. It applies to queries fetchQuery prefetches and setQueryData
-   * writes too.
+   * to 5 minutes. It applies to queries that `query()` and `fetchQuery()`
+   * prefetch and `setQueryData()` writes too.
    */
   gcTime?: number
   /**

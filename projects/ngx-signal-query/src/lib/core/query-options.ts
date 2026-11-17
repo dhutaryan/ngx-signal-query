@@ -4,9 +4,9 @@ import type { QueryKey, QueryOptions } from './types'
  * Identity helper that defines a typed, reusable set of {@link QueryOptions}.
  *
  * Returns the options unchanged at runtime, but anchors type inference so the
- * same definition can be handed to {@link injectQuery} and
- * {@link injectQueries} without re-declaring generics, and its `queryKey`
- * reused wherever the key is needed, such as
+ * same definition can be handed to {@link injectQuery}, {@link injectQueries}
+ * and {@link QueryClient.query} without re-declaring generics, and its
+ * `queryKey` reused wherever the key is needed, such as
  * {@link QueryClient.invalidateQueries}. A key carries no type, though:
  * {@link QueryClient.getQueryData} and {@link QueryClient.setQueryData} still
  * take the data type as a generic. Keeping query definitions in a service

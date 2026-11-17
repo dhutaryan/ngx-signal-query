@@ -201,8 +201,44 @@ export function fetchArgsOf<TData, TError, TQueryFnData = TData>(
   }
 }
 
+/**
+ * Seeds a query that has no data yet with the initialData its options give,
+ * so it shows as 'success' at once: a new query ('pending'), or one whose
+ * fetch failed before it had any data ('error'). Without an
+ * initialDataUpdatedAt, the seed counts as fetched right now, so staleTime
+ * applies to it like it does to any other data: a staleTime of 0 still means
+ * "stale at once". A function that gives undefined has nothing to seed, and
+ * the query loads like it would without one; the function is asked again on
+ * each call while the query has no data, and seeds it once it gives data.
+ *
+ * @internal
+ */
+export function applyInitialData<TData, TError, TQueryFnData>(
+  query: Query<TData, TError, TQueryFnData>,
+  {
+    initialData,
+    initialDataUpdatedAt,
+  }: Pick<QueryOptions<TData, TError>, 'initialData' | 'initialDataUpdatedAt'>,
+): void {
+  if (initialData === undefined || query.state().data !== undefined) return
+
+  const data =
+    typeof initialData === 'function'
+      ? (initialData as () => TData | undefined)()
+      : initialData
+
+  if (data === undefined) return
+
+  const updatedAt =
+    typeof initialDataUpdatedAt === 'function'
+      ? initialDataUpdatedAt()
+      : (initialDataUpdatedAt ?? Date.now())
+
+  query.setData(data, { updatedAt })
+}
+
 // Who asks for a fetch: a component, by the handle it shows the query with,
-// or 'caller', a caller no component owns, as fetchQuery().
+// or 'caller', a caller no component owns, such as query().
 type Asker<TData, TError, TQueryFnData> =
   | QuerySubscriber<TData, TError, TQueryFnData>
   | 'caller'
@@ -212,8 +248,8 @@ type Asker<TData, TError, TQueryFnData> =
 interface QueuedRefetch<TData, TError, TQueryFnData> {
   // Settles the promise that everyone who asked for the refetch shares.
   readonly outcome: Deferred<TData>
-  // What the last caller that isn't a component, as fetchQuery, asked to
-  // fetch with, if one asked.
+  // What the last caller that isn't a component, such as query(), asked
+  // to fetch with, if one asked.
   callerArgs: FetchArgs<TData, TError, TQueryFnData> | undefined
   // The component that asked last by hand, with its refetch(), if one did.
   byHand: QuerySubscriber<TData, TError, TQueryFnData> | undefined
@@ -341,10 +377,11 @@ export class Query<TData, TError = Error, TQueryFnData = TData> {
 
   // Keeps the longest gcTime asked for by anything that used the query, as
   // in TanStack: whoever created it, each component that showed it, each
-  // fetchQuery. A shorter one doesn't cut short a longer one asked for
-  // before. Never below 0. A NaN, such as `Number()` of a missing setting,
-  // keeps the query as Infinity does, but only until the next gcTime
-  // replaces it, as in TanStack: Math.max with a NaN would keep it for good.
+  // query() or fetchQuery() call. A shorter one doesn't cut short a longer
+  // one asked for before. Never below 0. A NaN, such as `Number()` of a
+  // missing setting, keeps the query as Infinity does, but only until the
+  // next gcTime replaces it, as in TanStack: Math.max with a NaN would keep
+  // it for good.
   updateGcTime(ms: number): void {
     this.#gcTime = Math.max(this.#gcTime || 0, ms)
   }
@@ -421,7 +458,7 @@ export class Query<TData, TError = Error, TQueryFnData = TData> {
   // cancel() or destroy() says. Nobody has to wait for it.
   //
   // `by` is who asks: the component the fetch is made for, or, by default, a
-  // caller no component owns, as fetchQuery().
+  // caller no component owns, such as query().
   fetch(
     {
       queryFn,
@@ -873,7 +910,7 @@ export class Query<TData, TError = Error, TQueryFnData = TData> {
   // first included: that of the first observer that wants the query fetched,
   // the one refetchIfActive picks, else that of whoever asked for the fetch
   // last, while it still asks for this query (see QuerySubscriber.asksFor). A
-  // caller no component owns, such as fetchQuery(), always does; a component
+  // caller no component owns, such as query(), always does; a component
   // does whether enabled or not, and even once it went away. Not simply the
   // queryFn the fetch started with: a queryFn may read its key's value only
   // when it runs, like `() => api(this.id())` does, and by then its component

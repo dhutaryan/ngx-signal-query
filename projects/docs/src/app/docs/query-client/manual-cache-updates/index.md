@@ -61,20 +61,26 @@ This is the counterpart to [invalidation](/query-client/query-invalidation): two
 
 They combine, too: write the response for an instant update _and_ invalidate to be sure — `setQueryData` in `onSuccess`, `invalidateQueries` in `onSettled`.
 
-## Prefetching: `fetchQuery`
+## Prefetching: `query`
 
-`fetchQuery` fills the cache **imperatively** — fetch now so the data is already there when a component mounts later. The usual use is prefetching: on hover, or in a route resolver, so the screen renders warm.
+`query()` fills the cache **imperatively** — fetch now so the data is already there when a component mounts later. The usual use is prefetching: on hover, or in a route resolver, so the screen renders warm. Hand it the query's definition, the one components show it with:
 
 ```ts
 // Prefetch on hover so the detail view opens instantly
 protected prefetchTodo(id: number): void {
-  const { queryKey, queryFn } = this.#queries.detail(id)
-
-  this.#client.fetchQuery(queryKey, queryFn, { staleTime: 30_000 })
+  this.#client.query(this.#queries.detail(id))
 }
 ```
 
-It respects `staleTime`: if the key already holds fresh-enough data, it does nothing, so prefetching on every hover won't spam the network. It returns a promise of the data, which nothing has to wait for: left alone, the call fills the cache in the background, and a prefetch that fails only leaves the query in `'error'`, for the component to fetch again when it mounts, showing its loading state rather than the prefetch's error.
+It fetches the query the way the definition says: its `staleTime`, `gcTime`, `retry`, `retryDelay` and `structuralSharing` apply, and its `initialData` seeds a key that holds no data, as it does for a component. What only a component does with a query doesn't apply: `query()` fetches whatever `enabled` says, doesn't poll, doesn't refetch on focus or reconnect, and leaves `placeholderData` out of the cache.
+
+It respects `staleTime`: if the key already holds data that's fresh for it, it does nothing, so prefetching on every hover won't spam the network. The `detail` definition sets no `staleTime`, so its data is stale at once, unless the app's [default options](/query-client/default-options) set one. Give it one for the prefetch by spreading the definition:
+
+```ts
+this.#client.query({ ...this.#queries.detail(id), staleTime: 30_000 })
+```
+
+It returns a promise of the data, which nothing has to wait for: left alone, the call fills the cache in the background, and a prefetch that fails only leaves the query in `'error'`, for the component to fetch again when it mounts, showing its loading state rather than the prefetch's error.
 
 It's safe to call from an effect as well, to prefetch the next page whenever the page changes, say: see [Calling it from an effect](/query-client/overview#calling-it-from-an-effect).
 
@@ -86,12 +92,31 @@ Await the promise when the data is needed before going on, e.g. in a route resol
 
 ```ts
 export const todoResolver: ResolveFn<Todo> = (route) => {
-  const { queryKey, queryFn } = inject(TodoQueries).detail(
-    Number(route.paramMap.get('id')),
-  )
+  const id = Number(route.paramMap.get('id'))
 
-  return injectQueryClient().fetchQuery(queryKey, queryFn)
+  return injectQueryClient().query(inject(TodoQueries).detail(id))
 }
 ```
 
-It resolves with the data, at once if the cached data is fresh, and rejects with the error if the fetch fails. Unlike a component's query in the browser, `fetchQuery` doesn't retry a failure unless you ask, with `retry` in the call or in [Default Options](/query-client/default-options): whoever waits for the data hears of the failure at once. If the query is removed while you wait, say on sign-out, it rejects with a `CancelledError`; see [Cancellation & Removal](/query-client/cancellation-and-removal).
+It resolves with the data, at once if the cached data is fresh, and rejects with the error if the fetch fails. Unlike a component's query in the browser, `query()` doesn't retry a failure unless you ask, with `retry` in the definition or in [Default Options](/query-client/default-options): whoever waits for the data hears of the failure at once. A fetch already in flight that it waits for, one a component started say, keeps its own retries. If the query is removed while you wait, say on sign-out, it rejects with a `CancelledError`; see [Cancellation & Removal](/query-client/cancellation-and-removal).
+
+### Without a definition: `fetchQuery`
+
+`fetchQuery(key, queryFn, options?)` does the same with the key, the query function and the options apart:
+
+```ts
+this.#client.fetchQuery(
+  ['todos', 'detail', id],
+  () => this.#http.get<Todo>(`/api/todos/${id}`),
+  { staleTime: 30_000 },
+)
+```
+
+Its options are `staleTime`, `gcTime`, `retry`, `retryDelay`, `structuralSharing`, and `cancelRefetch`, which waits for data read after the call rather than for a fetch already in flight (see [Query Functions](/queries/query-functions#cancellation-observable-or-promise)). With a definition at hand, use `query()`: taking a definition apart keeps only what you pass on, and there's no place for its `initialData`.
+
+## A note if you're coming from TanStack Query
+
+- **`query()` is here; `prefetchQuery()` and `ensureQueryData()` aren't.** A prefetch is a `query()` whose promise nothing waits for, and it needs no `.catch()`: a failure nobody waits for only shows in the query. For data that's cached already, `query({ ...definition, staleTime: Infinity })` resolves with it, unless the key was invalidated or its last fetch failed; there's no `staleTime: 'static'`.
+- **`fetchQuery()` takes the key, the query function and the options apart**, so `fetchQuery({ queryKey, queryFn })` doesn't compile: hand the options to `query()`.
+- **No `select`** in `query()`.
+- **A key in the cache with no data is seeded with `initialData` first**, as a component seeds it: one whose first load failed, one a disabled component created, or one whose first load is still running. A fresh seed resolves the call at once, with no request. TanStack's `query()` seeds a new key the same way, but fetches the first two kinds, and waits for a first load in flight.
