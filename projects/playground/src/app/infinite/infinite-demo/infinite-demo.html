@@ -1,0 +1,198 @@
+<section class="panel">
+  <h2>
+    An infinite list
+    <small>(issue #5)</small>
+  </h2>
+
+  <p class="hint">
+    A list of todos fetched page by page with
+    <code>injectInfiniteQuery</code>
+    : {{ pageSize }} todos a page, each page asked for by the id of its first
+    todo, and the next one starting after its last todo. A page takes
+    {{ pageLatency }} ms, a write {{ writeLatency }} ms. Saving or deleting a
+    todo invalidates the list, which fetches all its pages again: the first with
+    its own cursor, each next one with the cursor the page just fetched gives.
+    The checks below show what the list must never hold.
+  </p>
+
+  <div class="controls">
+    @for (option of filters; track option) {
+      <button (click)="show(option)" [class.on]="filter() === option">
+        {{ option }}
+      </button>
+    }
+    <span class="separator"></span>
+    <button
+      class="primary"
+      (click)="loadMore()"
+      [disabled]="!todos.hasNextPage() || todos.isFetching()"
+    >
+      {{ todos.isFetchingNextPage() ? 'Loading more…' : 'Load more' }}
+    </button>
+    <button
+      (click)="loadPrevious()"
+      [disabled]="!todos.hasPreviousPage() || todos.isFetching()"
+    >
+      {{ todos.isFetchingPreviousPage() ? 'Loading…' : 'Load previous' }}
+    </button>
+    <button (click)="refresh()">Refresh</button>
+  </div>
+
+  <div class="controls">
+    <button (click)="save.mutate()" [disabled]="save.isPending()">
+      Save a todo
+    </button>
+    <button (click)="remove.mutate()" [disabled]="remove.isPending()">
+      Delete the first todo
+    </button>
+    <span class="separator"></span>
+    <button (click)="toggle('windowed')" [class.on]="windowed()">
+      maxPages:
+      <strong>{{ windowed() ? 3 : 'none' }}</strong>
+    </button>
+    <button (click)="toggle('loadOnScroll')" [class.on]="loadOnScroll()">
+      load on scroll:
+      <strong>{{ loadOnScroll() ? 'on' : 'off' }}</strong>
+    </button>
+    <button (click)="toggle('promises')" [class.on]="promises()">
+      queryFn:
+      <strong>{{ promises() ? 'Promise' : 'Observable' }}</strong>
+    </button>
+    <button (click)="toggle('failNext')" [class.on]="server.failNext()">
+      fail the next request:
+      <strong>{{ server.failNext() ? 'yes' : 'no' }}</strong>
+    </button>
+  </div>
+
+  <p class="state">
+    {{ describe(todos.data()?.pages?.length) }} · cursors
+    {{ todos.data()?.pageParams?.join(', ') || '–' }} · hasNextPage
+    {{ todos.hasNextPage() }} · hasPreviousPage {{ todos.hasPreviousPage() }} ·
+    isFetching {{ todos.isFetching() }}
+    @if (todos.isFetchNextPageError() || todos.isFetchPreviousPageError()) {
+      ·
+      <span class="bad">
+        {{ todos.isFetchNextPageError() ? 'next' : 'previous' }} page failed:
+        {{ todos.error()?.message }}
+      </span>
+    }
+  </p>
+
+  <div class="pages">
+    @if (todos.isLoading()) {
+      <p class="state">loading the first page…</p>
+    } @else if (todos.isError() && !todos.data()) {
+      <p class="state bad">failed: {{ todos.error()?.message }}</p>
+    }
+    @for (page of pages(); track $index) {
+      <div class="page">
+        <span class="label">
+          page {{ $index + 1 }} · {{ page.filter }} · v{{ page.version }}
+        </span>
+        @for (todo of page.todos; track todo.id) {
+          <span class="todo" [class.done]="todo.done">{{ todo.title }}</span>
+        } @empty {
+          <span class="state">empty</span>
+        }
+      </div>
+    }
+    <div #sentinel class="end">
+      @if (todos.isFetchingNextPage()) {
+        loading the next page…
+      } @else if (todos.data() && !todos.hasNextPage()) {
+        that's all
+      }
+    </div>
+  </div>
+
+  <table class="counters">
+    <thead>
+      <tr>
+        <th>check</th>
+        <th>actual</th>
+        <th>expected</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>todos shown twice</td>
+        <td [class.bad]="duplicates() > 0">{{ duplicates() }}</td>
+        <td>0</td>
+      </tr>
+      <tr>
+        <td>pages of another filter</td>
+        <td [class.bad]="foreign() > 0">{{ foreign() }}</td>
+        <td>0</td>
+      </tr>
+      <tr>
+        <td>versions in the list</td>
+        <td [class.bad]="versions().length > 1">
+          {{ versions().length ? 'v' + versions().join(', v') : '–' }}
+        </td>
+        <td>one</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <ol class="timeline">
+    @for (entry of server.entries(); track $index) {
+      <li [class]="entry.kind">
+        <span class="at">{{ seconds(entry.at) }}</span>
+        {{ entry.text }}
+      </li>
+    }
+  </ol>
+
+  <details>
+    <summary>What to try</summary>
+    <ul class="hint">
+      <li>
+        <strong>Load more, a few times</strong>
+        — a page each time, asked for from the id after the last todo shown.
+      </li>
+      <li>
+        <strong>Load 3 pages, then Delete the first todo</strong>
+        — the list fetches its 3 pages again: from id 1, then from the id after
+        each page's last todo, which moved by one. Asking for the cursors the
+        pages were fetched with would show a todo twice.
+      </li>
+      <li>
+        <strong>Load 3 pages, then Save a todo</strong>
+        — all 3 pages come again in the next version, one after the other; the
+        list stays 3 pages long.
+      </li>
+      <li>
+        <strong>Load more, and Save while the page loads</strong>
+        — the refetch replaces the page in flight: the list fetches the pages it
+        held, and the new page isn't added. Load more again once it's in.
+      </li>
+      <li>
+        <strong>Load on scroll on, Save, then scroll to the end</strong>
+        — while the refetch runs, nothing is added; once it's in, the next page
+        comes on its own: the effect runs again as
+        <code>isFetching()</code>
+        goes false.
+      </li>
+      <li>
+        <strong>maxPages 3, then Load more 3 times</strong>
+        — the first pages go as new ones come; Load previous brings them back.
+        Load 5 pages first, then turn maxPages on: the next page leaves 3.
+      </li>
+      <li>
+        <strong>Load 3 pages, Save, then switch to "done" at once</strong>
+        — with an Observable
+        <code>queryFn</code>
+        , the refetch of the list you left is cancelled: its pages stay, and it
+        refetches when you switch back. With a Promise one, nothing stops it:
+        the page in flight lands, and no page is asked for with the next filter,
+        so the list you left keeps the page that came before the switch, all of
+        it "all". Switch back to see it.
+      </li>
+      <li>
+        <strong>Fail the next request, then Load more</strong>
+        — the list keeps its pages and says the next page failed; Load more
+        tries it again.
+      </li>
+    </ul>
+  </details>
+</section>

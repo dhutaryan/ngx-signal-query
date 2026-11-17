@@ -9,6 +9,7 @@ import { Log } from './core/log/log'
 import { EffectsDemo } from './effects/effects-demo/effects-demo'
 import { FirstLoadDemo } from './first-load/first-load-demo/first-load-demo'
 import { FocusDemo } from './focus/focus-demo/focus-demo'
+import { InfiniteDemo } from './infinite/infinite-demo/infinite-demo'
 import { InvalidationDemo } from './invalidation/invalidation-demo/invalidation-demo'
 import { LazyOptionsDemo } from './lazy-options/lazy-options-demo/lazy-options-demo'
 import { MutationDemo } from './mutations/mutation-demo/mutation-demo'
@@ -27,6 +28,7 @@ import { TodosApi } from './mutations/todos-api'
     LazyOptionsDemo,
     InvalidationDemo,
     FirstLoadDemo,
+    InfiniteDemo,
     PollingDemo,
     EffectsDemo,
     RemovalDemo,
