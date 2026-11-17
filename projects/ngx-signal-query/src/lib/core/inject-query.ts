@@ -5,6 +5,7 @@ import {
   Injector,
 } from '@angular/core'
 
+import { fetchArgsOf } from './query'
 import { createQueryObserver } from './query-observer'
 import type { QueryKey, QueryOptions, QueryResult } from './types'
 
@@ -68,7 +69,11 @@ export function injectQuery<
   if (!options?.injector) assertInInjectionContext(injectQuery)
 
   const injector = options?.injector ?? inject(Injector)
-  const { result, destroy } = createQueryObserver(optionsFn, injector)
+  const { result, destroy } = createQueryObserver<TData, TError>(
+    optionsFn,
+    injector,
+    fetchArgsOf,
+  )
 
   // The observation lives as long as the owning context (component or
   // injector): tear it down with it.

@@ -27,7 +27,7 @@ TanStack Query has an Angular adapter, and Angular ships `httpResource`. This li
 [size-badge]: https://deno.bundlejs.com/badge?q=ngx-signal-query&config=%7B%22esbuild%22%3A%7B%22external%22%3A%5B%22%40angular/core%22%2C%22%40angular/common%22%2C%22rxjs%22%2C%22rxjs/operators%22%2C%22tslib%22%5D%7D%7D
 [size-page]: https://bundlejs.com/?q=ngx-signal-query&config=%7B%22esbuild%22%3A%7B%22external%22%3A%5B%22%40angular/core%22%2C%22%40angular/common%22%2C%22rxjs%22%2C%22rxjs/operators%22%2C%22tslib%22%5D%7D%7D
 
-It's deliberately focused. If you need infinite queries, devtools or persistence today, TanStack Query is the better pick. If you want Observables and Angular DI all the way through, with a surface you can read in full, this is for you.
+It's deliberately focused. If you need devtools or persistence today, TanStack Query is the better pick. If you want Observables and Angular DI all the way through, with a surface you can read in full, this is for you.
 
 > How it started: [TanStack Query-style caching, the Angular-native way](https://dev.to/dhutaryan/tanstack-query-style-caching-the-angular-native-way-4igc).
 
@@ -42,12 +42,13 @@ Query state is exposed as **signals** — `data()`, `status()`, `isFetching()`, 
 - ♻️ Invalidation, cancellation and manual cache updates
 - 🔗 Dependent, parallel (`injectQueries`) and disabled queries
 - 🖼️ Seed and placeholder data while a query loads (`initialData`, `placeholderData`, `keepPreviousData`)
+- 📜 Lists that load page by page, for "Load more" and infinite scroll (`injectInfiniteQuery`)
 - 🔁 Retries, polling, and refetch on window focus and reconnect
 - ✏️ Mutations with async lifecycle hooks and optimistic updates
 - 🌍 App-wide defaults and global indicators (`injectIsFetching()`, `injectIsMutating()`)
 - 🖥️ Server rendering: the server waits for every fetch, and `withHydration()` brings the data over to the browser
 
-Not here yet: infinite queries, devtools and persistence.
+Not here yet: devtools and persistence.
 
 ## A quick taste
 

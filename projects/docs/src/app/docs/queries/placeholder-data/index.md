@@ -16,7 +16,7 @@ It shows again while a query that failed before it had any data is tried again: 
 
 The cache never sees any of it. Another component reading `['todos']` gets `undefined` until the real fetch lands — the placeholder is local to this one query result.
 
-The placeholder has the data type `queryFn` gives, here `Todo[]`. One that's missing fields is a type error, as code reading `data()` would find them missing. One TypeScript quirk: an inline object whose field has a literal type, like `status: 'open' | 'done'`, is an error even when it fits, because TypeScript widens `'open'` to `string` before it knows the data type. Add `satisfies` with the type, or keep the placeholder in a typed constant:
+The placeholder has the query's data type, here `Todo[]`, or for an [infinite query](/queries/infinite-queries) its pages. One that's missing fields is a type error, as code reading `data()` would find them missing. One TypeScript quirk: an inline object whose field has a literal type, like `status: 'open' | 'done'`, is an error even when it fits, because TypeScript widens `'open'` to `string` before it knows the data type. Add `satisfies` with the type, or keep the placeholder in a typed constant:
 
 ```ts
 placeholderData: { id: 1, status: 'open' } satisfies Ticket,

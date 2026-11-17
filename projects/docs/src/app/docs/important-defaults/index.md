@@ -15,6 +15,8 @@ Going stale doesn't refetch anything by itself: a query that stays on screen ref
 
 `initialData` counts as fetched just now, so a seeded query refetches at once too; see [Initial Data](/queries/initial-data).
 
+An infinite query refetches every page it holds, one after the other, so each refetch costs as many requests as the list has pages; see [Infinite Queries](/queries/infinite-queries#how-a-refetch-works).
+
 To fetch less, raise `staleTime`. See [Caching](/query-client/caching).
 
 ## Unused data is kept for 5 minutes

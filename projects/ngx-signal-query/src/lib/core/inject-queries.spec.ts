@@ -17,7 +17,7 @@ import {
   flush,
   tick,
 } from '@angular/core/testing'
-import { map, of, Subject, throwError, timer } from 'rxjs'
+import { type Observable, map, of, Subject, throwError, timer } from 'rxjs'
 
 import { mountHost } from '../../spec-helpers/host'
 import {
@@ -279,6 +279,35 @@ describe('injectQueries', () => {
     expect(results()[1].isError()).toBe(true)
     expect(results()[1].error()).toBe(err)
   })
+
+  it('retries each query as its own options say', fakeAsync(() => {
+    let attempts = 0
+    const flaky = (): Observable<string> => {
+      attempts++
+
+      return attempts === 1
+        ? throwError(() => new Error('blip'))
+        : of('second try')
+    }
+    const down = new Error('down')
+    const { results } = mount<string>(() => ({
+      queries: [
+        { queryKey: ['flaky'], queryFn: flaky, retry: 1, retryDelay: 10 },
+        {
+          queryKey: ['down'],
+          queryFn: () => throwError(() => down),
+          retry: false,
+        },
+      ],
+    }))
+
+    tick(10)
+
+    expect(attempts).toBe(2)
+    expect(results()[0].data()).toBe('second try')
+    expect(results()[1].error()).toBe(down)
+    expect(results()[1].failureCount()).toBe(1)
+  }))
 
   describe('reactive list', () => {
     it('adds a query when a key appears, without refetching the others', () => {

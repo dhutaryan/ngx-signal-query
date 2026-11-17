@@ -72,7 +72,7 @@ structuralSharing: (oldData, newData) =>
 
 It gets the data the query holds, `undefined` before the first response, and the new data, and returns what to store. It runs for every response and for every `setQueryData` write to the key, but not for `initialData`. So it has to merge, not pick: a function that returns `oldData` whenever, say, a `version` field matches also throws away an optimistic update that leaves the version as it was. If it throws, the fetch fails with its error and the query keeps its data, and `setQueryData` throws to its caller.
 
-The function merges data of the type `queryFn` gives, so one typed with `unknown` doesn't fit a query. To share one between queries and [`withDefaultOptions`](/query-client/default-options), where the data has no type, make it generic:
+The function merges data of the query's type: what `queryFn` gives, or the pages of an [infinite query](/queries/infinite-queries). So one typed with `unknown` doesn't fit a query. To share one between queries and [`withDefaultOptions`](/query-client/default-options), where the data has no type, make it generic:
 
 ```ts
 function shareDates<T>(oldData: T | undefined, newData: T): T {
@@ -88,4 +88,4 @@ function shareDates<T>(oldData: T | undefined, newData: T): T {
 
 It has no options of its own. It merges as the component showing the key asks, enabled or not. With none showing it, it merges the way the data in the cache was fetched, and a key nothing has fetched yet gets the app-wide default.
 
-> This works like structural sharing in TanStack Query: on by default and comparing the same way. Here the function's parameters are typed from `queryFn`.
+> This works like structural sharing in TanStack Query: on by default and comparing the same way. Here the function's parameters have the query's data type.
