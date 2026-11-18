@@ -100,6 +100,16 @@ export const todoResolver: ResolveFn<Todo> = (route) => {
 
 It resolves with the data, at once if the cached data is fresh, and rejects with the error if the fetch fails. Unlike a component's query in the browser, `query()` doesn't retry a failure unless you ask, with `retry` in the definition or in [Default Options](/query-client/default-options): whoever waits for the data hears of the failure at once. A fetch already in flight that it waits for, one a component started say, keeps its own retries. If the query is removed while you wait, say on sign-out, it rejects with a `CancelledError`; see [Cancellation & Removal](/query-client/cancellation-and-removal).
 
+### An infinite list: `infiniteQuery`
+
+`infiniteQuery()` does the same for a list, from its `infiniteQueryOptions` definition, and resolves with the list:
+
+```ts
+this.#client.infiniteQuery(this.#queries.todos())
+```
+
+A list with no pages yet gets its first page, a stale one is fetched again with every page it holds, and `pages: 3` asks for the first three. See [Prefetching](/queries/infinite-queries#prefetching) on the Infinite Queries page.
+
 ### Without a definition: `fetchQuery`
 
 `fetchQuery(key, queryFn, options?)` does the same with the key, the query function and the options apart:
@@ -116,7 +126,7 @@ Its options are `staleTime`, `gcTime`, `retry`, `retryDelay`, `structuralSharing
 
 ## A note if you're coming from TanStack Query
 
-- **`query()` is here; `prefetchQuery()` and `ensureQueryData()` aren't.** A prefetch is a `query()` whose promise nothing waits for, and it needs no `.catch()`: a failure nobody waits for only shows in the query. For data that's cached already, `query({ ...definition, staleTime: Infinity })` resolves with it, unless the key was invalidated or its last fetch failed; there's no `staleTime: 'static'`.
+- **`query()` and `infiniteQuery()` are here; `prefetchQuery()`, `ensureQueryData()` and their infinite twins aren't.** A prefetch is a `query()` whose promise nothing waits for, and it needs no `.catch()`: a failure nobody waits for only shows in the query. For data that's cached already, `query({ ...definition, staleTime: Infinity })` resolves with it, unless the key was invalidated or its last fetch failed; there's no `staleTime: 'static'`.
 - **`fetchQuery()` takes the key, the query function and the options apart**, so `fetchQuery({ queryKey, queryFn })` doesn't compile: hand the options to `query()`.
-- **No `select`** in `query()`.
+- **No `select`** in `query()` and `infiniteQuery()`.
 - **A key in the cache with no data is seeded with `initialData` first**, as a component seeds it: one whose first load failed, one a disabled component created, or one whose first load is still running. A fresh seed resolves the call at once, with no request. TanStack's `query()` seeds a new key the same way, but fetches the first two kinds, and waits for a first load in flight.

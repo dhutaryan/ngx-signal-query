@@ -55,7 +55,7 @@ The default is **5 minutes**. Raise it to keep data warm for slow back-and-forth
 
 **`Infinity`** keeps unused data until you remove it with `removeQueries`. So does any value above about 24.8 days (2³¹−1 ms), the most a browser timer can hold.
 
-When components showing the same query ask for different `gcTime`s, the **longest** one wins, and the query keeps it for as long as it stays in the cache. A component that sets none asks for the default, and so does `query()` with a definition that sets none. So one component's shorter `gcTime` doesn't cut short a query that another component shows, or one that was prefetched. To shorten it everywhere, set it where the query is defined, in its `queryOptions`, or for the whole app.
+When components showing the same query ask for different `gcTime`s, the **longest** one wins, and the query keeps it for as long as it stays in the cache. A component that sets none asks for the default, and so do `query()` and `infiniteQuery()` with a definition that sets none. So one component's shorter `gcTime` doesn't cut short a query that another component shows, or one that was prefetched. To shorten it everywhere, set it where the query is defined, in its `queryOptions`, or for the whole app.
 
 On the server nothing is collected, whatever `gcTime` says: the cache lives as long as the app that renders the request. For what else a query does differently there, see [Important Defaults](/important-defaults#on-the-server).
 

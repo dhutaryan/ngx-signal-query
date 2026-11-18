@@ -5,7 +5,10 @@ import {
   infiniteQueryOptions,
   keepPreviousData,
   queryOptions,
+  type DefaultedQueryOptions,
+  type InfiniteData,
   type QueryClient,
+  type QueryKey,
 } from 'ngx-signal-query'
 
 type Todo = { id: number; title: string; done: boolean }
@@ -227,3 +230,140 @@ client.fetchQuery(['todos'], () => http.get<Todo[]>('/api/todos'), {
   // @ts-expect-error -- not a number
   gcTime: '60000',
 })
+
+// infiniteQuery()
+
+// A list's definition goes in as it is, the options that only a component
+// uses included, and the promise has the list's type.
+const todoList = infiniteQueryOptions({
+  queryKey: ['todos', 'list'],
+  queryFn: ({ pageParam }) =>
+    http.get<TodoPage>(`/api/todos?cursor=${pageParam}`),
+  initialPageParam: 0,
+  getNextPageParam: (lastPage) => lastPage.nextCursor,
+  placeholderData: keepPreviousData,
+})
+
+expectTypeOf(client.infiniteQuery(todoList)).resolves.toEqualTypeOf<
+  InfiniteData<TodoPage, number>
+>()
+
+// So does one with pages, or with an option changed for this call.
+expectTypeOf(
+  client.infiniteQuery({ ...todoList, pages: 3 }),
+).resolves.toEqualTypeOf<InfiniteData<TodoPage, number>>()
+expectTypeOf(
+  client.infiniteQuery({ ...todoList, staleTime: Infinity }),
+).resolves.toEqualTypeOf<InfiniteData<TodoPage, number>>()
+
+// Written in the call, its query function gets the key with the type the key
+// has, a signal and the page's param.
+client.infiniteQuery({
+  queryKey: ['todos', id] as const,
+  queryFn: ({ queryKey, signal, pageParam }) => {
+    expectTypeOf(queryKey).toEqualTypeOf<readonly ['todos', number]>()
+    expectTypeOf(signal).toEqualTypeOf<AbortSignal>()
+    expectTypeOf(pageParam).toEqualTypeOf<number>()
+
+    return http.get<TodoPage>(`/api/todos?user=${queryKey[1]}&c=${pageParam}`)
+  },
+  initialPageParam: 0,
+  getNextPageParam: (lastPage) => lastPage.nextCursor,
+})
+
+// retry and retryDelay get the error with the list's error type.
+const typedList = infiniteQueryOptions<TodoPage, ApiError, QueryKey, number>({
+  queryKey: ['todos', 'list'],
+  queryFn: ({ pageParam }) =>
+    http.get<TodoPage>(`/api/todos?cursor=${pageParam}`),
+  initialPageParam: 0,
+  getNextPageParam: (lastPage) => lastPage.nextCursor,
+})
+
+client.infiniteQuery({
+  ...typedList,
+  retry: (failureCount, error) => {
+    expectTypeOf(error).toEqualTypeOf<ApiError>()
+
+    return failureCount < 2 && error.status !== 404
+  },
+  retryDelay: (_failureCount, error) => {
+    expectTypeOf(error).toEqualTypeOf<ApiError>()
+
+    return 1_000
+  },
+})
+
+// The generics can be written out, the page type first.
+expectTypeOf(
+  client.infiniteQuery<TodoPage, Error, QueryKey, number>({
+    queryKey: ['todos', 'list'],
+    queryFn: ({ pageParam }) =>
+      http.get<TodoPage>(`/api/todos?cursor=${pageParam}`),
+    initialPageParam: 0,
+    getNextPageParam: (lastPage) => lastPage.nextCursor,
+  }),
+).resolves.toEqualTypeOf<InfiniteData<TodoPage, number>>()
+
+// initialData is a list, not a page.
+client.infiniteQuery({
+  ...todoList,
+  initialData: { pages: [{ todos: [], nextCursor: 20 }], pageParams: [0] },
+})
+client.infiniteQuery({
+  ...todoList,
+  // @ts-expect-error -- one page isn't the list
+  initialData: { todos: [], nextCursor: null },
+})
+
+// A plain query's definition doesn't fit: it has no pages.
+// @ts-expect-error -- a plain query's definition
+client.infiniteQuery(list)
+
+// getNextPageParam is needed: a stale list refetches the pages after the
+// first with it.
+// @ts-expect-error -- no getNextPageParam
+client.infiniteQuery({
+  queryKey: ['todos', 'list'],
+  queryFn: ({ pageParam }: { pageParam: number }) =>
+    http.get<TodoPage>(`/api/todos?cursor=${pageParam}`),
+  initialPageParam: 0,
+})
+
+// pages is a number, and it's the call's, not an option of the definition.
+// @ts-expect-error -- not a number
+client.infiniteQuery({ ...todoList, pages: '3' })
+infiniteQueryOptions({
+  queryKey: ['todos', 'list'],
+  queryFn: ({ pageParam }) =>
+    http.get<TodoPage>(`/api/todos?cursor=${pageParam}`),
+  initialPageParam: 0,
+  getNextPageParam: (lastPage) => lastPage.nextCursor,
+  // @ts-expect-error -- not an option of a definition
+  pages: 3,
+})
+
+// cancelRefetch is fetchQuery's, and there's no select.
+// @ts-expect-error -- not an option of infiniteQuery()
+client.infiniteQuery({ ...todoList, cancelRefetch: true })
+// @ts-expect-error -- no select
+client.infiniteQuery({ ...todoList, select: () => 0 })
+
+// defaultQueryOptions()
+
+// It fills in the defaults for any kind of query: the data type comes from
+// the options, and so does what queryFn gives, the data itself or a page.
+expectTypeOf(client.defaultQueryOptions(list)).toEqualTypeOf<
+  DefaultedQueryOptions<Todo[], Error, Todo[]>
+>()
+expectTypeOf(client.defaultQueryOptions(todoList)).toEqualTypeOf<
+  DefaultedQueryOptions<InfiniteData<TodoPage, number>, Error, TodoPage>
+>()
+
+// Written in the call, the options take the data type from queryFn.
+expectTypeOf(
+  client.defaultQueryOptions({
+    queryKey: ['todos'],
+    queryFn: () => http.get<Todo[]>('/api/todos'),
+  }),
+).toEqualTypeOf<DefaultedQueryOptions<Todo[], Error, Todo[]>>()

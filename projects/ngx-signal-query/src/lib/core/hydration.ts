@@ -114,7 +114,7 @@ function warnLeftOut(queryHash: string): void {
   if (typeof ngDevMode === 'undefined' || ngDevMode) {
     // eslint-disable-next-line no-console
     console.warn(
-      `ngx-signal-query: query ${queryHash} stays on the server: JSON can't carry its data as is (a Date, a Map or a class instance, say), so the browser fetches it again. Return plain data from its queryFn to bring it over.`,
+      `ngx-signal-query: query ${queryHash} stays on the server: JSON can't carry its data as is (a Date, a Map, a class instance or an infinite list's undefined page param, say), so the browser fetches it again. Return plain data from its queryFn, and start an infinite list from null rather than undefined, to bring it over.`,
     )
   }
 }

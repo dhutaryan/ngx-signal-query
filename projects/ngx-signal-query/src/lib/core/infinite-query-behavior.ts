@@ -41,17 +41,18 @@ export function pageParamFor<TPage, TPageParam>(
  *
  * Any other fetch gets the pages anew, from the first: with the first page's
  * own param, or initialPageParam while the query holds none, then each with
- * the param getNextPageParam gives for the page just fetched. It fetches as
- * many pages as the query holds, one at least, and fewer once there is no
- * next one. A retry goes on from the page that failed. When no query
- * function asks for the query's key any more by the time of a page, such as
- * once the component that asked has moved on to another key, the fetch lands
- * with the pages it has.
+ * the param getNextPageParam gives for the page just fetched. It fetches
+ * `pages` of them if the caller asks for a number, else as many as the query
+ * holds; one at least, and fewer once there is no next one. A retry goes on
+ * from the page that failed. When no query function asks for the query's key
+ * any more by the time of a page, such as once the component that asked has
+ * moved on to another key, the fetch lands with the pages it has.
  *
  * @internal
  */
 export function infiniteQueryBehavior<TPage, TPageParam>(
   options: InfinitePageOptions<TPage, TPageParam>,
+  pages?: number,
 ): FetchBehavior<TPage, InfiniteData<TPage, TPageParam>> {
   // `to` with `page`, fetched with `param`, added at the end, or at the start
   // for a previous page.
@@ -67,6 +68,10 @@ export function infiniteQueryBehavior<TPage, TPageParam>(
 
   return ({ data, direction }) => {
     const held = data ?? { pages: [], pageParams: [] }
+    // How many pages a fetch that gets the pages anew fetches: as many as the
+    // caller asks for with `pages`, else as many as the query holds. The
+    // first page is fetched either way, even when that's 0.
+    const wanted = pages ?? held.pages.length
     // What the attempts of a fetch that gets the pages anew have fetched so
     // far, and how many pages that is: a retry goes on from there. Counted
     // apart from the pages kept, which maxPages may drop on the way.
@@ -103,7 +108,7 @@ export function infiniteQueryBehavior<TPage, TPageParam>(
             fetched = added(fetched, page, param, false)
             count++
 
-            return count < held.pages.length ? fetchNext() : of(fetched)
+            return count < wanted ? fetchNext() : of(fetched)
           }),
         )
       }

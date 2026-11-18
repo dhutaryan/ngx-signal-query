@@ -62,6 +62,8 @@ readonly startsAt = computed(() => {
 })
 ```
 
+An infinite list carries the param of each page too. One that starts from `initialPageParam: undefined` holds `undefined` there, which JSON brings back as `null`, so it stays on the server as well: start it from `null` instead, as [Typing the params](/queries/infinite-queries#typing-the-params) does.
+
 ## `HttpClient` and Angular's transfer cache
 
 `provideClientHydration()` also turns on Angular's own transfer cache: it puts the response of each `HttpClient` GET into the page, and answers the same request with it while the app boots, until the app first counts as stable. Refetches and polls after that get fresh responses. With `withHydration()` too, the page carries those responses twice. If every `HttpClient` GET your pages make goes through a query, turn Angular's off:

@@ -23,13 +23,13 @@ To fetch less, raise `staleTime`. See [Caching](/query-client/caching).
 
 When the last component showing a query is gone, the query stays in the cache for 5 minutes (`gcTime`). Coming back within that time shows its data at once, then refetches it if it's stale. Once the 5 minutes are up, the query is removed, and the next visit loads it from scratch. The clock only runs while nothing uses the query: no component shows it, and no fetch of it is running.
 
-Data you prefetch with `query()` or write with `setQueryData` for a key no component shows gets the same 5 minutes, counted from the fetch landing or from the last write. See [Caching](/query-client/caching).
+Data you prefetch with `query()` or `infiniteQuery()`, or write with `setQueryData`, for a key no component shows gets the same 5 minutes, counted from the fetch landing or from the last write. See [Caching](/query-client/caching).
 
 ## Failed queries retry 3 times
 
 A failed query retries 3 times (`retry`), so `queryFn` runs 4 times in all. It waits 1 s, 2 s and 4 s before the retries (`retryDelay`): the wait doubles each time, up to 30 s. The error shows only after the last attempt, at least 7 s after the first failure. Until then, `failureCount()` and `failureReason()` show how it's going. See [Query Retries](/queries/query-retries).
 
-`query()` and `fetchQuery()` are the exception: they don't retry unless you ask, since whoever waits for their promise should hear of a failure at once. A fetch already in flight that they wait for keeps its own retries. See [Manual Cache Updates](/query-client/manual-cache-updates#waiting-for-the-data).
+`query()`, `infiniteQuery()` and `fetchQuery()` are the exception: they don't retry unless you ask, since whoever waits for their promise should hear of a failure at once. A fetch already in flight that they wait for keeps its own retries. See [Manual Cache Updates](/query-client/manual-cache-updates#waiting-for-the-data).
 
 In tests, turn retries off, or a test of an error state waits through all of them; see [Testing](/testing).
 
@@ -49,7 +49,7 @@ A query polls only when you set `refetchInterval`, and polling ignores `staleTim
 
 While a query fetches or a mutation runs, Angular counts the app as busy, so a server render waits before it sends the page, and `whenStable()` waits in a test. It doesn't matter what `queryFn` or `mutationFn` sends the request with: `HttpClient`, `fetch()` or anything that returns a promise. A fetch keeps the app busy until its data or error is in the query, the waits between retries included; a mutation, until its last hook is done.
 
-That goes for work no component shows too: a prefetch with `query()`, a promise fetch that runs on after its component is gone, a mutation whose component is gone. For tests, see [Testing](/testing#waiting-with-whenstable).
+That goes for work no component shows too: a prefetch with `query()` or `infiniteQuery()`, a promise fetch that runs on after its component is gone, a mutation whose component is gone. For tests, see [Testing](/testing#waiting-with-whenstable).
 
 Nothing else keeps the app busy, with zone.js or without: a query waiting out its `gcTime`, and the time between polls, leave it stable. With zone.js, `queryFn` and `mutationFn` run outside Angular's zone, as `HttpClient` sends its requests, so a timer they start doesn't hold the app up either. See [Query Functions](/queries/query-functions#with-zonejs).
 

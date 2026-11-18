@@ -2876,10 +2876,64 @@ describe('injectQuery', () => {
       expect(refetched.value).toBe('todo 1 again')
     }))
 
+    it('asks for that key with the queryFn of the component that joined last, disabled since, once the one that started the fetch moved away', fakeAsync(() => {
+      const { queryFn: api, requests } = promiseRequests<string>()
+      const shown = panel(api)
+      // A component on todo 1 that joins the panel's request, then stops
+      // fetching: it asked last, and its queryFn still asks for todo 1.
+      const joined = mount(
+        (on) => ({
+          queryKey: ['todo', 1],
+          queryFn: () => api(1),
+          enabled: on(),
+          ...retryOptions,
+        }),
+        true,
+      )
+
+      joined.value.set(false)
+      joined.fixture.detectChanges()
+      requests[0].reject(new Error('down'))
+      tick(50)
+      shown.value.set(2)
+      shown.fixture.detectChanges()
+      requests[1].resolve('todo 2')
+      tick(50)
+
+      expect(api.calls.allArgs()).toEqual([[1], [2], [1]])
+
+      requests[2].resolve('todo 1')
+      flushMicrotasks()
+
+      expect(joined.result.data()).toBe('todo 1')
+    }))
+
+    // As when the last component leaves any fetch, though the prefetch's
+    // queryFn still fetches the key.
+    it('stops retrying a prefetch once the component that joined it, the last one on the key, moves on', fakeAsync(() => {
+      const { queryFn: api, requests } = promiseRequests<string>()
+      const down = new Error('down')
+      const prefetched = settled(
+        client.fetchQuery(['todo', 1], () => api(1), retryOptions),
+      )
+      const shown = panel(api)
+
+      requests[0].reject(down)
+      tick(50)
+      shown.value.set(2)
+      shown.fixture.detectChanges()
+      requests[1].resolve('todo 2')
+      tick(100)
+
+      expect(api.calls.allArgs()).toEqual([[1], [2]])
+      expect(prefetched.error).toBe(down)
+    }))
+
     // Once the component that asked for the fetch has moved on, its queryFn
     // asks for the next key, and a component that doesn't fetch the key has
     // none to lend: the retries stop, as when the last component leaves, and
-    // the fetch fails with the last error, whatever started it.
+    // the fetch fails with the last error, whatever started it. Unless a
+    // fetchQuery() asked for it: its queryFn still fetches the key.
     describe('with only a disabled component left on it', () => {
       it('fails at once when the component moved on before its request failed', fakeAsync(() => {
         const { queryFn: api, requests } = promiseRequests<string>()
@@ -3015,12 +3069,12 @@ describe('injectQuery', () => {
         expect(watching.result.error()).toBe(down)
       }))
 
-      it('fails a prefetch the component joined', fakeAsync(() => {
+      it("retries a prefetch the component joined with the prefetch's queryFn", fakeAsync(() => {
         const { queryFn: api, requests } = promiseRequests<string>()
         const down = new Error('down')
         // Hovering a link to todo 1 prefetches it, with a retry, and the
-        // panel opened on todo 1 joins that request. It asked last, so it
-        // takes the retries over, as it would if it left last.
+        // panel opened on todo 1 joins that request. The prefetch's queryFn
+        // still fetches todo 1 once the panel has moved on.
         const prefetched = settled(
           client.fetchQuery(['todo', 1], () => api(1), retryOptions),
         )
@@ -3036,8 +3090,12 @@ describe('injectQuery', () => {
         requests[1].resolve('todo 2')
         tick(50)
 
-        expect(api.calls.allArgs()).toEqual([[1], [2]])
-        expect(prefetched.error).toBe(down)
+        expect(api.calls.allArgs()).toEqual([[1], [2], [1]])
+
+        requests[2].resolve('todo 1')
+        flushMicrotasks()
+
+        expect(prefetched.value).toBe('todo 1')
       }))
 
       it('fails the refetch a disabled component asked for during the first load', fakeAsync(() => {

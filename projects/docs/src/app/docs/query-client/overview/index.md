@@ -35,12 +35,13 @@ With that one client, it's the same instance everywhere, so a write in one place
 | `removeQueries(filters?)` | Drop queries from the cache entirely. See [Cancellation & Removal](/query-client/cancellation-and-removal). |
 | `clear()` | Empty the cache, mutations included, e.g. on logout. See [Cancellation & Removal](/query-client/cancellation-and-removal#clear--empty-the-cache). |
 | `query(options)` | Fetch and cache a query as its definition says, e.g. to prefetch, and get the data. See [Manual Cache Updates](/query-client/manual-cache-updates#prefetching-query). |
+| `infiniteQuery(options)` | The same for an infinite list, from its definition, and get the list. See [Infinite Queries](/queries/infinite-queries#prefetching). |
 | `fetchQuery(key, queryFn, options?)` | The same, with the key, the query function and the options apart. See [Manual Cache Updates](/query-client/manual-cache-updates#without-a-definition-fetchquery). |
 | `getQueryCache()` / `getMutationCache()` | The underlying caches — an escape hatch for advanced use. |
 
 Each of these gets its own page in this section. Most of them take [filters](/query-client/filters) to pick which queries they act on — the same `queryKey` / `exact` matching that drives invalidation.
 
-`invalidateQueries`, `refetchQueries`, `query` and `fetchQuery` return promises. Await one when what comes next needs the fresh data, or call it and move on: nothing has to wait for them, and a failure nobody waits for only shows in the query.
+`invalidateQueries`, `refetchQueries`, `query`, `infiniteQuery` and `fetchQuery` return promises. Await one when what comes next needs the fresh data, or call it and move on: nothing has to wait for them, and a failed fetch nobody waits for only shows in the query.
 
 ## Calling it from an effect
 
