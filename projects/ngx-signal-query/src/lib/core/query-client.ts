@@ -8,9 +8,15 @@ import {
 
 import { onReconnect, onWindowFocus } from './browser-events'
 import { transferCache } from './hydration'
+import { infiniteQueryBehavior } from './infinite-query-behavior'
 import { isDestroyed } from './injector'
 import { inBrowser } from './platform'
-import { applyInitialData, fetchArgsOf, type Query } from './query'
+import {
+  applyInitialData,
+  fetchArgsOf,
+  type FetchBehavior,
+  type Query,
+} from './query'
 import { QueryCache } from './query-cache'
 import { MutationCache } from './mutation-cache'
 import type { MutationOptions } from './mutation'
@@ -18,6 +24,8 @@ import { defaultRetryDelay } from './retryer'
 import { functionalUpdate, whenAllSettled } from './utils'
 import type {
   DefaultedQueryOptions,
+  InfiniteData,
+  InfiniteQueryOptions,
   InvalidateQueryFilters,
   QueryFilters,
   QueryFunction,
@@ -99,15 +107,19 @@ export class QueryClient {
    * `staleTime`, `gcTime`, `retry`, `retryDelay`, `structuralSharing`,
    * `refetchOnWindowFocus`, `refetchOnReconnect` and
    * `refetchIntervalInBackground`. Used internally by {@link injectQuery}.
+   * An infinite list's definition fits too: the defaults don't depend on what
+   * `queryFn` gives.
    *
    * On the server a query doesn't poll, whatever its `refetchInterval`, and
    * doesn't retry a failure unless the query or the app sets `retry`, so the
    * page renders without waiting on a timer; the browser polls and tries
    * again once it takes over. `gcTime` is always `Infinity` there.
    */
-  defaultQueryOptions<TData, TError = Error>(
-    options: QueryOptions<TData, TError>,
-  ): DefaultedQueryOptions<TData, TError> {
+  defaultQueryOptions<TQueryFnData, TError = Error, TData = TQueryFnData>(
+    options: Omit<QueryOptions<TData, TError>, 'queryFn'> & {
+      queryFn: QueryFunction<TQueryFnData>
+    },
+  ): DefaultedQueryOptions<TData, TError, TQueryFnData> {
     const defaults = this.#config.defaultOptions?.queries
 
     // A render with zone.js waits for every pending timer, so on the server a
@@ -165,14 +177,15 @@ export class QueryClient {
    * event handler or an effect, or to wait for the data, such as in a route
    * resolver.
    *
-   * Takes a {@link queryOptions} definition as it is. Its `staleTime`,
-   * `gcTime`, `retry`, `retryDelay` and `structuralSharing` apply, and its
-   * `initialData` seeds a key that holds no data, the way it does for a
-   * component, before `staleTime` decides whether to fetch: a fresh seed
-   * resolves at once, with no request, even while the key's first load is
-   * still in flight. What only a component does with a query doesn't apply:
-   * it fetches whatever `enabled` says, doesn't poll, doesn't refetch on
-   * focus or reconnect, and leaves `placeholderData` out of the cache.
+   * Takes a {@link queryOptions} definition as it is; an infinite list's goes
+   * to {@link QueryClient.infiniteQuery}. Its `staleTime`, `gcTime`, `retry`,
+   * `retryDelay` and `structuralSharing` apply, and its `initialData` seeds a
+   * key that holds no data, the way it does for a component, before
+   * `staleTime` decides whether to fetch: a fresh seed resolves at once, with
+   * no request, even while the key's first load is still in flight. What only
+   * a component does with a query doesn't apply: it fetches whatever
+   * `enabled` says, doesn't poll, doesn't refetch on focus or reconnect, and
+   * leaves `placeholderData` out of the cache.
    *
    * Resolves with the data as the cache holds it: at once if it's fresh,
    * otherwise once the fetch lands. A fetch already in flight is waited for,
@@ -217,6 +230,70 @@ export class QueryClient {
     options: QueryOptions<TData, TError, TQueryKey>,
   ): Promise<TData> {
     return this.#fetch(options)
+  }
+
+  /**
+   * Fetches and caches an infinite list as its definition says, unless the
+   * cache already holds the list fresh for its `staleTime`, and resolves with
+   * the list. Prefer {@link injectInfiniteQuery} in components; use this to
+   * prefetch a list, on hover say, or to wait for its pages, such as in a
+   * route resolver.
+   *
+   * Takes an {@link infiniteQueryOptions} definition as it is. A list with no
+   * pages yet gets its first page, fetched with `initialPageParam`, and a
+   * component that shows the key afterwards goes on from there with
+   * `fetchNextPage()`. A stale list is fetched again the way any refetch of
+   * it is: every page it holds, in order, the first with its own param and
+   * each next one with the param `getNextPageParam` gives for the page just
+   * fetched. `pages` asks for that many pages from the first instead, fewer
+   * once `getNextPageParam` gives no next one; `maxPages` still decides how
+   * many of them the list keeps. `pages` applies only to a fetch the call
+   * starts: a fresh list is left as it is, and a fetch already in flight is
+   * waited for.
+   *
+   * Otherwise it works as {@link QueryClient.query} does: the definition's
+   * `staleTime`, `gcTime`, `retry`, `retryDelay` and `structuralSharing`
+   * apply, its `initialData` seeds a key that holds no data, and it fetches
+   * whatever `enabled` says, without polling or refetching on focus or
+   * reconnect, and leaves `placeholderData` out of the cache. A fetch it
+   * starts doesn't retry a failure unless `retry` asks: a page that fails
+   * rejects the promise, and the list keeps the pages it had.
+   *
+   * @typeParam TPage - Type of one page, as `queryFn` resolves it.
+   * @typeParam TError - Type of the error thrown by `queryFn`.
+   * @typeParam TQueryKey - Type of `queryKey`, which `queryFn` gets the key
+   *   with.
+   * @typeParam TPageParam - Type of the param each page is fetched with.
+   * @param options - The list's {@link InfiniteQueryOptions}, such as an
+   *   {@link infiniteQueryOptions} definition, and `pages`: how many pages to
+   *   fetch from the first, when the call fetches.
+   * @returns A promise of the list.
+   *
+   * @example
+   * ```ts
+   * // Prefetch on hover so the list opens with its first page
+   * protected prefetchTodos(): void {
+   *   this.#client.infiniteQuery(this.#queries.todos())
+   * }
+   * ```
+   */
+  infiniteQuery<
+    TPage,
+    TError = Error,
+    TQueryKey extends QueryKey = QueryKey,
+    TPageParam = unknown,
+  >(
+    options: InfiniteQueryOptions<TPage, TError, TQueryKey, TPageParam> & {
+      pages?: number
+    },
+  ): Promise<InfiniteData<TPage, TPageParam>> {
+    // pages is about this call, not an option of the list.
+    const { pages, ...definition } = options
+
+    return this.#fetch<InfiniteData<TPage, TPageParam>, TError, TPage>(
+      definition,
+      { behavior: infiniteQueryBehavior(definition, pages) },
+    )
   }
 
   /**
@@ -297,7 +374,7 @@ export class QueryClient {
         retryDelay,
         structuralSharing,
       },
-      cancelRefetch,
+      { cancelRefetch },
     )
   }
 
@@ -534,28 +611,38 @@ export class QueryClient {
   }
 
   /**
-   * Fetches and caches a query with its options, for query() and
-   * fetchQuery(), unless its data is fresh: the options are resolved like a
-   * component's, except that a failure isn't retried unless they or the app
-   * ask, and the query is seeded with initialData first. With cancelRefetch,
-   * a fetch in flight is replaced rather than waited for (see Query#refetch).
+   * Fetches and caches a query with its options, for query(), infiniteQuery()
+   * and fetchQuery(), unless its data is fresh: the options are resolved like
+   * a component's, except that a failure isn't retried unless they or the app
+   * ask, and the query is seeded with initialData first. The fetch gets the
+   * query's data from its queryFn as `behavior` says, such as page by page;
+   * without one, queryFn gives the data itself. With `cancelRefetch`, a fetch
+   * in flight is replaced rather than waited for (see Query#refetch).
    *
    * @internal
    */
-  #fetch<TData, TError = Error>(
-    options: QueryOptions<TData, TError>,
-    cancelRefetch = false,
+  #fetch<TData, TError = Error, TQueryFnData = TData>(
+    options: Omit<QueryOptions<TData, TError>, 'queryFn'> & {
+      queryFn: QueryFunction<TQueryFnData>
+    },
+    {
+      behavior,
+      cancelRefetch = false,
+    }: {
+      behavior?: FetchBehavior<TQueryFnData, TData>
+      cancelRefetch?: boolean
+    } = {},
   ): Promise<TData> {
     return untracked(() => {
       // Resolved like a query's options are, so one set of defaults serves
       // both, except that a failure isn't retried unless asked: whoever waits
       // for the data hears of it at once.
-      const defaulted = this.defaultQueryOptions<TData, TError>({
+      const defaulted = this.defaultQueryOptions<TQueryFnData, TError, TData>({
         ...options,
         retry:
           options.retry ?? this.#config.defaultOptions?.queries?.retry ?? false,
       })
-      let query: Query<TData, TError>
+      let query: Query<TData, TError, TQueryFnData>
 
       // A key that can't be hashed, or an initialData function that throws,
       // rejects the promise rather than throwing from the call, so a caller
@@ -565,7 +652,7 @@ export class QueryClient {
       // NG0200 while the app's ErrorHandler is being created, like it does
       // for an effect created there.
       try {
-        query = this.#cache.getOrCreate<TData, TError>(
+        query = this.#cache.getOrCreate<TData, TError, TQueryFnData>(
           defaulted.queryKey,
           defaulted.gcTime,
         )
@@ -587,8 +674,8 @@ export class QueryClient {
       }
 
       // A fetch asked for by a caller, not a component: it runs with this
-      // call's options.
-      const args = fetchArgsOf(defaulted)
+      // call's options, and gets the data as the call's behavior says.
+      const args = { ...fetchArgsOf(defaulted), behavior }
 
       return cancelRefetch
         ? query.refetch(args, { by: 'caller' })

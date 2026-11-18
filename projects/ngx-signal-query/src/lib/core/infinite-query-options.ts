@@ -6,9 +6,10 @@ import type { InfiniteQueryOptions, QueryKey } from './types'
  *
  * Returns the options unchanged at runtime, but anchors type inference: the
  * page type comes from `queryFn`, the param type from `initialPageParam`,
- * so the same definition can be handed to {@link injectInfiniteQuery}
- * without re-declaring generics, and its `queryKey` reused wherever the key
- * is needed, such as {@link QueryClient.invalidateQueries}.
+ * so the same definition can be handed to {@link injectInfiniteQuery} and
+ * {@link QueryClient.infiniteQuery} without re-declaring generics, and its
+ * `queryKey` reused wherever the key is needed, such as
+ * {@link QueryClient.invalidateQueries}.
  *
  * @typeParam TPage - Type of one page, as `queryFn` resolves it.
  * @typeParam TError - Type of the error thrown by `queryFn`.

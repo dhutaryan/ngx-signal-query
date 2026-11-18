@@ -77,7 +77,7 @@ A hook that runs after the clear and writes data into the cache puts that key ba
 
 A call that waits for a fetch you cancel or remove still settles:
 
-- After **`cancelQueries`**, a `query()` or `fetchQuery()` waiting for the fetch resolves with the data the cache holds or, if it holds none yet, rejects with a `CancelledError`.
+- After **`cancelQueries`**, a `query()`, `infiniteQuery()` or `fetchQuery()` waiting for the fetch resolves with the data the cache holds or, if it holds none yet, rejects with a `CancelledError`.
 - After **`removeQueries`** or **`clear`**, it rejects with a `CancelledError`, even if the query had data: the data is gone.
 - `refetch()` and `invalidateQueries()` never reject: they resolve either way.
 - A mutation's `mutateAsync()` settles as the mutation does: `clear()` doesn't stop it.

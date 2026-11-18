@@ -23,6 +23,13 @@ import { Observable, of, Subject, throwError } from 'rxjs'
 
 import { mountHost } from '../../spec-helpers/host'
 import {
+  type List,
+  type Page,
+  listOptions,
+  server,
+  threePages,
+} from '../../spec-helpers/list-server'
+import {
   goOfflineAndBack,
   leaveAndComeBack,
 } from '../../spec-helpers/page-events'
@@ -31,11 +38,16 @@ import { appIsStable } from '../../spec-helpers/stability'
 import { provideZonelessChangeDetection } from '../../spec-helpers/zoneless'
 import { withDefaultOptions } from '../features/with-default-options'
 import { CancelledError } from './cancelled-error'
+import { injectInfiniteQuery } from './inject-infinite-query'
 import { injectMutation } from './inject-mutation'
 import { injectQuery } from './inject-query'
 import { provideQueryClient } from './provider'
 import { QueryClient } from './query-client'
-import type { QueryFunctionContext } from './types'
+import type {
+  InfiniteQueryFunctionContext,
+  QueryFunctionContext,
+  QueryKey,
+} from './types'
 import { deferred } from './utils'
 
 // Runs `body` in an effect of a mounted component, the way an app calls the
@@ -747,6 +759,305 @@ describe('QueryClient', () => {
 
         tick(1)
         expect(client.getQueryData(['todos'])).toBeUndefined()
+      }))
+    })
+  })
+
+  // A list of the items 0 to 7, two to a page: the pages are asked for with
+  // the params 0, 2, 4 and 6 (see server()).
+  describe('infiniteQuery', () => {
+    it('fetches the first page with initialPageParam, and resolves with the list', fakeAsync(() => {
+      const api = server()
+      const result = settled(client.infiniteQuery(listOptions(api)))
+
+      flushMicrotasks()
+
+      expect(api.sent).toEqual([0])
+      expect(result.value).toEqual({ pages: [api.page(0)], pageParams: [0] })
+      expect(client.getQueryData(['list'])).toBe(result.value)
+    }))
+
+    it('fetches as many pages as `pages` asks for, each with the param getNextPageParam gives for the page before', fakeAsync(() => {
+      const api = server()
+      const result = settled(
+        client.infiniteQuery({ ...listOptions(api), pages: 3 }),
+      )
+
+      flushMicrotasks()
+
+      expect(api.sent).toEqual([0, 2, 4])
+      expect(result.value).toEqual(threePages(api))
+    }))
+
+    it('fetches fewer pages than `pages` asks for once getNextPageParam gives no next one', fakeAsync(() => {
+      const api = server()
+
+      client.infiniteQuery({ ...listOptions(api), pages: 5 })
+
+      expect(api.sent).toEqual([0, 2, 4, 6])
+    }))
+
+    it("refetches every page a stale list holds, in order, from the first page's own param", fakeAsync(() => {
+      const api = server()
+
+      client.setQueryData<List>(['list'], {
+        pages: [api.page(2), api.page(4), api.page(6)],
+        pageParams: [2, 4, 6],
+      })
+      // Item 3 is deleted: each page after the first is asked for with the
+      // param getNextPageParam gives for the page just fetched.
+      api.items = [0, 1, 2, 4, 5, 6, 7]
+
+      const result = settled(client.infiniteQuery(listOptions(api)))
+
+      flushMicrotasks()
+
+      expect(api.sent).toEqual([2, 5, 7])
+      expect(result.value).toEqual({
+        pages: [api.page(2), api.page(5), api.page(7)],
+        pageParams: [2, 5, 7],
+      })
+    }))
+
+    it('fetches only the first `pages` pages of a stale list that holds more', fakeAsync(() => {
+      const api = server()
+
+      client.setQueryData<List>(['list'], threePages(api))
+
+      const result = settled(
+        client.infiniteQuery({ ...listOptions(api), pages: 1 }),
+      )
+
+      flushMicrotasks()
+
+      expect(api.sent).toEqual([0])
+      expect(result.value).toEqual({ pages: [api.page(0)], pageParams: [0] })
+    }))
+
+    it('fetches only the first page with `pages: 0`, however many pages a stale list holds', fakeAsync(() => {
+      const api = server()
+
+      client.setQueryData<List>(['list'], threePages(api))
+
+      const result = settled(
+        client.infiniteQuery({ ...listOptions(api), pages: 0 }),
+      )
+
+      flushMicrotasks()
+
+      expect(api.sent).toEqual([0])
+      expect(result.value).toEqual({ pages: [api.page(0)], pageParams: [0] })
+    }))
+
+    it('fetches as many pages as `pages` asks for of a stale list that holds fewer', fakeAsync(() => {
+      const api = server()
+
+      client.setQueryData<List>(['list'], {
+        pages: [api.page(0)],
+        pageParams: [0],
+      })
+
+      const result = settled(
+        client.infiniteQuery({ ...listOptions(api), pages: 3 }),
+      )
+
+      flushMicrotasks()
+
+      expect(api.sent).toEqual([0, 2, 4])
+      expect(result.value).toEqual(threePages(api))
+    }))
+
+    it("leaves a list that's fresh for the options' staleTime as it is, whatever `pages` asks for", fakeAsync(() => {
+      const api = server()
+      const options = listOptions(api, { staleTime: 60_000 })
+
+      client.infiniteQuery(options)
+      tick(59_999)
+
+      const result = settled(client.infiniteQuery({ ...options, pages: 3 }))
+
+      flushMicrotasks()
+
+      expect(api.sent).toEqual([0])
+      expect(result.value).toEqual({ pages: [api.page(0)], pageParams: [0] })
+    }))
+
+    it('counts the pages it fetches, not the pages maxPages keeps', fakeAsync(() => {
+      const api = server()
+      const result = settled(
+        client.infiniteQuery({
+          ...listOptions(api, { maxPages: 2 }),
+          pages: 3,
+        }),
+      )
+
+      flushMicrotasks()
+
+      expect(api.sent).toEqual([0, 2, 4])
+      expect(result.value).toEqual({
+        pages: [api.page(2), api.page(4)],
+        pageParams: [2, 4],
+      })
+    }))
+
+    it("doesn't retry a page that fails unless asked, and the list keeps the pages it held", fakeAsync(() => {
+      const api = server()
+
+      client.setQueryData<List>(['list'], threePages(api))
+      api.failOnce.add(2)
+
+      const result = settled(client.infiniteQuery(listOptions(api)))
+
+      tick(60_000)
+
+      expect(api.sent).toEqual([0, 2])
+      expect(result.error).toEqual(new Error('page 2 failed'))
+      expect(client.getQueryData(['list'])).toEqual(threePages(api))
+    }))
+
+    it("lets a component that shows the key afterwards show the list without a fetch while it's fresh, and add the next page", fakeAsync(() => {
+      const api = server()
+
+      client.infiniteQuery(listOptions(api, { staleTime: 60_000 }))
+
+      const { fixture, created: list } = mountHost(() =>
+        injectInfiniteQuery(() => listOptions(api, { staleTime: 60_000 })),
+      )
+
+      expect(list.data()).toEqual({ pages: [api.page(0)], pageParams: [0] })
+      expect(list.isFetching()).toBe(false)
+      expect(list.hasNextPage()).toBe(true)
+
+      list.fetchNextPage()
+      flushMicrotasks()
+
+      expect(api.sent).toEqual([0, 2])
+      expect(list.data()).toEqual({
+        pages: [api.page(0), api.page(2)],
+        pageParams: [0, 2],
+      })
+
+      fixture.destroy()
+    }))
+
+    it('goes on with its own queryFn once a component that joined its fetch moves to another key', fakeAsync(() => {
+      const sent: string[] = []
+      const answers: Array<() => void> = []
+      // Promise query functions that don't read the signal: the component
+      // leaving the key doesn't stop the fetch.
+      const pagesOf =
+        (who: string) =>
+        ({
+          queryKey: [, list],
+          pageParam,
+        }: InfiniteQueryFunctionContext<QueryKey, number>): Promise<Page> => {
+          sent.push(`${who} ${list}:${pageParam}`)
+
+          return new Promise((resolve) =>
+            answers.push(() =>
+              resolve({
+                items: [`${list}:${pageParam}`],
+                next: pageParam < 4 ? pageParam + 2 : null,
+                previous: null,
+              }),
+            ),
+          )
+        }
+      const listOf = (list: number, who: string) => ({
+        queryKey: ['list', list],
+        queryFn: pagesOf(who),
+        initialPageParam: 0,
+        getNextPageParam: (lastPage: Page) => lastPage.next,
+      })
+      const result = settled(
+        client.infiniteQuery({ ...listOf(1, 'call'), pages: 3 }),
+      )
+      // The list opens while the prefetch runs, so the component joins its
+      // fetch, then moves to another list before the first page is in.
+      const { fixture, value } = mountHost(
+        (list) => injectInfiniteQuery(() => listOf(list(), 'component')),
+        1,
+      )
+
+      value.set(2)
+      fixture.detectChanges()
+
+      for (let i = 0; i < 5; i++) {
+        answers.splice(0).forEach((answer) => answer())
+        flushMicrotasks()
+      }
+
+      expect(sent).toEqual([
+        'call 1:0',
+        'component 2:0',
+        'call 1:2',
+        'call 1:4',
+      ])
+      expect(result.value?.pageParams).toEqual([0, 2, 4])
+
+      fixture.destroy()
+    }))
+
+    it('waits for a fetch of the list in flight, whatever `pages` asks for', fakeAsync(() => {
+      const api = server()
+
+      api.hold.add(0)
+
+      const { fixture } = mountHost(() =>
+        injectInfiniteQuery(() => listOptions(api)),
+      )
+      const result = settled(
+        client.infiniteQuery({ ...listOptions(api), pages: 3 }),
+      )
+
+      api.answer(0)
+      flushMicrotasks()
+
+      expect(api.sent).toEqual([0])
+      expect(result.value).toEqual({ pages: [api.page(0)], pageParams: [0] })
+
+      fixture.destroy()
+    }))
+
+    // As for query(): initialData seeds a key with no data, and staleTime
+    // decides whether the seed is fetched over.
+    describe('with initialData', () => {
+      it('resolves with a fresh seed, without a request', fakeAsync(() => {
+        const api = server()
+        const seed: List = { pages: [api.page(4)], pageParams: [4] }
+        const result = settled(
+          client.infiniteQuery(
+            listOptions(api, { initialData: seed, staleTime: 60_000 }),
+          ),
+        )
+
+        flushMicrotasks()
+
+        expect(result.value).toBe(seed)
+        expect(api.sent).toEqual([])
+      }))
+
+      it("refetches every page of a stale seed, from its first page's param", fakeAsync(() => {
+        const api = server()
+        const seed: List = {
+          pages: [api.page(2), api.page(4)],
+          pageParams: [2, 4],
+        }
+
+        // The server's list has changed since the seed was read.
+        api.version = 1
+
+        const result = settled(
+          client.infiniteQuery(listOptions(api, { initialData: seed })),
+        )
+
+        flushMicrotasks()
+
+        expect(api.sent).toEqual([2, 4])
+        expect(result.value).toEqual({
+          pages: [api.page(2), api.page(4)],
+          pageParams: [2, 4],
+        })
       }))
     })
   })

@@ -202,7 +202,7 @@ A next page that fails puts the list in `'error'`: `isError()` is `true` and `er
 
 As for any query, once no component shows the list, a fetch that leaving can stop is stopped, an `Observable` one or a `Promise` one whose function reads the `signal`, and the list keeps the pages it had. Any other `Promise` fetch runs on to its end, every page of it, and the pages it brings are kept for whoever comes back (see [Cancellation](/queries/query-functions#cancellation-observable-or-promise)). A page that fails then isn't tried again.
 
-A component that moves to another key is different: its `queryFn`, if it reads the key's value when it runs, now fetches the next key's data. So no page of the list it left is asked for with that function after the switch, and that list lands with the pages that came before it, all of them its own. If an enabled component still shows that list, the rest of its pages come with that component's `queryFn` instead.
+A component that moves to another key is different: its `queryFn`, if it reads the key's value when it runs, now fetches the next key's data. So no page of the list it left is asked for with that function after the switch, and that list lands with the pages that came before it, all of them its own. If an enabled component still shows that list, the rest of its pages come with that component's `queryFn` instead, and with none, with that of an `infiniteQuery()` call that asked for the fetch, such as a prefetch the component joined.
 
 ## Updating the pages by hand
 
@@ -272,9 +272,40 @@ export class TodoQueries {
 // protected readonly todos = injectInfiniteQuery(() => this.#queries.todos())
 ```
 
+## Prefetching
+
+The client's `infiniteQuery()` fetches a list ahead of time, on hover say, so that it opens with its pages, or waits for them in a route resolver. Hand it the list's definition:
+
+```ts
+// Prefetch on hover so the list opens with its first page
+protected prefetchTodos(): void {
+  this.#client.infiniteQuery(this.#queries.todos())
+}
+```
+
+A list with no pages yet gets its first page, fetched with `initialPageParam`, and a component that shows the key afterwards reads it as its own, `hasNextPage()` included, and goes on from there with `fetchNextPage()`. A stale list is fetched again the way any refetch of it is: every page it holds, in order (see [How a refetch works](#how-a-refetch-works)). A list that's fresh for its `staleTime` is left as it is.
+
+`pages` asks for more than the first page:
+
+```ts
+export const todosResolver: ResolveFn<InfiniteData<TodoPage, number>> = () =>
+  injectQueryClient().infiniteQuery({
+    ...inject(TodoQueries).todos(),
+    pages: 3,
+  })
+```
+
+It fetches the first three pages in order, each with the param `getNextPageParam` gives for the page before, and fewer once there's no next one, whether the list held fewer pages or more. `pages` counts the pages it fetches: `maxPages` still decides how many of them the list keeps. It applies only to a fetch the call starts: a fresh list is left as it is, and a fetch of the list already in flight is waited for, whatever it brings.
+
+Otherwise it works as [`query()`](/query-client/manual-cache-updates#prefetching-query) does for a query. The promise resolves with the list or rejects with the error, and nothing has to wait for it: a fetch that fails only shows in the list. A page that fails isn't tried again unless `retry` asks, in the definition or in [Default Options](/query-client/default-options), and the list keeps the pages it had. What only a component does, such as polling, doesn't apply.
+
+On the server, a list it fetches during the render comes over to the browser with [`withHydration()`](/server-rendering), as a query's data does, and so do its page params. JSON can't carry an `undefined` one: a list that starts from `initialPageParam: undefined` stays on the server, so start it from `null` (see [Data JSON can't carry](/server-rendering#data-json-cant-carry)).
+
+Don't prefetch a list with `fetchQuery()`: it fetches a plain query, so called with the list's key, it stores one page as the list's data, which the list then fails to read.
+
 ## Not here yet
 
-The client can't prefetch an infinite list yet: `query()` takes a plain query's options, so an infinite list's definition doesn't compile there, and `fetchQuery()` called with the list's key stores one page as the list's data, which the list then fails to read. And `injectQueries` runs plain queries only.
+`injectQueries` runs plain queries only.
 
 ## A note if you're coming from TanStack Query
 
@@ -283,9 +314,9 @@ The client can't prefetch an infinite list yet: `query()` takes a plain query's 
 - **The first page that `fetchNextPage()` loads, while the list holds none, is a first load.** `isFetchingNextPage()` and `isFetchNextPageError()` stay `false` for it; TanStack counts it as a next page.
 - **A page added to stale pages keeps the stale mark.** In TanStack it clears it.
 - **A page that comes back `undefined` fails the fetch.** TanStack keeps it as a page.
-- **A refetch starts from the first page's own param, `null` included.** TanStack takes `initialPageParam` in place of a `null` or `undefined` one.
-- **A lowered `maxPages` takes effect as the next page comes.** In TanStack, a page added to a list already longer than `maxPages` drops one page only, so the list stays as long until a refetch, although its docs say only `maxPages` pages are kept.
 - **A `maxPages` below `0` keeps every page, as an unset one does.** In TanStack the list stays empty.
 - **No `direction` in the query function's context.** TanStack still passes it, deprecated, and suggests the param instead.
 - **A component that moved to another key doesn't fetch the rest of the list it left.** In TanStack a refetch in flight goes on with that component's query function, so one that reads the key's value when it runs adds the next key's pages to the old list.
 - **Generics.** `injectInfiniteQuery<TPage, TError, TQueryKey, TPageParam>` puts the page type first, as `injectQuery` does; TanStack has the data type of `select`, which isn't here, in third place.
+- **`infiniteQuery()` is here; `fetchInfiniteQuery()`, `prefetchInfiniteQuery()` and `ensureInfiniteQueryData()` aren't.** A prefetch is an `infiniteQuery()` whose promise nothing waits for.
+- **`infiniteQuery()` needs `getNextPageParam`**: it takes the list's definition. TanStack's takes options without it unless `pages` is set, and then fails to refetch a stale list of two pages or more.

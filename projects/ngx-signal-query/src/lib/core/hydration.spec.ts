@@ -26,6 +26,8 @@ import {
 import { withDefaultOptions } from '../features/with-default-options'
 import { withHydration } from '../features/with-hydration'
 import { TRANSFER_KEY } from './hydration'
+import { infiniteQueryOptions } from './infinite-query-options'
+import { injectInfiniteQuery } from './inject-infinite-query'
 import { injectQuery } from './inject-query'
 import { provideQueryClient } from './provider'
 import { QueryClient } from './query-client'
@@ -176,6 +178,48 @@ describe('withHydration()', () => {
     inTheBrowser(page, [provideQueryClient(withHydration())])
 
     expect(TestBed.inject(QueryClient).getQueryData(['user'])).toBe('Ann')
+  }))
+
+  it('brings over a list the server prefetched with infiniteQuery(), which the browser shows without a fetch and adds the next page to', fakeAsync(() => {
+    const todoPage = (cursor: number) =>
+      Promise.resolve({ titles: [`todo ${cursor}`], next: cursor + 1 })
+    const todos = infiniteQueryOptions({
+      queryKey: ['todos'],
+      queryFn: ({ pageParam }) => todoPage(pageParam),
+      initialPageParam: 0,
+      getNextPageParam: (lastPage) => lastPage.next,
+    })
+    const page = renderOnServer(() =>
+      TestBed.inject(QueryClient).infiniteQuery({ ...todos, pages: 2 }),
+    )
+
+    inTheBrowser(page, [provideQueryClient(withHydration())])
+
+    const queryFn = jasmine.createSpy('queryFn', todoPage).and.callThrough()
+    const { fixture, created: list } = mountHost(() =>
+      injectInfiniteQuery(() => ({
+        ...todos,
+        queryFn: ({ pageParam }) => queryFn(pageParam),
+        staleTime: 60_000,
+      })),
+    )
+
+    expect(list.data()).toEqual({
+      pages: [
+        { titles: ['todo 0'], next: 1 },
+        { titles: ['todo 1'], next: 2 },
+      ],
+      pageParams: [0, 1],
+    })
+    expect(queryFn).not.toHaveBeenCalled()
+
+    list.fetchNextPage()
+    flushMicrotasks()
+
+    expect(queryFn).toHaveBeenCalledOnceWith(2)
+    expect(list.data()?.pages.length).toBe(3)
+
+    fixture.destroy()
   }))
 
   it("has the server's data in the cache before an app initializer reads it", fakeAsync(() => {

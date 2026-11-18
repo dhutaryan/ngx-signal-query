@@ -271,12 +271,16 @@ interface InFlightFetch<TData, TError, TQueryFnData> {
   // stopping the fetch with nothing in its place goes back to it (see
   // #stop).
   before: InternalQueryState<TData, TError>
-  // Whoever asked for the fetch last, and the queryFn it asked with: the
-  // caller that started it, one that joined it since, or a caller that asked
-  // for a refetch while it runs on a query with no data yet (see refetch).
-  // Each request after the first one of the fetch, a retry's included, falls
-  // back to that queryFn while it still asks for this query (see
-  // #nextQueryFn). Replaced whole, so the two always belong together.
+  // Who asked for the fetch last, and the queryFn it asked with: whoever
+  // started it or joined it since, or a caller no component owns that asked
+  // for a refetch while it runs on a query with no data yet (see refetch). A
+  // component that joins doesn't take over from a caller no component owns,
+  // such as query(): that caller's queryFn asks for this query for good,
+  // while the component may move on to another key, and its own queryFn is
+  // asked for first anyway while it shows the query (see #nextQueryFn). Each
+  // request after the first one of the fetch, a retry's included, falls back
+  // to that queryFn while it still asks for this query. Replaced whole, so
+  // the two always belong together.
   lastAsked: {
     readonly by: Asker<TData, TError, TQueryFnData>
     readonly queryFn: QueryFunction<TQueryFnData>
@@ -377,11 +381,11 @@ export class Query<TData, TError = Error, TQueryFnData = TData> {
 
   // Keeps the longest gcTime asked for by anything that used the query, as
   // in TanStack: whoever created it, each component that showed it, each
-  // query() or fetchQuery() call. A shorter one doesn't cut short a longer
-  // one asked for before. Never below 0. A NaN, such as `Number()` of a
-  // missing setting, keeps the query as Infinity does, but only until the
-  // next gcTime replaces it, as in TanStack: Math.max with a NaN would keep
-  // it for good.
+  // query(), infiniteQuery() or fetchQuery() call. A shorter one doesn't cut
+  // short a longer one asked for before. Never below 0. A NaN, such as
+  // `Number()` of a missing setting, keeps the query as Infinity does, but
+  // only until the next gcTime replaces it, as in TanStack: Math.max with a
+  // NaN would keep it for good.
   updateGcTime(ms: number): void {
     this.#gcTime = Math.max(this.#gcTime || 0, ms)
   }
@@ -480,11 +484,16 @@ export class Query<TData, TError = Error, TQueryFnData = TData> {
 
     if (running) {
       // Already in-flight: dedupe unless the caller explicitly wants a fresh
-      // fetch (e.g. invalidate/refetch) — then replace the old one. A caller
-      // that joins hands its queryFn over for the retries to come, and wants
-      // them made, even after the observers the fetch was started for left.
+      // fetch (e.g. invalidate/refetch) — then replace the old one. Whoever
+      // joins wants the requests to come made, even after the observers the
+      // fetch was started for left, and hands its queryFn over for them,
+      // unless it's a component and a caller no component owns asked before
+      // it (see InFlightFetch.lastAsked).
       if (!cancelRefetch) {
-        running.lastAsked = { by, queryFn }
+        if (by === 'caller' || running.lastAsked.by !== 'caller') {
+          running.lastAsked = { by, queryFn }
+        }
+
         running.retriesStopped = false
 
         return running.outcome.promise
@@ -909,12 +918,13 @@ export class Query<TData, TError = Error, TQueryFnData = TData> {
   // The queryFn for each request after the first one of a fetch, a retry's
   // first included: that of the first observer that wants the query fetched,
   // the one refetchIfActive picks, else that of whoever asked for the fetch
-  // last, while it still asks for this query (see QuerySubscriber.asksFor). A
-  // caller no component owns, such as query(), always does; a component
-  // does whether enabled or not, and even once it went away. Not simply the
-  // queryFn the fetch started with: a queryFn may read its key's value only
-  // when it runs, like `() => api(this.id())` does, and by then its component
-  // may have moved on to another key, its effects caught up or not. Null once
+  // last (see InFlightFetch.lastAsked), while it still asks for this query
+  // (see QuerySubscriber.asksFor). A caller no component owns, such as
+  // query(), always does; a component does whether enabled or not, and even
+  // once it went away. Not simply the queryFn the fetch started with: a
+  // queryFn may read its key's value only when it runs, like
+  // `() => api(this.id())` does, and by then its component may have moved on
+  // to another key, its effects caught up or not. Null once
   // no queryFn asks for this query: no request is made then (see
   // FetchAttempt). `wanted` says whether anyone still wants the data: not
   // once the component the queryFn came from went away. Its queryFn still
