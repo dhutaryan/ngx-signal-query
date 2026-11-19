@@ -192,7 +192,7 @@ it('adds a todo and invalidates the list', () => {
 
 If a hook returns a promise, the mutation settles only after it — run the test in `fakeAsync` and call `flushMicrotasks()` before asserting. That includes a hook that returns `invalidateQueries()` itself rather than a spy: the mutation then waits for the refetch.
 
-A hook that throws doesn't fail the test by itself: its error goes to the `ErrorHandler`, which in a test only logs it. Spy on it to check:
+A hook that throws doesn't fail the test by itself, and neither does a [global callback](/query-client/global-callbacks): its error goes to the `ErrorHandler`, which in a test only logs it. Spy on it to check:
 
 ```ts
 const handleError = spyOn(TestBed.inject(ErrorHandler), 'handleError')

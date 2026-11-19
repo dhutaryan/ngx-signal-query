@@ -1,0 +1,6 @@
+/* Type tests of an app that declares its own types on Register: a declaration there changes the types of every file compiled with it, so type-tests/register/ compiles apart from the other type tests. */
+{
+  "extends": "./tsconfig.type-tests.json",
+  "include": ["type-tests/register/**/*.ts"],
+  "exclude": []
+}

@@ -1,5 +1,7 @@
 import { InjectionToken } from '@angular/core'
 
+import type { MutationCacheConfig } from '../features/with-mutation-cache'
+import type { QueryCacheConfig } from '../features/with-query-cache'
 import type { DefaultOptions } from './types'
 
 /** @internal */
@@ -20,4 +22,22 @@ export const QUERY_CLIENT_CONFIG = new InjectionToken<QueryClientConfig>(
  */
 export const QUERY_CLIENT_HYDRATION = new InjectionToken<boolean>(
   'QUERY_CLIENT_HYDRATION',
+)
+
+/**
+ * Set by {@link withQueryCache}: the callbacks for every query in the cache.
+ *
+ * @internal
+ */
+export const QUERY_CACHE_CONFIG = new InjectionToken<QueryCacheConfig>(
+  'QUERY_CACHE_CONFIG',
+)
+
+/**
+ * Set by {@link withMutationCache}: the callbacks for every mutation.
+ *
+ * @internal
+ */
+export const MUTATION_CACHE_CONFIG = new InjectionToken<MutationCacheConfig>(
+  'MUTATION_CACHE_CONFIG',
 )

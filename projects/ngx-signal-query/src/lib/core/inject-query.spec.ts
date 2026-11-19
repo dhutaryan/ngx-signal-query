@@ -3494,6 +3494,24 @@ describe('injectQuery', () => {
       expect(result.data()).toBeUndefined()
       expect(queryFn).toHaveBeenCalledTimes(1)
     })
+
+    // The query the cache dropped is done with: no timer waits to collect it
+    // once the component that still showed it goes away.
+    it('leaves no timer of the dropped query behind once it goes away', fakeAsync(() => {
+      const { queryFn, resolve } = requests<string>()
+      const { fixture } = mount(
+        (id) => ({ queryKey: ['todo', id()], queryFn }),
+        1,
+      )
+
+      resolve('v1')
+      fixture.detectChanges()
+      client.removeQueries({ queryKey: ['todo', 1] })
+      fixture.destroy()
+
+      // Nothing is left to run, so flush() has no time to move on.
+      expect(flush()).toBe(0)
+    }))
   })
 
   describe('after clear()', () => {

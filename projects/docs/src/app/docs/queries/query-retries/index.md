@@ -7,7 +7,7 @@ That's the default, and it's usually what you want: most failures are a blip.
 - **`retry: 3`** — three retries after the initial attempt (so **four** calls to `queryFn` in total before the query errors).
 - **`retryDelay`** — exponential backoff: **1s**, then **2s**, then **4s**, doubling each time and capped at **30s**.
 
-Note that `queryFn` is called again for each retry — it isn't invoked once and replayed.
+Note that `queryFn` is called again for each retry — it isn't invoked once and replayed. So code that runs with the request, a `tap()` in `queryFn` or an `HttpInterceptor` that reports the failure, runs once per attempt. To report a failure once, after the last retry, use a [global callback](/query-client/global-callbacks).
 
 On the server, a query doesn't retry unless you set `retry`: a failure shows at once rather than holding up the page, and the browser tries again once it takes over. See [Important Defaults](/important-defaults#on-the-server).
 

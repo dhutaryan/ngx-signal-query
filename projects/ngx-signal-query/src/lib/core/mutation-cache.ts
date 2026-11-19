@@ -1,17 +1,13 @@
-import {
-  EnvironmentInjector,
-  ErrorHandler,
-  Injectable,
-  NgZone,
-  inject,
-} from '@angular/core'
+import { EnvironmentInjector, Injectable, NgZone, inject } from '@angular/core'
 
 import { Cache } from './cache'
+import { injectHostApp } from './host-app'
 import {
   type MutationFilters,
   type MutationOptions,
   Mutation,
 } from './mutation'
+import { injectMutationCacheCallbacks } from './mutation-cache-callbacks'
 import { lazyPendingTasks } from './pending-tasks'
 
 /** @internal */
@@ -20,24 +16,26 @@ export class MutationCache extends Cache<
   Mutation<unknown, unknown, unknown, unknown>
 > {
   #lastId = 0
-  readonly #injector = inject(EnvironmentInjector)
-  // The app's pending tasks, looked up for each task (see lazyPendingTasks),
-  // and Angular's zone, handed to each mutation it builds, which has no
-  // injector of its own, along with #reportError.
-  readonly #pendingTasks = lazyPendingTasks(this.#injector)
+  // What each mutation it builds needs from the app, having no injector of
+  // its own (see MutationConfig). The pending tasks are looked up for each
+  // task (see lazyPendingTasks).
+  readonly #pendingTasks = lazyPendingTasks(inject(EnvironmentInjector))
   readonly #zone = inject(NgZone)
+  readonly #callbacks = injectMutationCacheCallbacks()
+  readonly #reportError = injectHostApp().reportError
 
   build<TData, TError, TVariables, TContext>(
     options: MutationOptions<TData, TError, TVariables, TContext>,
   ): Mutation<TData, TError, TVariables, TContext> {
-    const mutation = new Mutation(
-      ++this.#lastId,
+    const mutation = new Mutation({
+      mutationId: ++this.#lastId,
       options,
-      this,
-      this.#pendingTasks,
-      this.#zone,
-      this.#reportError,
-    )
+      cache: this,
+      pendingTasks: this.#pendingTasks,
+      zone: this.#zone,
+      reportError: this.#reportError,
+      callbacks: this.#callbacks,
+    })
 
     this.addEntry(
       String(mutation.mutationId),
@@ -63,22 +61,4 @@ export class MutationCache extends Cache<
   ): void {
     this.removeEntry(String(mutation.mutationId))
   }
-
-  // Hands the error of a failing hook to the app's ErrorHandler. It's looked
-  // up each time, not injected: the app's ErrorHandler may use the client,
-  // which is created along with this cache, and then neither could be. All
-  // of it runs outside Angular's zone, where Angular calls the ErrorHandler
-  // for the errors it catches: a timer the handler sets, to hide the message
-  // it shows say, doesn't keep a zone.js app busy. An error the ErrorHandler
-  // can't take, as it throws or the injector is gone, surfaces as an
-  // unhandled rejection; outside the zone too, or zone.js would hand it to
-  // that ErrorHandler again. So this never throws, and the run settles.
-  readonly #reportError = (error: unknown): void =>
-    this.#zone.runOutsideAngular(() => {
-      try {
-        this.#injector.get(ErrorHandler).handleError(error)
-      } catch {
-        void Promise.reject(error)
-      }
-    })
 }

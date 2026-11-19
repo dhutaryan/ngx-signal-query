@@ -45,7 +45,7 @@ Query state is exposed as **signals** — `data()`, `status()`, `isFetching()`, 
 - 📜 Lists that load page by page, for "Load more" and infinite scroll (`injectInfiniteQuery`)
 - 🔁 Retries, polling, and refetch on window focus and reconnect
 - ✏️ Mutations with async lifecycle hooks and optimistic updates
-- 🌍 App-wide defaults and global indicators (`injectIsFetching()`, `injectIsMutating()`)
+- 🌍 App-wide defaults, callbacks for every query and mutation (`withQueryCache()`, `withMutationCache()`) and global indicators (`injectIsFetching()`, `injectIsMutating()`)
 - 🖥️ Server rendering: the server waits for every fetch, and `withHydration()` brings the data over to the browser
 
 Not here yet: devtools and persistence.

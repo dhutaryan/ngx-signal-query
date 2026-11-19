@@ -1,15 +1,9 @@
-import {
-  EnvironmentInjector,
-  inject,
-  Injectable,
-  runInInjectionContext,
-  untracked,
-} from '@angular/core'
+import { inject, Injectable, untracked } from '@angular/core'
 
 import { onReconnect, onWindowFocus } from './browser-events'
+import { injectHostApp } from './host-app'
 import { transferCache } from './hydration'
 import { infiniteQueryBehavior } from './infinite-query-behavior'
-import { isDestroyed } from './injector'
 import { inBrowser } from './platform'
 import {
   applyInitialData,
@@ -30,6 +24,7 @@ import type {
   QueryFilters,
   QueryFunction,
   QueryKey,
+  QueryMeta,
   QueryOptions,
   RetryDelayValue,
   RetryValue,
@@ -66,8 +61,8 @@ export class QueryClient {
   readonly #mutationCache = inject(MutationCache)
   readonly #config = inject(QUERY_CLIENT_CONFIG, { optional: true }) ?? {}
   readonly #onServer = !inBrowser()
-  /** @internal */
-  readonly #injector = inject(EnvironmentInjector)
+  // Runs the default hooks in the app's injection context (see HostApp).
+  readonly #app = injectHostApp()
 
   /** @internal */
   constructor() {
@@ -163,9 +158,9 @@ export class QueryClient {
       ...options,
       retry: options.retry ?? defaults?.retry,
       retryDelay: options.retryDelay ?? defaults?.retryDelay,
-      onSuccess: options.onSuccess ?? this.#inContext(defaults?.onSuccess),
-      onError: options.onError ?? this.#inContext(defaults?.onError),
-      onSettled: options.onSettled ?? this.#inContext(defaults?.onSettled),
+      onSuccess: options.onSuccess ?? this.#app.inContext(defaults?.onSuccess),
+      onError: options.onError ?? this.#app.inContext(defaults?.onError),
+      onSettled: options.onSettled ?? this.#app.inContext(defaults?.onSettled),
     }
   }
 
@@ -302,9 +297,9 @@ export class QueryClient {
    * {@link queryOptions} definition, prefer `query()`: taking it apart keeps
    * only what's passed on, and there's no place here for its `initialData`.
    *
-   * Takes `staleTime`, `gcTime`, `retry`, `retryDelay` and
-   * `structuralSharing`, and resolves, rejects, retries and caches the way
-   * `query()` does. A key already fetching is waited for, not fetched again,
+   * Takes `staleTime`, `gcTime`, `retry`, `retryDelay`, `structuralSharing`
+   * and `meta`, and resolves, rejects, retries and caches the way `query()`
+   * does. A key already fetching is waited for, not fetched again,
    * unless `cancelRefetch` is set: then the fetch in flight is replaced, or,
    * while the key has no data yet, let land, then fetched once more with this
    * call's `queryFn` and options (the last such call's, if several came),
@@ -322,7 +317,8 @@ export class QueryClient {
    *   {@link QueryFunctionContext}). Return `null` for no data: `undefined`
    *   fails the fetch.
    * @param options - Fetch tuning (`staleTime`, `gcTime`, `retry`,
-   *   `retryDelay`, `structuralSharing`, `cancelRefetch`).
+   *   `retryDelay`, `structuralSharing`, `cancelRefetch`) and the query's
+   *   `meta`, which the app's callbacks get (see {@link withQueryCache}).
    * @returns A promise of the data.
    *
    * @example
@@ -348,6 +344,7 @@ export class QueryClient {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       retryDelay?: RetryDelayValue<any>
       structuralSharing?: StructuralSharingValue<NoInfer<TData>>
+      meta?: QueryMeta
       cancelRefetch?: boolean
     } = {},
   ): Promise<TData> {
@@ -362,6 +359,7 @@ export class QueryClient {
       retry,
       retryDelay,
       structuralSharing,
+      meta,
     } = options
 
     return this.#fetch<TData>(
@@ -373,6 +371,7 @@ export class QueryClient {
         retry,
         retryDelay,
         structuralSharing,
+        meta,
       },
       { cancelRefetch },
     )
@@ -712,29 +711,5 @@ export class QueryClient {
   #defaultStructuralSharing<TData>(): StructuralSharingValue<TData> {
     return (this.#config.defaultOptions?.queries?.structuralSharing ??
       true) as StructuralSharingValue<TData>
-  }
-
-  /**
-   * Runs a default hook in the injection context of the injector that
-   * provides the client, so it can call inject(). The defaults belong to the
-   * app, so it's this injector, not the component that started the run.
-   *
-   * @internal
-   */
-  #inContext<TArgs extends unknown[]>(
-    hook: ((...args: TArgs) => unknown) | undefined,
-  ): ((...args: TArgs) => unknown) | undefined {
-    if (!hook) return
-
-    return (...args) => {
-      // Once that injector, or one above it, is destroyed, the app the
-      // defaults belong to is gone: a run that lands after it, e.g. after its
-      // test has ended, skips them. So does one that lands while Angular tears
-      // the app down, a save a component starts as it goes say: the app's
-      // injector counts as destroyed by then (see isDestroyed).
-      if (isDestroyed(this.#injector)) return
-
-      return runInInjectionContext(this.#injector, () => hook(...args))
-    }
   }
 }

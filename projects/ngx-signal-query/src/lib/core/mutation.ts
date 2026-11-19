@@ -22,8 +22,9 @@ import {
 } from 'rxjs'
 
 import type { MutationCache } from './mutation-cache'
+import type { MutationCacheCallbacks } from './mutation-cache-callbacks'
 import { countFailure, defaultRetryDelay, retryer } from './retryer'
-import type { RetryDelayValue, RetryValue } from './types'
+import type { MutationMeta, RetryDelayValue, RetryValue } from './types'
 import { deferred, isPromiseLike } from './utils'
 import { requestOutsideZone } from './zone'
 
@@ -128,6 +129,31 @@ export type MutationOptions<TData, TError, TVariables, TContext> = {
     variables: TVariables,
     context: TContext | undefined,
   ) => Promise<unknown> | unknown
+  /**
+   * What the app's cache callbacks need to know about the mutation, such as
+   * the queries to invalidate once it succeeds (see
+   * {@link withMutationCache}). The library itself doesn't read it. Its type
+   * is the `mutationMeta` that the app declares on {@link Register}, if it
+   * does.
+   */
+  meta?: MutationMeta
+}
+
+/**
+ * A run of a mutation, as a cache callback gets it (see
+ * {@link withMutationCache}): its state when the callback runs, still
+ * `'pending'` while the hooks run, and the `meta` of its options.
+ */
+export type MutationSnapshot<
+  TData = unknown,
+  TError = unknown,
+  TVariables = unknown,
+  TContext = unknown,
+> = {
+  /** The run's state when the callback runs. */
+  readonly state: Readonly<MutationState<TData, TError, TVariables, TContext>>
+  /** The `meta` of the mutation's options, if they have one. */
+  readonly meta: MutationMeta | undefined
 }
 
 /** Reactive result returned by {@link injectMutation}; state fields are signals. */
@@ -193,6 +219,31 @@ export function getInitialState<
   }
 }
 
+/**
+ * What a mutation is created with.
+ *
+ * @internal
+ */
+export type MutationConfig<TData, TError, TVariables, TContext> = {
+  mutationId: number
+  options: MutationOptions<TData, TError, TVariables, TContext>
+  /**
+   * The cache it lives in, which it only reaches to remove itself from once
+   * it's done and nobody observes it.
+   */
+  cache: Pick<MutationCache, 'remove'>
+  /**
+   * The app's pending tasks: each run holds one until its last hook is done.
+   */
+  pendingTasks: Pick<PendingTasks, 'add'>
+  /** Angular's zone, which its writes stay out of. */
+  zone: Pick<NgZone, 'run' | 'runOutsideAngular'>
+  /** Hands the error of a failing hook to the app's ErrorHandler. */
+  reportError: (error: unknown) => void
+  /** The app's callbacks for every mutation, which run before its own hooks. */
+  callbacks: MutationCacheCallbacks
+}
+
 /** @internal */
 export class Mutation<
   TData = unknown,
@@ -200,6 +251,8 @@ export class Mutation<
   TVariables = void,
   TContext = unknown,
 > {
+  readonly mutationId: number
+
   readonly #state =
     signal<MutationState<TData, TError, TVariables, TContext>>(
       getInitialState(),
@@ -212,24 +265,28 @@ export class Mutation<
 
   #observers = 0
   readonly #options: MutationOptions<TData, TError, TVariables, TContext>
-  readonly #cache: MutationCache
+  readonly #cache: Pick<MutationCache, 'remove'>
   readonly #pendingTasks: Pick<PendingTasks, 'add'>
   readonly #zone: Pick<NgZone, 'run' | 'runOutsideAngular'>
   readonly #reportError: (error: unknown) => void
+  readonly #callbacks: MutationCacheCallbacks
 
-  constructor(
-    readonly mutationId: number,
-    options: MutationOptions<TData, TError, TVariables, TContext>,
-    cache: MutationCache,
-    pendingTasks: Pick<PendingTasks, 'add'>,
-    zone: Pick<NgZone, 'run' | 'runOutsideAngular'>,
-    reportError: (error: unknown) => void,
-  ) {
+  constructor({
+    mutationId,
+    options,
+    cache,
+    pendingTasks,
+    zone,
+    reportError,
+    callbacks,
+  }: MutationConfig<TData, TError, TVariables, TContext>) {
+    this.mutationId = mutationId
     this.#options = options
     this.#cache = cache
     this.#pendingTasks = pendingTasks
     this.#zone = zone
     this.#reportError = reportError
+    this.#callbacks = callbacks
   }
 
   get observerCount(): number {
@@ -278,14 +335,22 @@ export class Mutation<
       submittedAt: Date.now(),
     })
 
-    // The outcome is fixed before the hooks that report it run: by onMutate,
-    // whose failure calls off the write, then by the write. A hook that fails
-    // after that can't turn a write that went through into an error. The run
-    // stays pending, and in the cache, until its last hook is done. Nothing
-    // stops it before that: the write has most likely reached the server
-    // (see removeObserver), so clearing the cache only forgets the run.
-    awaitHook(() => this.#options.onMutate?.(variables))
+    // The outcome is fixed before the hooks that report it run: by the app's
+    // onMutate, the mutation's own and then the write. Either onMutate calls
+    // the write off when it fails. A hook that fails after that
+    // can't turn a write that went through into an error. The run stays
+    // pending, and in the cache, until its last hook is done. Nothing stops
+    // it before that: the write has most likely reached the server (see
+    // removeObserver), so clearing the cache only forgets the run.
+    awaitHook(() =>
+      this.#callbacks.onMutate?.(variables, {
+        state: this.state(),
+        meta: this.#options.meta,
+      }),
+    )
       .pipe(
+        // Only the mutation's own onMutate makes the context.
+        concatMap(() => awaitHook(() => this.#options.onMutate?.(variables))),
         tap((context) =>
           this.#state.update((state) => ({ ...state, context })),
         ),
@@ -366,7 +431,8 @@ export class Mutation<
 
   /**
    * Runs the hooks that report an outcome, in order: onSuccess or onError,
-   * then onSettled. A hook that returns a promise holds the next one until it
+   * then onSettled, the app's callback before the mutation's own hook of the
+   * same name. A hook that returns a promise holds the next one until it
    * settles. One that fails is reported, and the next still runs.
    */
   #runHooks(
@@ -374,12 +440,39 @@ export class Mutation<
     variables: TVariables,
   ): Observable<never> {
     const { context } = this.state()
+    // The run as the app's callbacks get it. Its state stays as it is until
+    // the hooks are done: the outcome is written after them.
+    const mutation = { state: this.state(), meta: this.#options.meta }
 
     return concat(
       runHook(this.#reportError, () =>
         outcome.status === 'success'
+          ? this.#callbacks.onSuccess?.(
+              outcome.data,
+              variables,
+              context,
+              mutation,
+            )
+          : this.#callbacks.onError?.(
+              outcome.error,
+              variables,
+              context,
+              mutation,
+            ),
+      ),
+      runHook(this.#reportError, () =>
+        outcome.status === 'success'
           ? this.#options.onSuccess?.(outcome.data, variables, context)
           : this.#options.onError?.(outcome.error, variables, context),
+      ),
+      runHook(this.#reportError, () =>
+        this.#callbacks.onSettled?.(
+          outcome.data,
+          outcome.error,
+          variables,
+          context,
+          mutation,
+        ),
       ),
       runHook(this.#reportError, () =>
         this.#options.onSettled?.(

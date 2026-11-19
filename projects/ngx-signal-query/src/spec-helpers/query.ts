@@ -1,5 +1,4 @@
 import { Query } from '../lib/core/query'
-import type { QueryCache } from '../lib/core/query-cache'
 import type { QueryState } from '../lib/core/types'
 
 // A query outside any cache or app, for the specs of Query and of what its
@@ -23,7 +22,7 @@ export function createQuery<TData, TError = Error, TQueryFnData = TData>(
   >({
     key: ['key'],
     queryHash: '["key"]',
-    cache: cache as unknown as QueryCache,
+    cache,
     gcTime,
     pendingTasks: {
       add: () => {
@@ -38,6 +37,8 @@ export function createQuery<TData, TError = Error, TQueryFnData = TData>(
     // Angular's zone as an app without zone.js has it: both run what they're
     // given as is.
     zone: { run: (fn) => fn(), runOutsideAngular: (fn) => fn() },
+    // An app with no callbacks for its queries.
+    callbacks: { success: () => undefined, error: () => undefined },
   })
 
   return { query, cache, tasks }

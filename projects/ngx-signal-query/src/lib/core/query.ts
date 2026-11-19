@@ -11,6 +11,7 @@ import {
 
 import { CancelledError } from './cancelled-error'
 import type { QueryCache } from './query-cache'
+import type { QueryCacheCallbacks } from './query-cache-callbacks'
 import { countFailure, defaultRetryDelay, retryer } from './retryer'
 import { type Deferred, deferred, isValidTimeout, replaceData } from './utils'
 import { requestOutsideZone } from './zone'
@@ -86,20 +87,29 @@ export interface QuerySubscriber<TData, TError = Error, TQueryFnData = TData> {
 }
 
 /**
- * What a query is created with: its key and the key's hash, the cache it
- * lives in, how long it stays there once nothing uses it, the app's pending
- * tasks, one of which each of its fetches holds while in flight, and
- * Angular's zone, which its requests and its gc timer stay out of.
+ * What a query is created with.
  *
  * @internal
  */
 export interface QueryConfig {
   key: QueryKey
   queryHash: string
-  cache: QueryCache
+  /**
+   * The cache it lives in, which it only reaches to remove itself from once
+   * unused.
+   */
+  cache: Pick<QueryCache, 'remove'>
+  /** How long it stays in the cache once nothing uses it. */
   gcTime: number
+  /** The app's pending tasks: each of its fetches holds one while in flight. */
   pendingTasks: Pick<PendingTasks, 'add'>
+  /** Angular's zone, which its requests and its gc timer stay out of. */
   zone: Pick<NgZone, 'run' | 'runOutsideAngular'>
+  /**
+   * The app's callbacks, which hear of each of its fetches that lands or
+   * fails.
+   */
+  callbacks: QueryCacheCallbacks
 }
 
 /**
@@ -164,16 +174,17 @@ export type FetchBehavior<TQueryFnData, TData> = (start: {
 }) => FetchAttempt<TQueryFnData, TData>
 
 /**
- * What a fetch runs with, as its caller asks for it: the query function and
- * the retry policy, as a query's options give them; how the response merges
- * with the data the query holds; how the fetch gets that data from the query
- * function; and, for a fetch that adds a page, which way.
+ * What a fetch runs with, as its caller asks for it: the query function, the
+ * retry policy and the meta that the app's callbacks get, as a query's
+ * options give them; how the response merges with the data the query holds;
+ * how the fetch gets that data from the query function; and, for a fetch that
+ * adds a page, which way.
  *
  * @internal
  */
 export type FetchArgs<TData, TError = Error, TQueryFnData = TData> = Pick<
   QueryOptions<TQueryFnData, TError>,
-  'queryFn' | 'retry' | 'retryDelay'
+  'queryFn' | 'retry' | 'retryDelay' | 'meta'
 > & {
   structuralSharing?: StructuralSharingValue<TData>
   behavior?: FetchBehavior<TQueryFnData, TData>
@@ -182,8 +193,8 @@ export type FetchArgs<TData, TError = Error, TQueryFnData = TData> = Pick<
 
 /**
  * What a fetch made with a query's options runs with: its query function,
- * its retry policy and how its data merges, taken field by field, so nothing
- * else an options object holds reaches the fetch.
+ * its retry policy, how its data merges and its meta, taken field by field,
+ * so nothing else an options object holds reaches the fetch.
  *
  * @internal
  */
@@ -191,13 +202,14 @@ export function fetchArgsOf<TData, TError, TQueryFnData = TData>(
   options: DefaultedQueryOptions<TData, TError, TQueryFnData>,
 ): Pick<
   DefaultedQueryOptions<TData, TError, TQueryFnData>,
-  'queryFn' | 'retry' | 'retryDelay' | 'structuralSharing'
+  'queryFn' | 'retry' | 'retryDelay' | 'structuralSharing' | 'meta'
 > {
   return {
     queryFn: options.queryFn,
     retry: options.retry,
     retryDelay: options.retryDelay,
     structuralSharing: options.structuralSharing,
+    meta: options.meta,
   }
 }
 
@@ -352,9 +364,15 @@ export class Query<TData, TError = Error, TQueryFnData = TData> {
   readonly #observers = new Set<QuerySubscriber<TData, TError, TQueryFnData>>()
   #gcTime = 0
   #gcTimer: ReturnType<typeof setTimeout> | null = null
-  readonly #cache: QueryCache
+  // Set by destroy(): the query is thrown away. Code still busy with it may
+  // call it after that, such as the end of its fetch, or a loop over the
+  // cache's queries, once a callback of the app removed it: it starts no
+  // refetch then, and no gc timer.
+  #destroyed = false
+  readonly #cache: Pick<QueryCache, 'remove'>
   readonly #pendingTasks: Pick<PendingTasks, 'add'>
   readonly #zone: Pick<NgZone, 'run' | 'runOutsideAngular'>
+  readonly #callbacks: QueryCacheCallbacks
 
   constructor({
     key,
@@ -363,12 +381,14 @@ export class Query<TData, TError = Error, TQueryFnData = TData> {
     gcTime,
     pendingTasks,
     zone,
+    callbacks,
   }: QueryConfig) {
     this.key = key
     this.queryHash = queryHash
     this.#cache = cache
     this.#pendingTasks = pendingTasks
     this.#zone = zone
+    this.#callbacks = callbacks
     this.updateGcTime(gcTime)
     // A new query has nothing using it yet: its creator is about to, and if
     // nothing ever does, gc removes it.
@@ -414,8 +434,11 @@ export class Query<TData, TError = Error, TQueryFnData = TData> {
 
   // Refetches the query if a component shows it: the first observer that
   // wants it fetched decides how, as in TanStack (see refetch). Returns the
-  // refetch's promise, or undefined if no observer wants the query fetched.
+  // refetch's promise, or undefined if no observer wants the query fetched
+  // or the query is destroyed.
   refetchIfActive(): Promise<TData> | undefined {
+    if (this.#destroyed) return
+
     for (const observer of this.#observers) {
       const options = observer.fetchOptions()
 
@@ -454,7 +477,9 @@ export class Query<TData, TError = Error, TQueryFnData = TData> {
 
   // Without a structuralSharing setting the response is stored as is: the
   // default is the client's to resolve. Without a behavior, the fetch makes
-  // one request, whose data the query stores.
+  // one request, whose data the query stores. Once the fetch lands or fails,
+  // the app's callbacks get the query with the `meta` of this call (see
+  // QueryCacheCallbacks): a caller that joins the fetch doesn't change it.
   //
   // Returns a promise of the data as the query stores it, which every caller
   // that joins the fetch shares. A fetch that replaces this one settles it
@@ -471,6 +496,7 @@ export class Query<TData, TError = Error, TQueryFnData = TData> {
       structuralSharing = false,
       behavior,
       direction,
+      meta,
     }: FetchArgs<TData, TError, TQueryFnData>,
     {
       cancelRefetch = false,
@@ -649,6 +675,20 @@ export class Query<TData, TError = Error, TQueryFnData = TData> {
             updatedAt: Date.now(),
             fetchDirection: direction ?? null,
           })
+          // The app's callbacks come before #refetchIfAsked starts the
+          // refetch queued during the fetch: that refetch may land at once,
+          // and its callbacks must come after these. A callback that removes
+          // the query, or clears the cache on a sign-out, leaves no refetch
+          // to start and no gc to schedule (see #destroyed).
+          this.#callbacks.success(
+            {
+              queryKey: this.key,
+              queryHash: this.queryHash,
+              state: this.state(),
+              meta,
+            },
+            data,
+          )
           outcome.resolve(data)
           this.#refetchIfAsked(inFlight)
           this.#scheduleGc()
@@ -665,6 +705,15 @@ export class Query<TData, TError = Error, TQueryFnData = TData> {
             isFetching: false,
             ...countFailure(state, err),
           }))
+          this.#callbacks.error(
+            {
+              queryKey: this.key,
+              queryHash: this.queryHash,
+              state: this.state(),
+              meta,
+            },
+            err,
+          )
           outcome.reject(err)
           this.#refetchIfAsked(inFlight)
           this.#scheduleGc()
@@ -803,6 +852,7 @@ export class Query<TData, TError = Error, TQueryFnData = TData> {
   // The query is thrown away with its data, so whoever waits for its fetch
   // gets a CancelledError, as in TanStack.
   destroy(): void {
+    this.#destroyed = true
     this.#stop((outcome) => outcome.reject(new CancelledError()))
     this.#clearGcTimer()
   }
@@ -851,13 +901,18 @@ export class Query<TData, TError = Error, TQueryFnData = TData> {
   // #queuedRefetchArgs), unless an attempt that started over began after the
   // refetch was last asked for: then all the data the fetch lands with was
   // read after the reason for the refetch (see InFlightFetch.refetchAsked).
-  // Whoever asked gets the refetch's outcome, or the fetch's.
+  // A query destroyed meanwhile, by a callback of the app that heard of the
+  // fetch, refetches nothing. Whoever asked gets the refetch's outcome, or
+  // the fetch's.
   #refetchIfAsked(inFlight: InFlightFetch<TData, TError, TQueryFnData>): void {
     const queued = inFlight.queuedRefetch
 
     if (!queued) return
 
-    const asked = inFlight.refetchAsked ? this.#queuedRefetchArgs(queued) : null
+    const asked =
+      inFlight.refetchAsked && !this.#destroyed
+        ? this.#queuedRefetchArgs(queued)
+        : null
 
     queued.outcome.resolve(
       asked
@@ -898,9 +953,10 @@ export class Query<TData, TError = Error, TQueryFnData = TData> {
   }
 
   // A fetch in flight is kept, as in TanStack, and the observers aren't even
-  // asked: fetch() would drop the refetch anyway.
+  // asked: fetch() would drop the refetch anyway. A destroyed query refetches
+  // nothing.
   #refetchOn(option: 'refetchOnWindowFocus' | 'refetchOnReconnect'): void {
-    if (this.#inFlight) return
+    if (this.#inFlight || this.#destroyed) return
 
     for (const observer of this.#observers) {
       const options = observer.fetchOptions()
@@ -1027,10 +1083,17 @@ export class Query<TData, TError = Error, TQueryFnData = TData> {
   #scheduleGc(): void {
     this.#clearGcTimer()
 
-    // While observed, the query is in use: the last observer leaving calls
-    // this again. Infinity, or a gcTime no timer can hold, keeps the query
-    // until something removes it: a browser would run the timer at once.
-    if (this.#observers.size > 0 || !isValidTimeout(this.#gcTime)) return
+    // A destroyed query is out of the cache already. While observed, the
+    // query is in use: the last observer leaving calls this again. Infinity,
+    // or a gcTime no timer can hold, keeps the query until something removes
+    // it: a browser would run the timer at once.
+    if (
+      this.#destroyed ||
+      this.#observers.size > 0 ||
+      !isValidTimeout(this.#gcTime)
+    ) {
+      return
+    }
 
     // Outside Angular's zone: with zone.js, a timer pending there keeps the
     // app from counting as stable, this one for gcTime. Nothing on screen

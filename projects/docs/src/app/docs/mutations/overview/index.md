@@ -118,7 +118,7 @@ This hook starts the refetch and returns nothing, so the mutation finishes as th
 
 The `context` returned by `onMutate` is what makes rollbacks possible — snapshot the old data, restore it if the request fails. That's covered in Optimistic Updates.
 
-A hook every mutation needs, such as reporting failed writes, doesn't have to be repeated on each one: set it once in [Default Options](/query-client/default-options).
+A hook every mutation needs, such as reporting failed writes, doesn't have to be repeated on each one: a [global callback](/query-client/global-callbacks) runs for every mutation, before its own hooks, and a [default hook](/query-client/default-options) for each mutation that has no hook of its own.
 
 ## Awaiting a mutation: `mutateAsync`
 

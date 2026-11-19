@@ -11,6 +11,9 @@ import { of } from 'rxjs'
 
 import { provideZonelessChangeDetection } from '../../spec-helpers/zoneless'
 import { withDefaultOptions } from '../features/with-default-options'
+import { withHydration } from '../features/with-hydration'
+import { withMutationCache } from '../features/with-mutation-cache'
+import { withQueryCache } from '../features/with-query-cache'
 import { injectMutation } from './inject-mutation'
 import { injectQuery } from './inject-query'
 import { provideQueryClient } from './provider'
@@ -27,6 +30,17 @@ describe('provideQueryClient', () => {
   it('accepts a feature without throwing', () => {
     expect(() =>
       provideQueryClient(withDefaultOptions({ queries: { staleTime: 1 } })),
+    ).not.toThrow()
+  })
+
+  it('accepts every feature at once', () => {
+    expect(() =>
+      provideQueryClient(
+        withDefaultOptions({}),
+        withHydration(),
+        withQueryCache({}),
+        withMutationCache({}),
+      ),
     ).not.toThrow()
   })
 

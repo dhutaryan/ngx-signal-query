@@ -71,11 +71,11 @@ describe('Mutation', () => {
           held: number
         }>,
       }
-      const mutation: Mutation<string, Error, void, unknown> = new Mutation(
-        1,
+      const mutation: Mutation<string, Error, void, unknown> = new Mutation({
+        mutationId: 1,
         options,
-        cache as unknown as MutationCache,
-        {
+        cache,
+        pendingTasks: {
           add: () => {
             tasks.held++
 
@@ -87,10 +87,12 @@ describe('Mutation', () => {
         },
         // Angular's zone as an app without zone.js has it: both run what
         // they're given as is.
-        { run: (fn) => fn(), runOutsideAngular: (fn) => fn() },
+        zone: { run: (fn) => fn(), runOutsideAngular: (fn) => fn() },
         // Its hooks don't fail.
-        () => undefined,
-      )
+        reportError: () => undefined,
+        // An app with no callbacks for its mutations.
+        callbacks: {},
+      })
 
       return { mutation, tasks }
     }
