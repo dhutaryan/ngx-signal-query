@@ -187,6 +187,23 @@ export interface QueryState<TData, TError = Error> {
   updatedAt: number
 }
 
+/**
+ * A query, as a cache callback gets it (see {@link withQueryCache}): its key
+ * and the key's hash, its state once the fetch ended, and the `meta` of the
+ * options that the fetch ran with. It stays as the fetch left it: what
+ * happens to the query afterwards doesn't change it.
+ */
+export type QuerySnapshot<TData = unknown, TError = unknown> = {
+  /** The query's key. */
+  readonly queryKey: QueryKey
+  /** The key's hash, which the cache keeps the query under. */
+  readonly queryHash: string
+  /** The query's state once the fetch ended, its outcome included. */
+  readonly state: Readonly<QueryState<TData, TError>>
+  /** The `meta` of the options that the fetch ran with, if they have one. */
+  readonly meta: QueryMeta | undefined
+}
+
 /** Selects which queries an operation applies to (e.g. invalidate, cancel). */
 export type QueryFilters = {
   /** Match queries whose key starts with (or, with `exact`, equals) this key. */
@@ -264,6 +281,50 @@ export type RetryDelayValue<TError> =
 export type StructuralSharingValue<TData> =
   | boolean
   | ((oldData: TData | undefined, newData: TData) => TData)
+
+/**
+ * Types that an app declares once for the whole library, by declaration
+ * merging. `queryMeta` is the type of every query's `meta` (see
+ * {@link QueryMeta}), and `mutationMeta` that of every mutation's (see
+ * {@link MutationMeta}). The file that declares them needs an import or an
+ * export, such as the import below: without one, its declaration replaces
+ * the library's types rather than adding to them.
+ *
+ * ```ts
+ * import type { QueryKey } from 'ngx-signal-query'
+ *
+ * declare module 'ngx-signal-query' {
+ *   interface Register {
+ *     queryMeta: { errorMessage?: string; silent?: boolean }
+ *     mutationMeta: { invalidates?: QueryKey }
+ *   }
+ * }
+ * ```
+ */
+// An interface, unlike the other types here: only an interface takes the
+// fields an app declares on it. Empty: an app adds the fields it needs.
+// eslint-disable-next-line @typescript-eslint/no-empty-object-type
+export interface Register {}
+
+/**
+ * The type of a query's `meta`: the `queryMeta` that the app declares on
+ * {@link Register}, or any plain object.
+ */
+export type QueryMeta = Register extends {
+  queryMeta: infer TMeta extends object
+}
+  ? TMeta
+  : Record<string, unknown>
+
+/**
+ * The type of a mutation's `meta`: the `mutationMeta` that the app declares
+ * on {@link Register}, or any plain object.
+ */
+export type MutationMeta = Register extends {
+  mutationMeta: infer TMeta extends object
+}
+  ? TMeta
+  : Record<string, unknown>
 
 /** Configuration for a query, passed to {@link injectQuery} / {@link queryOptions}. */
 export type QueryOptions<
@@ -370,6 +431,15 @@ export type QueryOptions<
   structuralSharing?: StructuralSharingValue<NoInfer<TData>>
   /** Set `false` to disable fetching (e.g. until a dependency is ready). */
   enabled?: boolean
+  /**
+   * What the app's cache callbacks need to know about the query, such as the
+   * message to show when it fails (see {@link withQueryCache}). The library
+   * itself doesn't read it. A callback gets the `meta` of the options that
+   * the fetch ran with: those of the component the query is fetched for, or
+   * of the call that fetches it, such as `query()`. Its type is the
+   * `queryMeta` that the app declares on {@link Register}, if it does.
+   */
+  meta?: QueryMeta
 }
 
 /**

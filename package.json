@@ -13,7 +13,7 @@
     "test": "ng test ngx-signal-query",
     "test:ci": "ng test ngx-signal-query --watch=false --browsers=ChromeHeadless",
     "test:coverage": "ng test ngx-signal-query --watch=false --browsers=ChromeHeadless --code-coverage",
-    "test:types": "tsc -p projects/ngx-signal-query/tsconfig.type-tests.json",
+    "test:types": "tsc -p projects/ngx-signal-query/tsconfig.type-tests.json && tsc -p projects/ngx-signal-query/tsconfig.type-tests.register.json",
     "lint": "ng lint"
   },
   "private": true,

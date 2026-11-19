@@ -1,4 +1,4 @@
-If most of your queries want the same `staleTime`, or every failed save should reach your error handler, don't repeat it on every query and mutation — set it once, when you provide the client.
+If most of your queries want the same `staleTime`, or most of your mutations should report a failed save the same way, don't repeat it on every query and mutation — set it once, when you provide the client.
 
 ## `withDefaultOptions`
 
@@ -102,6 +102,8 @@ injectMutation(() => ({
 ```
 
 A field left `undefined` keeps the default, so a shared definition that passes an optional hook on doesn't drop it. To turn a default hook off for one mutation, pass a function that does nothing: `onError: () => {}`. (In TanStack Query, a hook set to `undefined` turns the default off.)
+
+To report every failed write, those of mutations with an `onError` of their own included, use a [global callback](/query-client/global-callbacks) instead: it runs for every mutation, before the mutation's own hook.
 
 ## Default hooks can use `inject()`
 

@@ -8,6 +8,7 @@ import {
 
 import { Cache } from './cache'
 import { lazyPendingTasks } from './pending-tasks'
+import { injectQueryCacheCallbacks } from './query-cache-callbacks'
 import { hashKey, partialMatchKey } from './utils'
 import { Query } from './query'
 import type { QueryFilters, QueryKey } from './types'
@@ -15,11 +16,12 @@ import type { QueryFilters, QueryKey } from './types'
 /** @internal */
 @Injectable()
 export class QueryCache extends Cache<Query<unknown, unknown>> {
-  // The app's pending tasks, looked up for each task (see lazyPendingTasks),
-  // and Angular's zone, handed to each query it creates, which has no
-  // injector of its own.
+  // What each query it creates needs from the app, having no injector of its
+  // own (see QueryConfig). The pending tasks are looked up for each task (see
+  // lazyPendingTasks).
   readonly #pendingTasks = lazyPendingTasks(inject(EnvironmentInjector))
   readonly #zone = inject(NgZone)
+  readonly #callbacks = injectQueryCacheCallbacks()
 
   constructor() {
     super()
@@ -50,6 +52,7 @@ export class QueryCache extends Cache<Query<unknown, unknown>> {
         gcTime,
         pendingTasks: this.#pendingTasks,
         zone: this.#zone,
+        callbacks: this.#callbacks,
       }),
     ) as Query<TData, TError, TQueryFnData>
   }

@@ -6,5 +6,7 @@
     "noEmit": true,
     "types": []
   },
-  "include": ["type-tests/**/*.ts"]
+  "include": ["type-tests/**/*.ts"],
+  /* type-tests/register/ compiles on its own: see tsconfig.type-tests.register.json. */
+  "exclude": ["type-tests/register/**"]
 }

@@ -53,8 +53,9 @@ export type DefaultedObserverOptions<TOptions, TData, TError, TQueryFnData> =
   TOptions & DefaultedQueryOptions<TData, TError, TQueryFnData>
 
 /**
- * What a fetch made on behalf of an observer runs with: its query function,
- * and its retry policy and merge, with the client's defaults filled in.
+ * What a fetch made on behalf of an observer runs with: its query function
+ * and meta, and its retry policy and merge, with the client's defaults filled
+ * in.
  *
  * @internal
  */
