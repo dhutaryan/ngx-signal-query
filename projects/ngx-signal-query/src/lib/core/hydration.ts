@@ -7,8 +7,9 @@ import { survivesJson } from './utils'
 
 /**
  * A query as the page carries it from the server to the browser: its key and
- * the key's hash, its data and when the server fetched it, and whether it was
- * marked stale.
+ * the key's hash, its data and when the server got it, whether it was marked
+ * stale, and whether the data is only a seed of initialData, which nothing
+ * fetched.
  *
  * @internal
  */
@@ -20,6 +21,7 @@ interface TransferredQuery {
   data: unknown
   updatedAt: number
   isInvalidated?: boolean
+  seed?: boolean
 }
 
 /**
@@ -32,8 +34,9 @@ export const TRANSFER_KEY = makeStateKey<TransferredQuery[]>('ngx-signal-query')
 /**
  * Hands the cache from a server render over to the browser through Angular's
  * TransferState: on the server, the queries go into the page once the render
- * is done; in the browser, they go back into the cache, as fetched when the
- * server fetched them. Must run in an injection context.
+ * is done; in the browser, they go back into the cache as the server had
+ * them, fetched or seeded, with the time it did. Must run in an injection
+ * context.
  *
  * @internal
  */
@@ -64,7 +67,8 @@ export function transferCache(cache: QueryCache, gcTime: number): void {
 // references itself fails the whole page's state, Angular's own included.
 function dehydrate(cache: QueryCache): TransferredQuery[] {
   return cache.getAll().flatMap((query) => {
-    const { status, data, updatedAt, isInvalidated } = query.state()
+    const { status, data, updatedAt, isInvalidated, fetchedCount } =
+      query.state()
 
     if (status !== 'success') return []
 
@@ -81,6 +85,7 @@ function dehydrate(cache: QueryCache): TransferredQuery[] {
         data,
         updatedAt,
         ...(isInvalidated && { isInvalidated }),
+        ...(fetchedCount === 0 && { seed: true }),
       },
     ]
   })
@@ -88,15 +93,16 @@ function dehydrate(cache: QueryCache): TransferredQuery[] {
 
 // Puts the queries the page carries into a cache nothing has read yet. One
 // that nothing uses is kept for gcTime, as data written with setQueryData is.
+// Data the server fetched counts as fetched; a seed of initialData stays one.
 function hydrate(
   cache: QueryCache,
   queries: TransferredQuery[],
   gcTime: number,
 ): void {
-  for (const { key, hash, data, updatedAt, isInvalidated } of queries) {
+  for (const { key, hash, data, updatedAt, isInvalidated, seed } of queries) {
     const query = cache.getOrCreate(key, gcTime, hash)
 
-    query.setData(data, { updatedAt })
+    query.setData(data, { updatedAt, seed })
 
     if (isInvalidated) query.invalidate()
   }

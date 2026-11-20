@@ -1076,6 +1076,46 @@ describe('injectInfiniteQuery', () => {
     expect(result.isFetchNextPageError()).toBeTrue()
   })
 
+  describe('isFetchedAfterMount', () => {
+    it('turns true once a refetch has all the pages in, not with each page', () => {
+      const api = server()
+
+      api.hold.add(4)
+
+      // The seeded pages are stale at the default staleTime, so the
+      // component fetches them all again.
+      const { result } = mount(() =>
+        listOptions(api, { initialData: threePages(api) }),
+      )
+
+      expect(api.sent).toEqual([0, 2, 4])
+      expect(result.isFetched()).toBeFalse()
+      expect(result.isFetchedAfterMount()).toBeFalse()
+
+      api.answer(4)
+
+      expect(result.isFetched()).toBeTrue()
+      expect(result.isFetchedAfterMount()).toBeTrue()
+    })
+
+    it('turns true once the next page lands on a list fetched before the component started', () => {
+      const api = server()
+
+      void client.infiniteQuery(listOptions(api))
+
+      const { result } = mount(() => listOptions(api, { staleTime: Infinity }))
+
+      expect(api.sent).toEqual([0])
+      expect(result.isFetched()).toBeTrue()
+      expect(result.isFetchedAfterMount()).toBeFalse()
+
+      void result.fetchNextPage()
+
+      expect(api.sent).toEqual([0, 2])
+      expect(result.isFetchedAfterMount()).toBeTrue()
+    })
+  })
+
   describe('injection context', () => {
     it('throws when called outside an injection context', () => {
       const api = server()

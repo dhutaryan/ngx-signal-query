@@ -4388,6 +4388,544 @@ describe('injectQuery', () => {
     }))
   })
 
+  describe('isFetched', () => {
+    it('is false while only initialData shows', () => {
+      const { result } = mount(() => ({
+        queryKey: ['todo'],
+        queryFn: () => of('fetched'),
+        initialData: 'seed',
+        enabled: false,
+      }))
+
+      expect(result.data()).toBe('seed')
+      expect(result.isFetched()).toBe(false)
+      expect(result.isFetchedAfterMount()).toBe(false)
+    })
+
+    it('is false while placeholderData shows during the first fetch', () => {
+      const { queryFn } = requests<string>()
+      const { result } = mount(() => ({
+        queryKey: ['todo'],
+        queryFn,
+        placeholderData: 'placeholder',
+      }))
+
+      expect(result.isPlaceholderData()).toBe(true)
+      expect(result.isFetched()).toBe(false)
+      expect(result.isFetchedAfterMount()).toBe(false)
+    })
+
+    it('turns true once the first fetch lands', () => {
+      const { queryFn, resolve } = requests<string>()
+      const { result } = mount(() => ({ queryKey: ['todo'], queryFn }))
+
+      expect(result.isFetched()).toBe(false)
+
+      resolve('fetched')
+
+      expect(result.isFetched()).toBe(true)
+    })
+
+    it('stays true once initialData seeds a query whose fetch failed with no data', () => {
+      client
+        .query({
+          queryKey: ['todo'],
+          queryFn: () => throwError(() => new Error('down')),
+        })
+        .catch(() => undefined)
+
+      const { result } = mount(() => ({
+        queryKey: ['todo'],
+        queryFn: () => of('fetched'),
+        initialData: 'seed',
+        staleTime: Infinity,
+      }))
+
+      expect(result.data()).toBe('seed')
+      expect(result.isFetched()).toBe(true)
+      expect(result.isFetchedAfterMount()).toBe(false)
+    })
+
+    it('turns true once the first fetch fails, with no data', () => {
+      const { queryFn, fail } = requests<string>()
+      const { result } = mount(() => ({
+        queryKey: ['todo'],
+        queryFn,
+        retry: false,
+      }))
+
+      fail(new Error('down'))
+
+      expect(result.data()).toBeUndefined()
+      expect(result.isFetched()).toBe(true)
+    })
+
+    it('stays false while a failed attempt waits for its retry, and turns true with the outcome', fakeAsync(() => {
+      const { queryFn, inFlight, fail } = requests<string>()
+      const { result } = mount(() => ({
+        queryKey: ['todo'],
+        queryFn,
+        retry: 1,
+        retryDelay: 100,
+      }))
+
+      fail(new Error('down'))
+
+      expect(result.failureCount()).toBe(1)
+      expect(result.isFetched()).toBe(false)
+
+      tick(100)
+
+      expect(inFlight()).toBe(1)
+      expect(result.isFetched()).toBe(false)
+
+      fail(new Error('down again'))
+
+      expect(result.isError()).toBe(true)
+      expect(result.isFetched()).toBe(true)
+    }))
+
+    it('stays false when the first fetch is cancelled', () => {
+      const { queryFn } = requests<string>()
+      const { result } = mount(() => ({ queryKey: ['todo'], queryFn }))
+
+      client.cancelQueries({ queryKey: ['todo'] })
+
+      expect(result.isFetching()).toBe(false)
+      expect(result.isFetched()).toBe(false)
+    })
+
+    it('is true for data setQueryData wrote, as for fetched data', () => {
+      client.setQueryData(['todo'], 'written')
+
+      const { result } = mount(() => ({
+        queryKey: ['todo'],
+        queryFn: () => of('fetched'),
+        staleTime: Infinity,
+      }))
+
+      expect(result.data()).toBe('written')
+      expect(result.isFetched()).toBe(true)
+      // Written before the component started showing the query.
+      expect(result.isFetchedAfterMount()).toBe(false)
+    })
+
+    it('turns true once a response of undefined fails the fetch', () => {
+      const { result } = mount(() => ({
+        queryKey: ['todo', 3],
+        // A lookup that finds nothing.
+        queryFn: () => of([1, 2].find((id) => id === 3)),
+        retry: 2,
+      }))
+
+      expect(result.isError()).toBe(true)
+      expect(result.isFetched()).toBe(true)
+    })
+
+    it('stays true while a query that failed with no data is fetched again', () => {
+      const { queryFn, fail } = requests<string>()
+      const { result } = mount(() => ({
+        queryKey: ['todo'],
+        queryFn,
+        retry: false,
+      }))
+
+      fail(new Error('down'))
+      result.refetch()
+
+      expect(result.isPending()).toBe(true)
+      expect(result.isFetching()).toBe(true)
+      expect(result.isFetched()).toBe(true)
+      expect(result.isFetchedAfterMount()).toBe(true)
+    })
+  })
+
+  describe('isFetchedAfterMount', () => {
+    // The flag is read only after mount() ran change detection, so the
+    // component's own fetch has started by then, and with `of()` landed.
+    it('is true right away when the response comes back at once', () => {
+      const { result } = mount(() => ({
+        queryKey: ['todo'],
+        queryFn: () => of('fetched'),
+      }))
+
+      expect(result.isFetched()).toBe(true)
+      expect(result.isFetchedAfterMount()).toBe(true)
+    })
+
+    it('turns true once a promise response lands', fakeAsync(() => {
+      const { result } = mount(() => ({
+        queryKey: ['todo'],
+        queryFn: () => Promise.resolve('fetched'),
+      }))
+
+      expect(result.isFetchedAfterMount()).toBe(false)
+
+      flushMicrotasks()
+
+      expect(result.isFetchedAfterMount()).toBe(true)
+    }))
+
+    it('is false while the component shows data another one fetched, and true once its own fetch lands', () => {
+      const { queryFn, inFlight, resolve } = requests<string>()
+      const first = mount(() => ({ queryKey: ['todo'], queryFn }))
+
+      resolve('v1')
+
+      // The cached data is stale at the default staleTime, so the second
+      // component refetches it as it starts.
+      const second = mount(() => ({ queryKey: ['todo'], queryFn }))
+
+      expect(inFlight()).toBe(1)
+      expect(second.result.data()).toBe('v1')
+      expect(second.result.isFetched()).toBe(true)
+      expect(second.result.isFetchedAfterMount()).toBe(false)
+      expect(first.result.isFetchedAfterMount()).toBe(true)
+
+      resolve('v2')
+
+      expect(second.result.isFetchedAfterMount()).toBe(true)
+      expect(first.result.isFetchedAfterMount()).toBe(true)
+    })
+
+    it('stays false while the cached data is fresh, until something else fetches the query', () => {
+      void client.query({
+        queryKey: ['todo'],
+        queryFn: () => of('prefetched'),
+      })
+
+      const { queryFn, inFlight, resolve } = requests<string>()
+      const { result } = mount(() => ({
+        queryKey: ['todo'],
+        queryFn,
+        staleTime: Infinity,
+      }))
+
+      expect(inFlight()).toBe(0)
+      expect(result.isFetched()).toBe(true)
+      expect(result.isFetchedAfterMount()).toBe(false)
+
+      void client.invalidateQueries({ queryKey: ['todo'] })
+
+      expect(inFlight()).toBe(1)
+      expect(result.isFetchedAfterMount()).toBe(false)
+
+      resolve('refetched')
+
+      expect(result.isFetchedAfterMount()).toBe(true)
+    })
+
+    it('turns true when a fetch already in flight as the component started lands', () => {
+      const prefetch = requests<string>()
+
+      void client.query({ queryKey: ['todo'], queryFn: prefetch.queryFn })
+
+      const { queryFn } = requests<string>()
+      const { result } = mount(() => ({ queryKey: ['todo'], queryFn }))
+
+      // The component joins the prefetch rather than sending its own.
+      expect(queryFn).not.toHaveBeenCalled()
+      expect(result.isFetchedAfterMount()).toBe(false)
+
+      prefetch.resolve('prefetched')
+
+      expect(result.data()).toBe('prefetched')
+      expect(result.isFetchedAfterMount()).toBe(true)
+    })
+
+    it('is false while initialData seeds a query whose prefetch is in flight, and true once the prefetch lands', () => {
+      const prefetch = requests<string>()
+
+      void client.query({ queryKey: ['todo'], queryFn: prefetch.queryFn })
+
+      const { result } = mount(() => ({
+        queryKey: ['todo'],
+        queryFn: () => of('fetched'),
+        initialData: 'seed',
+      }))
+
+      expect(result.data()).toBe('seed')
+      expect(result.isFetched()).toBe(false)
+      expect(result.isFetchedAfterMount()).toBe(false)
+
+      prefetch.resolve('prefetched')
+
+      expect(result.data()).toBe('prefetched')
+      expect(result.isFetched()).toBe(true)
+      expect(result.isFetchedAfterMount()).toBe(true)
+    })
+
+    it('stays true through a background refetch, and when it fails', () => {
+      const { queryFn, inFlight, resolve, fail } = requests<string>()
+      const { result } = mount(() => ({
+        queryKey: ['todo'],
+        queryFn,
+        retry: false,
+      }))
+
+      resolve('v1')
+
+      expect(result.isFetchedAfterMount()).toBe(true)
+
+      void client.invalidateQueries({ queryKey: ['todo'] })
+
+      expect(inFlight()).toBe(1)
+      expect(result.isFetchedAfterMount()).toBe(true)
+
+      fail(new Error('down'))
+
+      expect(result.isError()).toBe(true)
+      expect(result.data()).toBe('v1')
+      expect(result.isFetchedAfterMount()).toBe(true)
+    })
+
+    it('is true once setQueryData writes during the first fetch, as a fetch landing is', () => {
+      const { queryFn, resolve } = requests<string>()
+      const { result } = mount(() => ({ queryKey: ['todo'], queryFn }))
+
+      client.setQueryData(['todo'], 'pushed')
+
+      expect(result.data()).toBe('pushed')
+      expect(result.isFetchedAfterMount()).toBe(true)
+
+      resolve('fetched')
+
+      expect(result.data()).toBe('fetched')
+      expect(result.isFetchedAfterMount()).toBe(true)
+    })
+
+    it('starts over on a key change, and again on the way back', () => {
+      void client.query({
+        queryKey: ['todo', 2],
+        queryFn: () => of('cached 2'),
+      })
+
+      const { queryFn, inFlight, resolve } = requests<string>()
+      const { fixture, result, value } = mount(
+        (id) => ({ queryKey: ['todo', id()], queryFn }),
+        1,
+      )
+
+      resolve('todo 1')
+
+      expect(result.isFetchedAfterMount()).toBe(true)
+
+      // The new key's cached data is stale, so its refetch goes out.
+      value.set(2)
+      fixture.detectChanges()
+
+      expect(inFlight()).toBe(1)
+      expect(result.data()).toBe('cached 2')
+      expect(result.isFetchedAfterMount()).toBe(false)
+
+      resolve('todo 2')
+
+      expect(result.isFetchedAfterMount()).toBe(true)
+
+      value.set(1)
+      fixture.detectChanges()
+
+      expect(inFlight()).toBe(1)
+      expect(result.data()).toBe('todo 1')
+      expect(result.isFetchedAfterMount()).toBe(false)
+
+      resolve('todo 1 again')
+
+      expect(result.isFetchedAfterMount()).toBe(true)
+    })
+
+    it('is true once refetch() brings back a key that removeQueries dropped', () => {
+      let calls = 0
+      const { fixture, result } = mount(() => ({
+        queryKey: ['todo'],
+        queryFn: () => of(++calls),
+        staleTime: Infinity,
+      }))
+
+      expect(result.isFetchedAfterMount()).toBe(true)
+
+      client.removeQueries({ queryKey: ['todo'] })
+      fixture.detectChanges()
+      // The response comes back at once, before the component moves to the
+      // new entry the refetch made: until it does, it shows the dropped one.
+      void result.refetch()
+
+      expect(result.data()).toBe(1)
+      expect(result.isFetchedAfterMount()).toBe(false)
+
+      fixture.detectChanges()
+
+      expect(client.getQueryData(['todo'])).toBe(2)
+      expect(result.data()).toBe(2)
+      expect(result.isFetchedAfterMount()).toBe(true)
+    })
+
+    it('starts over when the key comes back after removeQueries() or clear(), whatever brings it back', () => {
+      const { queryFn, resolve } = requests<string>()
+      const { fixture, result } = mount(() => ({
+        queryKey: ['todo'],
+        queryFn,
+        staleTime: Infinity,
+      }))
+
+      resolve('fetched')
+      // The write that brings the key back comes before the component moves
+      // to the new entry.
+      client.removeQueries({ queryKey: ['todo'] })
+      client.setQueryData(['todo'], 'written')
+      fixture.detectChanges()
+
+      expect(result.data()).toBe('written')
+      expect(result.isFetchedAfterMount()).toBe(false)
+
+      void client.invalidateQueries({ queryKey: ['todo'] })
+      resolve('refetched')
+
+      expect(result.isFetchedAfterMount()).toBe(true)
+
+      client.clear()
+      void result.refetch()
+      fixture.detectChanges()
+
+      expect(result.isFetching()).toBe(true)
+      expect(result.isFetchedAfterMount()).toBe(false)
+
+      resolve('fetched again')
+
+      expect(result.isFetchedAfterMount()).toBe(true)
+    })
+
+    it('is false while the old key still shows after refetch() fetched the next one', () => {
+      // Read by the options as it is, not through an input: the key changes
+      // with no change detection in between.
+      const id = signal(1)
+      const { fixture, result } = mount(() => ({
+        queryKey: ['todo', id()],
+        queryFn: () => of(`todo ${id()}`),
+      }))
+
+      expect(result.isFetchedAfterMount()).toBe(true)
+
+      // refetch() fetches the next key's query before the effects move the
+      // component there; until they do, it shows the old key's data, which
+      // that fetch didn't bring.
+      id.set(2)
+      void result.refetch()
+
+      expect(result.data()).toBe('todo 1')
+      expect(result.isFetchedAfterMount()).toBe(false)
+
+      fixture.detectChanges()
+
+      expect(result.data()).toBe('todo 2')
+      expect(result.isFetchedAfterMount()).toBe(true)
+    })
+
+    it('goes on from where it was when the key comes back before the effects moved to the next one', () => {
+      // Read by the options as it is, not through an input: the key changes
+      // with no change detection in between.
+      const id = signal(1)
+      let calls = 0
+      const { fixture, result } = mount(() => ({
+        queryKey: ['todo', id()],
+        queryFn: () => of(`todo ${id()} #${++calls}`),
+      }))
+
+      expect(result.isFetchedAfterMount()).toBe(true)
+
+      // refetch() fetches the next key's query before the effects move the
+      // component there; the key comes back before they do.
+      id.set(2)
+      void result.refetch()
+      id.set(1)
+      fixture.detectChanges()
+
+      expect(calls).toBe(2)
+      expect(result.data()).toBe('todo 1 #1')
+      expect(result.isFetchedAfterMount()).toBe(true)
+    })
+
+    it('is true once a poll brings back a key that removeQueries dropped', fakeAsync(() => {
+      let calls = 0
+      const { fixture, result } = mount(() => ({
+        queryKey: ['todo'],
+        queryFn: () => of(++calls),
+        staleTime: Infinity,
+        refetchInterval: 100,
+      }))
+
+      client.removeQueries({ queryKey: ['todo'] })
+      // The poll's response comes back at once, before the component moves
+      // to the new entry the poll made.
+      tick(100)
+      fixture.detectChanges()
+
+      expect(calls).toBe(2)
+      expect(result.data()).toBe(2)
+      expect(result.isFetchedAfterMount()).toBe(true)
+
+      fixture.destroy()
+    }))
+
+    it('counts a fetch that lands after the first read, before the effects run', () => {
+      const result = injectQuery(
+        () => ({
+          queryKey: ['todo'],
+          queryFn: () => of('own'),
+          staleTime: 60_000,
+        }),
+        { injector: TestBed.inject(Injector) },
+      )
+
+      // The first read starts showing the query; no effect has run yet.
+      expect(result.data()).toBeUndefined()
+
+      void client.query({ queryKey: ['todo'], queryFn: () => of('prefetched') })
+      TestBed.inject(ApplicationRef).tick()
+
+      expect(result.data()).toBe('prefetched')
+      expect(result.isFetchedAfterMount()).toBe(true)
+    })
+
+    it("doesn't count a fetch that lands before the first read", () => {
+      const result = injectQuery(
+        () => ({
+          queryKey: ['todo'],
+          queryFn: () => of('own'),
+          staleTime: 60_000,
+        }),
+        { injector: TestBed.inject(Injector) },
+      )
+
+      void client.query({ queryKey: ['todo'], queryFn: () => of('prefetched') })
+
+      // No effect has run yet: this read starts showing the query, with the
+      // prefetched data already in.
+      expect(result.data()).toBe('prefetched')
+      expect(result.isFetchedAfterMount()).toBe(false)
+    })
+
+    it('counts a response that comes back at once for the component that asked for it, not for the ones that start after it', () => {
+      const queryFn = jasmine
+        .createSpy('queryFn')
+        .and.callFake(() => of('fetched'))
+      // The first component's response is in before the others start, and
+      // stays fresh, so they don't fetch it again.
+      const { results } = mountMany(3, () => ({
+        queryKey: ['todo'],
+        queryFn,
+        staleTime: 60_000,
+      }))
+
+      expect(queryFn).toHaveBeenCalledTimes(1)
+      expect(results.map((result) => result.isFetchedAfterMount())).toEqual([
+        true,
+        false,
+        false,
+      ])
+    })
+  })
+
   describe('refetchInterval (polling)', () => {
     it('refetches on the interval and stops on destroy', fakeAsync(() => {
       const queryFn = jasmine.createSpy('queryFn').and.returnValue(of(1))

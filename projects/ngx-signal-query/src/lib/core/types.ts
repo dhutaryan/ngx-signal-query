@@ -476,7 +476,7 @@ export type QueryResult<TData, TError = Error> = {
    * When the data was last updated, as a timestamp in ms: when the last
    * response landed or `setQueryData` wrote it; for `initialData`, its
    * `initialDataUpdatedAt`, or when it was seeded; for data a server render
-   * brought over (see {@link withHydration}), when the server fetched it. A
+   * brought over (see {@link withHydration}), as it was on the server. A
    * refetch that brings the same data moves it too; one that fails or is
    * cancelled doesn't. `0` while there is no data, placeholder data included.
    */
@@ -504,6 +504,29 @@ export type QueryResult<TData, TError = Error> = {
   isError: Signal<boolean>
   /** Whether `data` is placeholder data (see `placeholderData`), not cached data. */
   isPlaceholderData: Signal<boolean>
+  /**
+   * Whether a fetch of the query has landed, with data or with an error, or
+   * `setQueryData` has written to it. Neither `initialData` nor
+   * `placeholderData` counts. Data that a server render brought over (see
+   * {@link withHydration}) counts if the server fetched it, and not if it was
+   * only `initialData` there.
+   */
+  isFetched: Signal<boolean>
+  /**
+   * Whether a fetch of the query has landed, with data or with an error, or
+   * `setQueryData` has written to it, since the component started showing the
+   * query, whoever made the fetch. A response that comes back at once, such as
+   * `of()`'s, counts for the component that asked for it, not for one that
+   * starts showing the query after it landed. A page that shows cached data or
+   * `initialData` can wait for a fetch of its own with it. A background
+   * refetch doesn't turn it back to `false`. A key change does, until a fetch
+   * of the new key lands, and so does the key coming back after
+   * `removeQueries()` or `clear()` dropped it, whatever brings it back. A
+   * component whose cached data is still fresh for its `staleTime` fetches
+   * nothing as it starts, so this stays `false` until something else fetches
+   * the query.
+   */
+  isFetchedAfterMount: Signal<boolean>
   /** Consecutive failures in the current fetch. */
   failureCount: Signal<number>
   /** Error of the most recent failed attempt, or `null`. */

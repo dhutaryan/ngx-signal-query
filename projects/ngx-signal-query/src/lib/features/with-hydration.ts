@@ -17,7 +17,7 @@ import {
  * the browser fetches it again; in development the server logs a warning
  * naming it.
  *
- * In the browser the data counts as fetched when the server fetched it, and
+ * In the browser the data keeps the time it had on the server, and
  * `staleTime` decides as for any data in the cache: with the default of `0`,
  * a component refetches its query in the background as it appears, showing
  * the server's data meanwhile. Set a `staleTime` to skip that request.

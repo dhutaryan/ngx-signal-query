@@ -171,10 +171,41 @@ export function createQueryObserver<
       >,
   )
 
+  // A query the observer turned to, and how many times something had landed
+  // in it by then.
+  type TurnedTo = {
+    q: Query<TData, TError, TQueryFnData>
+    fetchedCount: number
+  }
+
+  // The query the observer turned to last: isFetchedAfterMount tells from it
+  // whether something has landed in the query since (see
+  // InternalQueryState.fetchedCount).
+  const since = signal<TurnedTo | undefined>(undefined)
+
+  // since as it was when the effects last switched the observer to a query
+  // (see switchTo). The observer may turn to another query before the
+  // effects move it there, as refetch() does for the next key. If the key
+  // comes back before they do, they never left the query they switched to,
+  // so the observer goes on from this rather than starting over.
+  let switchedSince: TurnedTo | undefined
+
   // Resolves the query for a key, seeding one with no data yet with
   // initialData (see applyInitialData), each time the key is resolved. It
-  // writes signals (the cache's entries, the query's state), so callers run it
-  // untracked: reached from a computed, a tracked write throws NG0600.
+  // writes signals (the cache's entries, the query's state, since), so
+  // callers run it untracked: reached from a computed, a tracked write throws
+  // NG0600.
+  //
+  // A query other than the one it resolved last is one the observer turns
+  // to: the first one, the next key's, a key it comes back to, or a new
+  // entry for the key after removeQueries or clear(), which its own refetch
+  // or poll makes, or which something else makes and the follow effect
+  // below moves it to: a write, another component's fetch, a prefetch.
+  // Turning to it notes how many times something has landed in it so far;
+  // for the query the effects last switched to, it goes on from what it
+  // noted then (see switchedSince). Each fetch that the observer asks for
+  // resolves its query here first, so a response that comes back at once
+  // lands after that, whenever the effects catch up.
   const resolve = (key: QueryKey): Query<TData, TError, TQueryFnData> => {
     const options = untracked(defaultedOptions)
     const q = cache.getOrCreate<TData, TError, TQueryFnData>(
@@ -183,6 +214,14 @@ export function createQueryObserver<
     )
 
     applyInitialData(q, options)
+
+    if (untracked(since)?.q !== q) {
+      since.set(
+        switchedSince?.q === q
+          ? switchedSince
+          : { q, fetchedCount: q.state().fetchedCount },
+      )
+    }
 
     return q
   }
@@ -225,7 +264,8 @@ export function createQueryObserver<
   const lastData = signal<TData | undefined>(undefined)
 
   // Switches the observer to q, first keeping the data of the query it
-  // leaves for the placeholderData function.
+  // leaves for the placeholderData function. q comes from resolve(), which
+  // has just turned the observer to it, so since is q's.
   const switchTo = (q: Query<TData, TError, TQueryFnData>): void => {
     untracked(() => {
       const prev = switched()
@@ -235,6 +275,7 @@ export function createQueryObserver<
       }
     })
     switched.set(q)
+    switchedSince = untracked(since)
   }
 
   track(() => {
@@ -540,6 +581,16 @@ export function createQueryObserver<
     isSuccess: computed(() => resolved().status === 'success'),
     isError: computed(() => resolved().status === 'error'),
     isPlaceholderData: computed(() => resolved().isPlaceholderData),
+    isFetched: computed(() => query().state().fetchedCount > 0),
+    // query() first: a first read resolves the query, which sets since. Until
+    // the effects catch up with a query the observer has turned to, the
+    // query it shows has nothing landed since.
+    isFetchedAfterMount: computed(() => {
+      const q = query()
+      const turnedTo = since()
+
+      return turnedTo?.q === q && q.state().fetchedCount > turnedTo.fetchedCount
+    }),
     failureCount: computed(() => query().state().failureCount),
     failureReason: computed(() => query().state().failureReason),
     // Force a fresh fetch regardless of staleTime and enabled (explicit user

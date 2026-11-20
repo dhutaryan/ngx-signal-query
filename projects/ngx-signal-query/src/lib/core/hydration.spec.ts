@@ -168,6 +168,59 @@ describe('withHydration()', () => {
     expect(queryFn).toHaveBeenCalledTimes(1)
   }))
 
+  it("counts the server's data as fetched, though not after the browser's component started showing it", fakeAsync(() => {
+    const page = renderOnServer(() =>
+      showTodo({
+        queryFn: (id) => Promise.resolve({ id, title: 'Write specs' }),
+      }),
+    )
+
+    inTheBrowser(page, [provideQueryClient(withHydration())])
+
+    const response = deferred<Todo>()
+    const { todo } = showTodo({ queryFn: () => response.promise })
+
+    // At the default staleTime the browser fetches the data again.
+    expect(todo.isFetching()).toBe(true)
+    expect(todo.isFetched()).toBe(true)
+    expect(todo.isFetchedAfterMount()).toBe(false)
+
+    response.resolve({ id: 1, title: 'Write specs' })
+    flushMicrotasks()
+
+    expect(todo.isFetchedAfterMount()).toBe(true)
+  }))
+
+  it("doesn't count data that was only initialData on the server as fetched", fakeAsync(() => {
+    const page = renderOnServer(() =>
+      mountHost(() =>
+        injectQuery(() => ({
+          queryKey: ['todos'],
+          queryFn: () => Promise.resolve(['fetched']),
+          initialData: ['seed'],
+          // Fresh for good: the server fetches nothing.
+          staleTime: Infinity,
+        })),
+      ),
+    )
+
+    inTheBrowser(page, [provideQueryClient(withHydration())])
+
+    const queryFn = jasmine.createSpy('queryFn').and.resolveTo(['fetched'])
+    // No initialData here: the seed the browser shows is the server's.
+    const { created: todos } = mountHost(() =>
+      injectQuery(() => ({
+        queryKey: ['todos'],
+        queryFn,
+        staleTime: Infinity,
+      })),
+    )
+
+    expect(todos.data()).toEqual(['seed'])
+    expect(queryFn).not.toHaveBeenCalled()
+    expect(todos.isFetched()).toBe(false)
+  }))
+
   it('brings over data the server prefetched with fetchQuery for no component', fakeAsync(() => {
     const page = renderOnServer(() =>
       TestBed.inject(QueryClient).fetchQuery(['user'], () =>

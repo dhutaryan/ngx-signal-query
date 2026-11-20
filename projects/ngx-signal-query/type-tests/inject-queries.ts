@@ -23,6 +23,8 @@ const todos = injectQueries(() => ({
 }))
 
 expectTypeOf(todos()[0].data()).toEqualTypeOf<Todo | undefined>()
+expectTypeOf(todos()[0].isFetched()).toEqualTypeOf<boolean>()
+expectTypeOf(todos()[0].isFetchedAfterMount()).toEqualTypeOf<boolean>()
 
 // queryFn's context
 

@@ -31,13 +31,15 @@ export const appConfig: ApplicationConfig = {
 
 Once the page is rendered, the server writes every query that succeeded into it, through Angular's `TransferState`. The browser puts them back into the cache before anything can read it, so the first render shows the data, and a `query()` in a route resolver or an app initializer resolves with it while it's fresh for the query's `staleTime`, such as the 30 s above. It works with Angular's `provideClientHydration()` or without it.
 
-A query that failed or never fetched stays on the server, and so does a mutation: the browser fetches the query as it would without a server render.
+A query that failed or has no data stays on the server, and so does a mutation: the browser fetches the query as it would without a server render.
 
 Only the page the browser loads first comes with data: navigating within the app fetches as usual.
 
 ## Fresh or stale
 
-The data counts as fetched when the server fetched it, and `staleTime` decides as for any data in the cache. With the default of `0`, it's stale by the time the browser has it: each component refetches its query in the background as it appears, showing the server's data meanwhile. To skip that request, set a `staleTime` longer than a page takes to reach the browser and boot, as the 30 seconds above. A query still marked stale by `invalidateQueries()` when the page is rendered comes over marked, and refetches as it appears, whatever its `staleTime`.
+The data keeps the time it had on the server, and `staleTime` decides as for any data in the cache. With the default of `0`, it's stale by the time the browser has it: each component refetches its query in the background as it appears, showing the server's data meanwhile. To skip that request, set a `staleTime` longer than a page takes to reach the browser and boot, as the 30 seconds above. A query still marked stale by `invalidateQueries()` when the page is rendered comes over marked, and refetches as it appears, whatever its `staleTime`.
+
+`isFetched()` counts the server's data as fetched, unless it was only `initialData` there. `isFetchedAfterMount()` waits for a fetch in the browser, as the data came in before any component showed it: with a `staleTime` that keeps the data fresh, such as the 30 seconds above, that fetch doesn't come, so give a query that waits for one, such as an edit form's, `staleTime: 0`. See [Waiting for fresh data](/queries/overview#waiting-for-fresh-data).
 
 A page prerendered at build time, or served from a cache, carries data as old as the page: once that's older than `staleTime`, the browser refetches it in the background.
 

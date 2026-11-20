@@ -28,9 +28,11 @@ The cast matters: `JSON.parse` returns `any`, and a seed typed `any` makes `data
 
 This surprises people. Seed a query and it _still_ fires a request straight away.
 
-There's no trick to it: the seed is treated as data fetched **right now**, and the [default](/important-defaults) `staleTime` is `0` — meaning "stale immediately". So a background refetch kicks off at once, while the seeded data is on screen.
+There's no trick to it: the seed is treated as data updated **right now**, and the [default](/important-defaults) `staleTime` is `0` — meaning "stale immediately". So a background refetch kicks off at once, while the seeded data is on screen.
 
 That's usually what you want: show something instantly, quietly replace it with fresh data.
+
+Nothing fetched the seed, though: `isFetched()` stays `false` until a fetch of the key lands. A page that mustn't start from the seed, such as a form that edits the record, waits for its own fetch with `isFetchedAfterMount()`; see [Waiting for fresh data](/queries/overview#waiting-for-fresh-data).
 
 To stop it, say how long the seed stays good with `staleTime`:
 

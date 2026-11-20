@@ -138,6 +138,57 @@ A practical combination — a full-page spinner on first load, a subtle indicato
 
 {% endraw %}
 
+## Waiting for fresh data
+
+Most screens are happy to show cached data while it refreshes. A form that edits a record isn't: it takes its values once, so filled from the cache it shows what was cached, and the refetch that lands a moment later either never reaches it or overwrites what the user has typed. Such a page waits for a fetch of its own, even when the cache already holds the record because a list loaded it, or `initialData` seeds it from the list.
+
+The signals above can't tell that moment apart: cached data is `'success'` at once, `isFetching()` turns on again with every background refetch, and `dataUpdatedAt()` moves for a seed of `initialData` as it does for a fetch. Two signals can:
+
+- **`isFetchedAfterMount()`** — a fetch of the key has landed since this component started showing it, with data or with an error, whoever made it. A key change starts it over for the new key.
+- **`isFetched()`** — a fetch of the key has landed at all, here or before this component. Data that only `initialData` or `placeholderData` gave doesn't count.
+
+A `setQueryData()` write counts as a fetch for both; see [Manual Cache Updates](/query-client/manual-cache-updates).
+
+The edit page shows its form once its own fetch is in:
+
+```ts
+export class EditTodoComponent {
+  readonly #http = inject(HttpClient)
+
+  readonly id = input.required<number>()
+
+  protected readonly todo = injectQuery(() => ({
+    queryKey: ['todo', this.id()],
+    queryFn: () => this.#http.get<Todo>(`/api/todos/${this.id()}`),
+  }))
+}
+```
+
+{% raw %}
+
+```html
+@if (!todo.isFetchedAfterMount()) {
+  <p>Loading…</p>
+} @else {
+  @if (todo.data(); as data) {
+    <app-todo-form [todo]="data" />
+  } @else if (todo.isError()) {
+    <p>Couldn't load the todo: {{ todo.error()?.message }}</p>
+    <button (click)="todo.refetch()">Retry</button>
+  } @else {
+    <p>Loading…</p>
+  }
+}
+```
+
+{% endraw %}
+
+A failed fetch counts too: the flag says the fetch is over, not that it worked. With no data, the error branch offers a retry, and the last branch shows the new attempt. With data from before, a failed fetch keeps it, so the form starts from that data; read `isError()` next to the form if the user should know. Once the form is up, a background refetch, back to the tab or after an invalidation, doesn't turn the flag back to `false`, so the form stays while the user types, whether the refetch works or not.
+
+The flag waits for a fetch, so one has to happen: a component fetches as it starts only when the cached data is stale. With the [default](/important-defaults) `staleTime` of `0` it always is. With a longer one, data that's still fresh is shown as it is, and `isFetchedAfterMount()` stays `false` until something else fetches the key: if your [default options](/query-client/default-options) set a `staleTime`, give the edit page's query `staleTime: 0`.
+
+`isFetched()` asks less: whether any fetch of the key has landed, here or before this component. It's `false` while a detail shows only the list row `initialData` seeded it with, and turns `true` with the first fetch, wherever it's made.
+
 ## Refetching manually
 
 `refetch()` forces a fresh fetch, ignoring `staleTime`:
