@@ -408,6 +408,46 @@ describe('QueryClient', () => {
       expect(client.getQueryData(['todos'])).toBeUndefined()
     }))
 
+    it('restarts a pending gc countdown when query() asks for longer on a cache hit', fakeAsync(() => {
+      const queryFn = jasmine.createSpy('queryFn').and.returnValue(of('v1'))
+      const todos = { queryKey: ['todos'], queryFn, staleTime: Infinity }
+
+      client.query({ ...todos, gcTime: 1000 })
+      tick(500)
+      client.query({ ...todos, gcTime: 2000 })
+      tick(500)
+      expect(client.getQueryData(['todos'])).toBe('v1')
+
+      client.query({ ...todos, gcTime: 2000 })
+      client.query({ ...todos, gcTime: 1000 })
+      tick(1499)
+      expect(client.getQueryData(['todos'])).toBe('v1')
+      expect(queryFn).toHaveBeenCalledTimes(1)
+      tick(1)
+      expect(client.getQueryData(['todos'])).toBeUndefined()
+    }))
+
+    it('keeps fresh data for a longer gcTime requested after the last component leaves', fakeAsync(() => {
+      const queryFn = jasmine.createSpy('queryFn').and.returnValue(of('v1'))
+      const todos = { queryKey: ['todos'], queryFn, staleTime: Infinity }
+
+      @Component({ template: '' })
+      class Todos {
+        readonly todos = injectQuery(() => ({ ...todos, gcTime: 1000 }))
+      }
+
+      const fixture = TestBed.createComponent(Todos)
+
+      fixture.detectChanges()
+      flushMicrotasks()
+      fixture.destroy()
+
+      client.query(todos)
+      tick(1500)
+      expect(client.getQueryData(['todos'])).toBe('v1')
+      expect(queryFn).toHaveBeenCalledTimes(1)
+    }))
+
     it('retries a failing fetch as the options say', fakeAsync(() => {
       const start = Date.now()
       const sent: number[] = []

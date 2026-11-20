@@ -409,15 +409,21 @@ export class Query<TData, TError = Error, TQueryFnData = TData> {
     return this.#observers.size
   }
 
-  // Keeps the longest gcTime asked for by anything that used the query, as
-  // in TanStack: whoever created it, each component that showed it, each
-  // query(), infiniteQuery() or fetchQuery() call. A shorter one doesn't cut
-  // short a longer one asked for before. Never below 0. A NaN, such as
-  // `Number()` of a missing setting, keeps the query as Infinity does, but
-  // only until the next gcTime replaces it, as in TanStack: Math.max with a
-  // NaN would keep it for good.
+  // Keeps the longest gcTime asked for by anything that used the query:
+  // whoever created it, each component that showed it, each query(),
+  // infiniteQuery() or fetchQuery() call. A shorter one doesn't cut short a
+  // longer one asked for before. A longer one starts a running gc countdown
+  // over with it: a call that finds fresh data fetches and writes nothing,
+  // so nothing else would. Never below 0. A NaN, such as `Number()` of a
+  // missing setting, keeps the query as Infinity does, but only until the
+  // next gcTime replaces it, as in TanStack: Math.max with a NaN would keep
+  // it for good.
   updateGcTime(ms: number): void {
-    this.#gcTime = Math.max(this.#gcTime || 0, ms)
+    const previous = this.#gcTime
+
+    this.#gcTime = Math.max(previous || 0, ms)
+
+    if (!Object.is(previous, this.#gcTime)) this.#scheduleGc()
   }
 
   addObserver(observer: QuerySubscriber<TData, TError, TQueryFnData>): void {
@@ -1096,7 +1102,8 @@ export class Query<TData, TError = Error, TQueryFnData = TData> {
   // Removes the query gcTime from now, unless something uses it by then: an
   // observer, or a fetch of it in flight. Called whenever the query may have
   // become unused: when it's created, when its last observer leaves, when a
-  // fetch of it ends, when data is written into it by hand.
+  // fetch of it ends, when data is written into it by hand. Also when its
+  // gcTime changes, so the countdown starts over with the new one.
   #scheduleGc(): void {
     this.#clearGcTimer()
 
