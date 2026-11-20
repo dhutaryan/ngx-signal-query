@@ -28,6 +28,8 @@ expectTypeOf(todos.data()).toEqualTypeOf<
   InfiniteData<TodoPage, number> | undefined
 >()
 expectTypeOf(todos.error()).toEqualTypeOf<Error | null>()
+expectTypeOf(todos.isFetched()).toEqualTypeOf<boolean>()
+expectTypeOf(todos.isFetchedAfterMount()).toEqualTypeOf<boolean>()
 
 // A Promise page, and a key with `as const`, whose type the query function
 // gets.

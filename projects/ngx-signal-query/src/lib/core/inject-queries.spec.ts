@@ -405,6 +405,51 @@ describe('injectQueries', () => {
       ])
     }))
 
+    it('gives each query its own isFetchedAfterMount, kept across reordering', () => {
+      void client.query({ queryKey: ['todo', 3], queryFn: () => of(3) })
+
+      const waiting = new Map<number, Subject<number>>()
+      const ids = signal([1, 2])
+      const { fixture, results } = mount(() => ({
+        queries: ids().map((id) => ({
+          queryKey: ['todo', id],
+          // Todo 1 comes back at once; todo 2 waits for an answer.
+          queryFn: () => {
+            if (id !== 2) return of(id)
+
+            const response = new Subject<number>()
+
+            waiting.set(id, response)
+
+            return response
+          },
+          // Nothing is fetched again: a query that started over on the
+          // reordering would stay false.
+          staleTime: Infinity,
+        })),
+      }))
+      const fetchedAfterMount = () =>
+        results().map((todo) => todo.isFetchedAfterMount())
+
+      expect(fetchedAfterMount()).toEqual([true, false])
+
+      ids.set([2, 1])
+      fixture.detectChanges()
+
+      expect(fetchedAfterMount()).toEqual([false, true])
+
+      // Todo 3 was fetched before the list showed it.
+      ids.set([2, 1, 3])
+      fixture.detectChanges()
+
+      expect(results()[2].isFetched()).toBe(true)
+      expect(fetchedAfterMount()).toEqual([false, true, false])
+
+      waiting.get(2)!.next(2)
+
+      expect(fetchedAfterMount()).toEqual([true, true, false])
+    })
+
     it('keeps the same array when only options change', () => {
       const version = signal(1)
       const { fixture, results } = mount(() => ({

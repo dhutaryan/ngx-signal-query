@@ -116,6 +116,7 @@ They look similar — both render something before the fetch finishes — but th
 | `status()` while shown | `'success'` | `'success'` |
 | `isPlaceholderData()` | `true` | `false` |
 | `dataUpdatedAt()` | `0` | `initialDataUpdatedAt`, or when it was seeded |
+| Counts as a fetch for `isFetched()`? | No | No |
 | Other observers see it? | No | Yes |
 | Good for | temporary stand-ins, previous page | real data you'd keep |
 

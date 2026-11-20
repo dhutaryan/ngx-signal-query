@@ -157,6 +157,13 @@ export interface InternalQueryState<TData, TError = Error> extends QueryState<
   // it came from, such as the one for the next page. Put back, along with the
   // status and the error, when a fetch is stopped with nothing in its place.
   fetchDirection: FetchDirection | null
+  // How many times something has landed in the query: a fetch, with data or
+  // with an error, or a write that puts data in it by hand, such as
+  // setQueryData or data that a server render fetched. A fetch counts once,
+  // with its outcome, not once for each failed attempt; initialData doesn't
+  // count. A stopped fetch leaves it as it is. Observers tell from it whether
+  // the query was fetched at all, and whether since they started showing it.
+  fetchedCount: number
 }
 
 /**
@@ -222,6 +229,8 @@ export function fetchArgsOf<TData, TError, TQueryFnData = TData>(
  * "stale at once". A function that gives undefined has nothing to seed, and
  * the query loads like it would without one; the function is asked again on
  * each call while the query has no data, and seeds it once it gives data.
+ * Nothing fetched the seed, so it doesn't count in
+ * InternalQueryState.fetchedCount.
  *
  * @internal
  */
@@ -246,7 +255,7 @@ export function applyInitialData<TData, TError, TQueryFnData>(
       ? initialDataUpdatedAt()
       : (initialDataUpdatedAt ?? Date.now())
 
-  query.setData(data, { updatedAt })
+  query.setData(data, { updatedAt, seed: true })
 }
 
 // Who asks for a fetch: a component, by the handle it shows the query with,
@@ -350,6 +359,7 @@ export class Query<TData, TError = Error, TQueryFnData = TData> {
     failureReason: null,
     updatedAt: 0,
     fetchDirection: null,
+    fetchedCount: 0,
   })
 
   // `state` must follow `#state`: a public field can't precede the private
@@ -674,6 +684,7 @@ export class Query<TData, TError = Error, TQueryFnData = TData> {
             failureReason: null,
             updatedAt: Date.now(),
             fetchDirection: direction ?? null,
+            fetchedCount: this.state().fetchedCount + 1,
           })
           // The app's callbacks come before #refetchIfAsked starts the
           // refetch queued during the fetch: that refetch may land at once,
@@ -704,6 +715,7 @@ export class Query<TData, TError = Error, TQueryFnData = TData> {
             error: err,
             isFetching: false,
             ...countFailure(state, err),
+            fetchedCount: state.fetchedCount + 1,
           }))
           this.#callbacks.error(
             {
@@ -781,15 +793,19 @@ export class Query<TData, TError = Error, TQueryFnData = TData> {
   }
 
   // Without a structuralSharing setting the data is stored as is: which one
-  // a write uses is the client's to resolve.
+  // a write uses is the client's to resolve. A write counts in
+  // InternalQueryState.fetchedCount, unless it's a `seed`: initialData, which
+  // nothing fetched.
   setData(
     data: TData,
     {
       updatedAt = Date.now(),
       structuralSharing = false,
+      seed = false,
     }: {
       updatedAt?: number
       structuralSharing?: StructuralSharingValue<TData>
+      seed?: boolean
     } = {},
   ): void {
     this.#state.update((state) => ({
@@ -801,6 +817,7 @@ export class Query<TData, TError = Error, TQueryFnData = TData> {
       failureCount: 0,
       failureReason: null,
       updatedAt,
+      fetchedCount: seed ? state.fetchedCount : state.fetchedCount + 1,
     }))
 
     // A write made during a fetch is what stopping the fetch goes back to.

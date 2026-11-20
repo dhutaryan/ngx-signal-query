@@ -402,6 +402,11 @@ export class QueryClient {
    * entry that counts as just fetched, which a query's `staleTime` takes as
    * fresh.
    *
+   * A write counts as a fetch that landed: `isFetched()` turns `true`, and so
+   * does `isFetchedAfterMount()` in a component that already shows the key,
+   * unless `removeQueries()` or `clear()` dropped the key first: the
+   * component starts over with the write, as on a key change.
+   *
    * The data is merged like a response (see `structuralSharing`): what didn't
    * change keeps its reference, so writing what the cache holds leaves
    * `data()` as it is. It still counts as a write: `dataUpdatedAt` moves, and

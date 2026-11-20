@@ -23,6 +23,11 @@ const todos = injectQuery(() => ({
 
 expectTypeOf(todos.data()).toEqualTypeOf<Todo[] | undefined>()
 
+// Whether a fetch has landed, at all or since the component started showing
+// the query.
+expectTypeOf(todos.isFetched()).toEqualTypeOf<boolean>()
+expectTypeOf(todos.isFetchedAfterMount()).toEqualTypeOf<boolean>()
+
 // placeholderData
 
 // keepPreviousData keeps the data type of queryFn.

@@ -12,7 +12,11 @@ import {
 import { settled } from '../../spec-helpers/promises'
 import { createQuery } from '../../spec-helpers/query'
 import { CancelledError } from './cancelled-error'
-import type { FetchBehavior, QuerySubscriber } from './query'
+import {
+  type FetchBehavior,
+  type QuerySubscriber,
+  applyInitialData,
+} from './query'
 import { deferred } from './utils'
 
 // An observer that never wants the query fetched, for specs that only count
@@ -1203,6 +1207,81 @@ describe('Query', () => {
       tick()
       expect(query.state().data).toBe(2)
     }))
+  })
+
+  describe('fetchedCount', () => {
+    it('counts each fetch that lands, with data or with an error', () => {
+      const { query } = createQuery<number>()
+
+      expect(query.state().fetchedCount).toBe(0)
+
+      query.fetch({ queryFn: () => of(1) })
+
+      expect(query.state().fetchedCount).toBe(1)
+
+      query.fetch({ queryFn: () => throwError(() => new Error('down')) })
+
+      expect(query.state().fetchedCount).toBe(2)
+    })
+
+    it('counts a fetch once, with its outcome, however many attempts it takes', fakeAsync(() => {
+      const { query } = createQuery<number>()
+      let attempts = 0
+
+      query.fetch({
+        queryFn: () =>
+          ++attempts < 3 ? throwError(() => new Error('down')) : of(attempts),
+        retry: 2,
+        retryDelay: 10,
+      })
+
+      expect(query.state().fetchedCount).toBe(0)
+
+      tick(10)
+
+      expect(query.state().failureCount).toBe(2)
+      expect(query.state().fetchedCount).toBe(0)
+
+      tick(10)
+
+      expect(query.state().data).toBe(3)
+      expect(query.state().fetchedCount).toBe(1)
+    }))
+
+    it("doesn't count a fetch that is cancelled or replaced", () => {
+      const { query } = createQuery<number>()
+      const cancelled = new Subject<number>()
+      const replaced = new Subject<number>()
+      const replacing = new Subject<number>()
+
+      query.fetch({ queryFn: () => of(1) })
+      query.fetch({ queryFn: () => cancelled })
+      query.cancel()
+
+      expect(query.state().fetchedCount).toBe(1)
+
+      query.fetch({ queryFn: () => replaced })
+      query.fetch({ queryFn: () => replacing }, { cancelRefetch: true })
+
+      expect(query.state().fetchedCount).toBe(1)
+
+      replacing.next(2)
+
+      expect(query.state().fetchedCount).toBe(2)
+    })
+
+    it('counts a write by hand, but not a seed of initialData', () => {
+      const { query } = createQuery<number>()
+
+      applyInitialData(query, { initialData: 1 })
+
+      expect(query.state().data).toBe(1)
+      expect(query.state().fetchedCount).toBe(0)
+
+      query.setData(2)
+
+      expect(query.state().fetchedCount).toBe(1)
+    })
   })
 
   // fetch() returns a promise of the data as the query stores it, shared by
