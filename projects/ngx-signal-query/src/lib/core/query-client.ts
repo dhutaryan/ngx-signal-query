@@ -199,9 +199,11 @@ export class QueryClient {
    * {@link withDefaultOptions}, so whoever waits for the data hears of the
    * failure at once.
    *
-   * A query no component shows is removed `gcTime` after the fetch lands (the
-   * options', else the configured default, else 5 minutes), like any unused
-   * query is.
+   * A query no component shows is removed `gcTime` after the fetch lands, like
+   * any unused query is. Its `gcTime` is the longest anything asked for; this
+   * call asks for the options', else the configured default, else 5 minutes.
+   * A call that asks for longer while that countdown runs starts it over, even
+   * when it finds the data fresh and fetches nothing.
    *
    * @typeParam TData - Type of the data resolved by `queryFn`.
    * @typeParam TError - Type of the error thrown by `queryFn`.

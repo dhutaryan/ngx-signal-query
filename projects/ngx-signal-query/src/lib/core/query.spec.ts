@@ -1925,6 +1925,16 @@ describe('Query', () => {
       }
     })
 
+    it('never removes a query whose gcTime grows to Infinity, or more than a timer can hold, during a countdown', async () => {
+      for (const gcTime of [Infinity, 2 ** 31]) {
+        const { query, cache } = createQuery<number>(30)
+
+        query.updateGcTime(gcTime)
+        await new Promise((resolve) => setTimeout(resolve, 60))
+        expect(cache.remove).not.toHaveBeenCalled()
+      }
+    })
+
     it('cancels a scheduled gc when an observer returns', fakeAsync(() => {
       const { query, cache } = createQuery<number>(1000)
       const observer = stubObserver()
