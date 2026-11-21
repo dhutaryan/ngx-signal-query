@@ -357,8 +357,9 @@ export type QueryOptions<
    * `Infinity` keeps it until it's removed, and so does anything over about
    * 24.8 days (2³¹−1 ms), the most a timer can hold. When components showing
    * it, `query()`, `infiniteQuery()` and `fetchQuery()` ask for different
-   * gcTimes, the longest wins for as long as the query stays in the cache. On
-   * the server it's always `Infinity`.
+   * gcTimes, the longest wins for as long as the query stays in the cache.
+   * A longer gcTime restarts a running countdown, even on a fresh cache hit.
+   * On the server it's always `Infinity`.
    */
   gcTime?: number
   /**
