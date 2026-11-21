@@ -1991,6 +1991,21 @@ describe('Query', () => {
       expect(cache.remove).toHaveBeenCalledWith(query)
     }))
 
+    it('keeps a query whose gcTime turns NaN during a countdown, until the next gcTime starts it over', fakeAsync(() => {
+      const { query, cache } = createQuery<number>(1000)
+
+      query.updateGcTime(NaN)
+      tick(5000)
+      expect(cache.remove).not.toHaveBeenCalled()
+
+      query.updateGcTime(2000)
+      tick(1999)
+      expect(cache.remove).not.toHaveBeenCalled()
+
+      tick(1)
+      expect(cache.remove).toHaveBeenCalledWith(query)
+    }))
+
     it('keeps a query while a fetch of it is in flight, and removes it gcTime after the fetch lands', fakeAsync(() => {
       const { query, cache } = createQuery<number>(1000)
       const response = new Subject<number>()

@@ -922,6 +922,18 @@ describe('QueryClient', () => {
       expect(result.value).toEqual({ pages: [api.page(0)], pageParams: [0] })
     }))
 
+    it("removes a list nobody shows the options' gcTime after its fetch lands", fakeAsync(() => {
+      const api = server()
+
+      client.infiniteQuery(listOptions(api, { gcTime: 1000 }))
+
+      tick(999)
+      expect(client.getQueryData(['list'])).toBeDefined()
+
+      tick(1)
+      expect(client.getQueryData(['list'])).toBeUndefined()
+    }))
+
     it('counts the pages it fetches, not the pages maxPages keeps', fakeAsync(() => {
       const api = server()
       const result = settled(
