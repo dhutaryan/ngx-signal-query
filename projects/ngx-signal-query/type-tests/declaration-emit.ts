@@ -5,7 +5,12 @@
 // error here (TS4023) means a library like that doesn't build.
 import { HttpClient } from '@angular/common/http'
 import { inject, Injectable } from '@angular/core'
-import { infiniteQueryOptions, queryOptions } from 'ngx-signal-query'
+import {
+  infiniteQueryOptions,
+  injectInfiniteQuery,
+  injectQuery,
+  queryOptions,
+} from 'ngx-signal-query'
 
 export type Todo = { id: number; title: string }
 export type TodoPage = { todos: Todo[]; nextCursor: number | null }
@@ -47,4 +52,25 @@ export class TodoQueries {
       queryFn: () => this.#http.get<Todo>(`/api/todos/${id}`),
     })
   }
+}
+
+// Definitions with a seed that's always there, and a component's queries
+// made of them.
+export const savedTodos = queryOptions({
+  queryKey: ['todos', 'saved'],
+  queryFn: () => http.get<Todo[]>('/api/todos'),
+  initialData: [],
+})
+export const savedTodoPages = infiniteQueryOptions({
+  queryKey: ['todos', 'saved', 'infinite'],
+  queryFn: ({ pageParam }) =>
+    http.get<TodoPage>(`/api/todos?cursor=${pageParam}`),
+  initialPageParam: 0,
+  getNextPageParam: (lastPage) => lastPage.nextCursor,
+  initialData: { pages: [], pageParams: [] },
+})
+
+export class SavedTodosComponent {
+  readonly todos = injectQuery(() => savedTodos)
+  readonly pages = injectInfiniteQuery(() => savedTodoPages)
 }

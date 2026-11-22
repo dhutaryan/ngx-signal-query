@@ -12,6 +12,8 @@ protected readonly todos = injectQuery(() => ({
 
 The query never shows `'pending'`. `data()` is populated from the first render, `status()` is `'success'`.
 
+The type says so too: `todos.data()` is `Todo[]`, not `Todo[] | undefined`, so a template reads it with no `?.` and no `@if (todos.data(); as data)` around it. That holds for a value whose type leaves `undefined` out, and for a function whose return type does. A seed that may be `undefined`, such as the lookup in [Seeding from another query](/queries/initial-data#seeding-from-another-query), keeps `undefined` in the type. A `queryOptions()` definition with such a seed carries it to every component that uses it.
+
 Crucially, **`initialData` is written into the cache**. It's not a temporary placeholder — it becomes the real cached value for that key, and other components reading the same key will see it.
 
 ## A value or a function
@@ -22,7 +24,7 @@ If computing the data is expensive, pass a function. It's only called when the q
 initialData: () => JSON.parse(localStorage.getItem('todos') ?? '[]') as Todo[]
 ```
 
-The cast matters: `JSON.parse` returns `any`, and a seed typed `any` makes `data()` `any` too.
+The cast matters: `JSON.parse` returns `any`, and a seed typed `any` makes `data()` `any` too. With it, `data()` is `Todo[]`: the function always returns a list.
 
 ## It refetches immediately (by default)
 
@@ -83,7 +85,7 @@ export class TodoDetailComponent {
 }
 ```
 
-The detail view renders instantly from the list's data, then refetches in the background to fill in whatever the list row didn't have. If the list isn't cached, or has no such row, `find` returns `undefined`: nothing is seeded, and the query starts `'pending'` as usual.
+The detail view renders instantly from the list's data, then refetches in the background to fill in whatever the list row didn't have. If the list isn't cached, or has no such row, `find` returns `undefined`: nothing is seeded, and the query starts `'pending'` as usual. That's why `todo.data()` keeps `undefined` in its type here: it's `Todo | undefined`, the same as for a query with no seed.
 
 This works with a reactive key too: the seed function runs again for each new id, so navigating between todos keeps seeding from the list.
 

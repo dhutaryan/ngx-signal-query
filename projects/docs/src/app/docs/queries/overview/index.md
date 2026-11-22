@@ -74,6 +74,8 @@ The simplest approach is a chain of boolean checks. Note that inside the `@if (t
 
 {% endraw %}
 
+A query whose `initialData` always seeds it can do without the `@if (todos.data(); as data)` block: its `data()` is `Todo[]` from the first read, not `Todo[] | undefined`. See [Initial Data](/queries/initial-data).
+
 If you prefer, `@switch` on `status()` reads a little more explicitly:
 
 {% raw %}
