@@ -35,24 +35,19 @@ import type {
  *
  * @example
  * ```ts
- * @Injectable({ providedIn: 'root' })
- * class TodoQueries {
- *   private readonly http = inject(HttpClient)
- *
- *   todos() {
- *     return infiniteQueryOptions({
- *       queryKey: ['todos', 'infinite'],
- *       queryFn: ({ pageParam }) =>
- *         this.http.get<TodoPage>(`/api/todos?cursor=${pageParam}`),
- *       initialPageParam: 0,
- *       getNextPageParam: (lastPage) => lastPage.nextCursor,
- *     })
- *   }
+ * // In a service:
+ * todos() {
+ *   return infiniteQueryOptions({
+ *     queryKey: ['todos', 'infinite'],
+ *     queryFn: ({ pageParam }) =>
+ *       this.http.get<TodoPage>(`/api/todos?cursor=${pageParam}`),
+ *     initialPageParam: 0,
+ *     getNextPageParam: (lastPage) => lastPage.nextCursor,
+ *   })
  * }
  *
  * // In a component:
- * // private readonly queries = inject(TodoQueries)
- * // readonly todos = injectInfiniteQuery(() => this.queries.todos())
+ * readonly todos = injectInfiniteQuery(() => this.#queries.todos())
  * ```
  */
 export function infiniteQueryOptions<
@@ -106,24 +101,19 @@ export function infiniteQueryOptions<
  *
  * @example
  * ```ts
- * @Injectable({ providedIn: 'root' })
- * class TodoQueries {
- *   private readonly http = inject(HttpClient)
- *
- *   todos() {
- *     return infiniteQueryOptions({
- *       queryKey: ['todos', 'infinite'],
- *       queryFn: ({ pageParam }) =>
- *         this.http.get<TodoPage>(`/api/todos?cursor=${pageParam}`),
- *       initialPageParam: 0,
- *       getNextPageParam: (lastPage) => lastPage.nextCursor,
- *     })
- *   }
+ * // In a service:
+ * todos() {
+ *   return infiniteQueryOptions({
+ *     queryKey: ['todos', 'infinite'],
+ *     queryFn: ({ pageParam }) =>
+ *       this.http.get<TodoPage>(`/api/todos?cursor=${pageParam}`),
+ *     initialPageParam: 0,
+ *     getNextPageParam: (lastPage) => lastPage.nextCursor,
+ *   })
  * }
  *
  * // In a component:
- * // private readonly queries = inject(TodoQueries)
- * // readonly todos = injectInfiniteQuery(() => this.queries.todos())
+ * readonly todos = injectInfiniteQuery(() => this.#queries.todos())
  * ```
  */
 export function infiniteQueryOptions<

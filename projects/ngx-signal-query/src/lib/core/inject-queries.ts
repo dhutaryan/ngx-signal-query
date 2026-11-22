@@ -61,19 +61,15 @@ interface Entry<TData, TError> {
  *
  * @example
  * ```ts
- * class TodoListComponent {
- *   readonly #queries = inject(TodoQueries)
+ * readonly todoIds = input.required<number[]>()
  *
- *   readonly todoIds = input.required<number[]>()
+ * readonly todos = injectQueries(() => ({
+ *   queries: this.todoIds().map((id) => this.#queries.detail(id)),
+ * }))
  *
- *   readonly todos = injectQueries(() => ({
- *     queries: this.todoIds().map((id) => this.#queries.detail(id)),
- *   }))
- *
- *   readonly isPending = computed(() =>
- *     this.todos().some((todo) => todo.isPending()),
- *   )
- * }
+ * readonly isPending = computed(() =>
+ *   this.todos().some((todo) => todo.isPending()),
+ * )
  * ```
  */
 export function injectQueries<TData, TError = Error>(

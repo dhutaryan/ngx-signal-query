@@ -62,32 +62,25 @@ import type {
  *
  * @example
  * ```ts
- * @Component({
- *   template: `
- *     @for (page of todos.data()?.pages ?? []; track $index) {
- *       @for (todo of page.todos; track todo.id) {
- *         <p>{{ todo.title }}</p>
- *       }
- *     }
- *     <button
- *       (click)="todos.fetchNextPage()"
- *       [disabled]="!todos.hasNextPage() || todos.isFetching()"
- *     >
- *       {{ todos.isFetchingNextPage() ? 'Loading more…' : 'Load more' }}
- *     </button>
- *   `,
- * })
- * class TodoListComponent {
- *   private readonly http = inject(HttpClient)
+ * readonly todos = injectInfiniteQuery(() => ({
+ *   queryKey: ['todos', 'infinite'],
+ *   queryFn: ({ pageParam }) =>
+ *     this.http.get<TodoPage>(`/api/todos?cursor=${pageParam}`),
+ *   initialPageParam: 0,
+ *   getNextPageParam: (lastPage) => lastPage.nextCursor,
+ * }))
  *
- *   readonly todos = injectInfiniteQuery(() => ({
- *     queryKey: ['todos', 'infinite'],
- *     queryFn: ({ pageParam }) =>
- *       this.http.get<TodoPage>(`/api/todos?cursor=${pageParam}`),
- *     initialPageParam: 0,
- *     getNextPageParam: (lastPage) => lastPage.nextCursor,
- *   }))
- * }
+ * // The todos of every loaded page, in order.
+ * readonly items = computed(
+ *   () => this.todos.data()?.pages.flatMap((page) => page.todos) ?? [],
+ * )
+ *
+ * // <button
+ * //   (click)="todos.fetchNextPage()"
+ * //   [disabled]="!todos.hasNextPage() || todos.isFetching()"
+ * // >
+ * //   {{ todos.isFetchingNextPage() ? 'Loading more…' : 'Load more' }}
+ * // </button>
  * ```
  */
 export function injectInfiniteQuery<
@@ -157,32 +150,25 @@ export function injectInfiniteQuery<
  *
  * @example
  * ```ts
- * @Component({
- *   template: `
- *     @for (page of todos.data()?.pages ?? []; track $index) {
- *       @for (todo of page.todos; track todo.id) {
- *         <p>{{ todo.title }}</p>
- *       }
- *     }
- *     <button
- *       (click)="todos.fetchNextPage()"
- *       [disabled]="!todos.hasNextPage() || todos.isFetching()"
- *     >
- *       {{ todos.isFetchingNextPage() ? 'Loading more…' : 'Load more' }}
- *     </button>
- *   `,
- * })
- * class TodoListComponent {
- *   private readonly http = inject(HttpClient)
+ * readonly todos = injectInfiniteQuery(() => ({
+ *   queryKey: ['todos', 'infinite'],
+ *   queryFn: ({ pageParam }) =>
+ *     this.http.get<TodoPage>(`/api/todos?cursor=${pageParam}`),
+ *   initialPageParam: 0,
+ *   getNextPageParam: (lastPage) => lastPage.nextCursor,
+ * }))
  *
- *   readonly todos = injectInfiniteQuery(() => ({
- *     queryKey: ['todos', 'infinite'],
- *     queryFn: ({ pageParam }) =>
- *       this.http.get<TodoPage>(`/api/todos?cursor=${pageParam}`),
- *     initialPageParam: 0,
- *     getNextPageParam: (lastPage) => lastPage.nextCursor,
- *   }))
- * }
+ * // The todos of every loaded page, in order.
+ * readonly items = computed(
+ *   () => this.todos.data()?.pages.flatMap((page) => page.todos) ?? [],
+ * )
+ *
+ * // <button
+ * //   (click)="todos.fetchNextPage()"
+ * //   [disabled]="!todos.hasNextPage() || todos.isFetching()"
+ * // >
+ * //   {{ todos.isFetchingNextPage() ? 'Loading more…' : 'Load more' }}
+ * // </button>
  * ```
  */
 export function injectInfiniteQuery<

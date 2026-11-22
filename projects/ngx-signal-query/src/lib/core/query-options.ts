@@ -31,21 +31,16 @@ import type {
  *
  * @example
  * ```ts
- * @Injectable({ providedIn: 'root' })
- * class TodoQueries {
- *   private readonly http = inject(HttpClient)
- *
- *   todos() {
- *     return queryOptions({
- *       queryKey: ['todos'],
- *       queryFn: () => this.http.get<Todo[]>('/api/todos'),
- *     })
- *   }
+ * // In a service:
+ * todos() {
+ *   return queryOptions({
+ *     queryKey: ['todos'],
+ *     queryFn: () => this.http.get<Todo[]>('/api/todos'),
+ *   })
  * }
  *
  * // In a component:
- * // private readonly queries = inject(TodoQueries)
- * // readonly todos = injectQuery(() => this.queries.todos())
+ * readonly todos = injectQuery(() => this.#queries.todos())
  * ```
  */
 export function queryOptions<
@@ -84,21 +79,16 @@ export function queryOptions<
  *
  * @example
  * ```ts
- * @Injectable({ providedIn: 'root' })
- * class TodoQueries {
- *   private readonly http = inject(HttpClient)
- *
- *   todos() {
- *     return queryOptions({
- *       queryKey: ['todos'],
- *       queryFn: () => this.http.get<Todo[]>('/api/todos'),
- *     })
- *   }
+ * // In a service:
+ * todos() {
+ *   return queryOptions({
+ *     queryKey: ['todos'],
+ *     queryFn: () => this.http.get<Todo[]>('/api/todos'),
+ *   })
  * }
  *
  * // In a component:
- * // private readonly queries = inject(TodoQueries)
- * // readonly todos = injectQuery(() => this.queries.todos())
+ * readonly todos = injectQuery(() => this.#queries.todos())
  * ```
  */
 export function queryOptions<

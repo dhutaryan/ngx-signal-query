@@ -53,22 +53,15 @@ import type {
  *
  * @example
  * ```ts
- * @Component({
- *   template: `
- *     @if (todo.isPending()) { <p>Loading…</p> }
- *     @if (todo.data(); as data) { <p>{{ data.title }}</p> }
- *   `,
- * })
- * class TodoComponent {
- *   readonly id = input.required<number>()
- *   private readonly http = inject(HttpClient)
+ * readonly id = input.required<number>()
  *
- *   // Refetches automatically whenever `id()` changes.
- *   readonly todo = injectQuery(() => ({
- *     queryKey: ['todo', this.id()],
- *     queryFn: () => this.http.get<Todo>(`/api/todos/${this.id()}`),
- *   }))
- * }
+ * // Refetches automatically whenever `id()` changes.
+ * readonly todo = injectQuery(() => ({
+ *   queryKey: ['todo', this.id()],
+ *   queryFn: () => this.http.get<Todo>(`/api/todos/${this.id()}`),
+ * }))
+ *
+ * // <p>{{ todo.isPending() ? 'Loading…' : todo.data()?.title }}</p>
  * ```
  */
 export function injectQuery<
@@ -121,22 +114,15 @@ export function injectQuery<
  *
  * @example
  * ```ts
- * @Component({
- *   template: `
- *     @if (todo.isPending()) { <p>Loading…</p> }
- *     @if (todo.data(); as data) { <p>{{ data.title }}</p> }
- *   `,
- * })
- * class TodoComponent {
- *   readonly id = input.required<number>()
- *   private readonly http = inject(HttpClient)
+ * readonly id = input.required<number>()
  *
- *   // Refetches automatically whenever `id()` changes.
- *   readonly todo = injectQuery(() => ({
- *     queryKey: ['todo', this.id()],
- *     queryFn: () => this.http.get<Todo>(`/api/todos/${this.id()}`),
- *   }))
- * }
+ * // Refetches automatically whenever `id()` changes.
+ * readonly todo = injectQuery(() => ({
+ *   queryKey: ['todo', this.id()],
+ *   queryFn: () => this.http.get<Todo>(`/api/todos/${this.id()}`),
+ * }))
+ *
+ * // <p>{{ todo.isPending() ? 'Loading…' : todo.data()?.title }}</p>
  * ```
  */
 export function injectQuery<
