@@ -3429,6 +3429,34 @@ describe('injectQuery', () => {
       expect(queryFn).toHaveBeenCalledTimes(2)
     })
 
+    it('seeds initialData into the entry it follows while it is disabled', () => {
+      // A disabled component asks for no fetch, which would seed the entry
+      // when it resolves the key: following the entry is all that seeds it.
+      const { queryFn, inFlight } = requests<string>()
+      const a = mount(
+        (id) => ({
+          queryKey: ['todo', id()],
+          queryFn,
+          initialData: 'seed',
+          enabled: false,
+        }),
+        1,
+      )
+
+      expect(a.result.data()).toBe('seed')
+
+      client.removeQueries({ queryKey: ['todo', 1] })
+      a.fixture.detectChanges()
+
+      // Another component brings the key back with a request in flight.
+      mount((id) => ({ queryKey: ['todo', id()], queryFn }), 1)
+      a.fixture.detectChanges()
+
+      expect(inFlight()).toBe(1)
+      expect(client.getQueryData(['todo', 1])).toBe('seed')
+      expect(a.result.data()).toBe('seed')
+    })
+
     it('polls the key back into the cache', fakeAsync(() => {
       const { queryFn, starts } = timed(30)
       const { fixture, result } = mount(

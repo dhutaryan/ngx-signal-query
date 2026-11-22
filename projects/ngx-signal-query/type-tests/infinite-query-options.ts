@@ -6,6 +6,7 @@ import {
   infiniteQueryOptions,
   keepPreviousData,
   type DataTag,
+  type DefinedInitialDataInfiniteOptions,
   type InfiniteData,
   type InfiniteQueryOptions,
   type QueryKey,
@@ -134,6 +135,46 @@ infiniteQueryOptions({
   // @ts-expect-error -- one page isn't the pages
   initialData: { todos: [], nextCursor: null },
 })
+
+// A definition seeded with pages that are always there says so in its type.
+const seededPages = infiniteQueryOptions({
+  queryKey: ['todos', 'seeded'],
+  queryFn: ({ pageParam }) =>
+    http.get<TodoPage>(`/api/todos?cursor=${pageParam}`),
+  initialPageParam: 0,
+  getNextPageParam: (lastPage) => lastPage.nextCursor,
+  initialData: { pages: [], pageParams: [] },
+})
+
+expectTypeOf(seededPages).toEqualTypeOf<
+  DefinedInitialDataInfiniteOptions<
+    TodoPage,
+    Error,
+    DataTag<string[], InfiniteData<TodoPage, number>>,
+    number
+  >
+>()
+
+// One whose seed may be undefined doesn't.
+declare const cachedPages: InfiniteData<TodoPage, number> | undefined
+
+const maybeSeededPages = infiniteQueryOptions({
+  queryKey: ['todos', 'seeded'],
+  queryFn: ({ pageParam }) =>
+    http.get<TodoPage>(`/api/todos?cursor=${pageParam}`),
+  initialPageParam: 0,
+  getNextPageParam: (lastPage) => lastPage.nextCursor,
+  initialData: () => cachedPages,
+})
+
+expectTypeOf(maybeSeededPages).toEqualTypeOf<
+  InfiniteQueryOptions<
+    TodoPage,
+    Error,
+    DataTag<string[], InfiniteData<TodoPage, number>>,
+    number
+  >
+>()
 
 // A query function that takes no context fits.
 const plain: () => Observable<TodoPage> = () => http.get<TodoPage>('/api/todos')

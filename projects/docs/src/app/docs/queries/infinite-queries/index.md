@@ -237,7 +237,7 @@ this.#client.setQueryData<InfiniteData<TodoPage, number>>(
 
 As for any query, a fetch of the list in flight lands over a write: a page that was loading goes onto the pages as they were when it started. So cancel it first, as [Optimistic Updates](/mutations/optimistic-updates#why-cancelqueries-first) does: the page isn't added, and it can be asked for again.
 
-`initialData` and `placeholderData` have the same shape: an `InfiniteData` with `pages` and `pageParams`. A refetch of seeded data fetches as many pages as it holds.
+`initialData` and `placeholderData` have the same shape: an `InfiniteData` with `pages` and `pageParams`. A refetch of seeded data fetches as many pages as it holds. A list whose `initialData` always seeds it, a value whose type leaves `undefined` out or a function whose return type does, has a `data()` without `undefined` in its type, like a query with such a seed.
 
 ## Typing the params
 

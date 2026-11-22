@@ -117,6 +117,7 @@ They look similar — both render something before the fetch finishes — but th
 | `isPlaceholderData()` | `true` | `false` |
 | `dataUpdatedAt()` | `0` | `initialDataUpdatedAt`, or when it was seeded |
 | Counts as a fetch for `isFetched()`? | No | No |
+| `undefined` in the type of `data()`? | Yes | No, with a seed that's always there |
 | Other observers see it? | No | Yes |
 | Good for | temporary stand-ins, previous page | real data you'd keep |
 

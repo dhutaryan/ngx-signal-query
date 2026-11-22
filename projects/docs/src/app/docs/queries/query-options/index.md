@@ -62,7 +62,7 @@ export class TodoListComponent {
 }
 ```
 
-`todos.data()` is typed as `Todo[] | undefined` — inferred straight from `queryFn`, no generics to repeat.
+`todos.data()` is typed as `Todo[] | undefined` — inferred straight from `queryFn`, no generics to repeat. A definition whose `initialData` always seeds the query makes it `Todo[]` (see [Initial Data](/queries/initial-data)).
 
 Note that `detail(id)` is just a function taking an argument. Combined with [reactive keys](/queries/query-keys), that's all you need for a query that follows a signal:
 
@@ -120,6 +120,8 @@ protected readonly todos = injectQuery(() => ({
 }))
 ```
 
+If the definition has an `initialData` that always seeds the query, a spread keeps it, and with it a `data()` without `undefined`; setting `initialData: undefined` drops both.
+
 ## The key carries the data type
 
 A definition's key carries the type of the data cached under it, so `getQueryData` and `setQueryData` take the type from the key, with no generic to write:
@@ -148,7 +150,7 @@ Two cases need a type from you:
 const keys: QueryKey[] = [queries.list().queryKey, queries.detail(5).queryKey]
 ```
 
-If you write a method's return type out, keep the key's type in it: with `QueryOptions<Todo[], Error, DataTag<QueryKey, Todo[]>>` the key still carries `Todo[]`, while with `QueryOptions<Todo[]>` it doesn't, and `getQueryData` gives `unknown` again.
+If you write a method's return type out, keep the key's type in it: with `QueryOptions<Todo[], Error, DataTag<QueryKey, Todo[]>>` the key still carries `Todo[]`, while with `QueryOptions<Todo[]>` it doesn't, and `getQueryData` gives `unknown` again. For a definition whose `initialData` always seeds the query, write `DefinedInitialDataOptions<Todo[], Error, DataTag<QueryKey, Todo[]>>`: with `QueryOptions` the seed drops out of the type, and `data()` may be `undefined` again.
 
 ## Testing
 

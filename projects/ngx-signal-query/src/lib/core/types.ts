@@ -474,6 +474,33 @@ export type QueryOptions<
 }
 
 /**
+ * {@link QueryOptions} whose `initialData` always seeds the query: a value
+ * whose type leaves `undefined` out, or a function whose return type does.
+ * Such a query has data from its first read, so {@link injectQuery} gives a
+ * {@link DefinedQueryResult} for it, and a {@link queryOptions} definition
+ * keeps this type. Write it as the return type of a method that returns such
+ * a definition, with a key type that carries the data type, such as
+ * `DefinedInitialDataOptions<Todo[], Error, DataTag<QueryKey, Todo[]>>`: with
+ * `QueryOptions` there, the seed drops out of the type, and `data()` may be
+ * `undefined` again; with no {@link DataTag}, the key carries no data type.
+ *
+ * @typeParam TData - Type of the data resolved by `queryFn`.
+ * @typeParam TError - Type of the error thrown by `queryFn`.
+ * @typeParam TQueryKey - Type of `queryKey`, which `queryFn` gets the key
+ *   with.
+ */
+export type DefinedInitialDataOptions<
+  TData,
+  TError = Error,
+  TQueryKey extends QueryKey = QueryKey,
+> = QueryOptions<TData, TError, TQueryKey> & {
+  // A seed that may be undefined, a value or what a function returns, doesn't
+  // fit. Without Exclude it would: TData would take undefined in from the
+  // seed itself.
+  initialData: Exclude<TData, undefined> | (() => Exclude<TData, undefined>)
+}
+
+/**
  * {@link QueryOptions} with defaults resolved (internal, set by {@link QueryClient}).
  * `TQueryFnData` is what `queryFn` gives: the data itself, unless a fetch
  * makes the data out of several responses, such as the pages of a list.
@@ -576,6 +603,26 @@ export type QueryResult<TData, TError = Error> = {
 }
 
 /**
+ * The result {@link injectQuery} gives for a query whose `initialData` always
+ * seeds it (see {@link DefinedInitialDataOptions}): the signals of a
+ * {@link QueryResult}, with `data()` of the type `TData` rather than
+ * `TData | undefined`. It fits wherever a `QueryResult` does.
+ */
+// Omit, not an intersection with QueryResult: data would then be both
+// signals, and calling it gives the first one's type, TData | undefined.
+export type DefinedQueryResult<TData, TError = Error> = Omit<
+  QueryResult<TData, TError>,
+  'data'
+> & {
+  /**
+   * The query's data from the first read on: the data the query holds, or the
+   * seed whenever it holds none. It keeps its reference while refetches bring
+   * the same data (see `structuralSharing`).
+   */
+  data: Signal<TData>
+}
+
+/**
  * Configuration for an infinite query, passed to {@link injectInfiniteQuery},
  * {@link infiniteQueryOptions} or {@link QueryClient.infiniteQuery}: those of
  * a query (see {@link QueryOptions}), whose data is the pages (see
@@ -600,6 +647,32 @@ export type InfiniteQueryOptions<
      */
     queryFn: InfiniteQueryFunction<TPage, TQueryKey, TPageParam>
   }
+
+/**
+ * {@link DefinedInitialDataOptions} for an infinite query:
+ * {@link InfiniteQueryOptions} whose `initialData` always seeds the list, the
+ * pages as a value whose type leaves `undefined` out or a function whose
+ * return type does. {@link injectInfiniteQuery} gives a
+ * {@link DefinedInfiniteQueryResult} for such a list, and an
+ * {@link infiniteQueryOptions} definition keeps this type. Written as the
+ * return type of a method, it takes a key type with {@link DataTag} too.
+ *
+ * @typeParam TPage - Type of one page, as `queryFn` resolves it.
+ * @typeParam TError - Type of the error thrown by `queryFn`.
+ * @typeParam TQueryKey - Type of `queryKey`, which `queryFn` gets the key
+ *   with.
+ * @typeParam TPageParam - Type of the param each page is fetched with.
+ */
+export type DefinedInitialDataInfiniteOptions<
+  TPage,
+  TError = Error,
+  TQueryKey extends QueryKey = QueryKey,
+  TPageParam = unknown,
+> = InfiniteQueryOptions<TPage, TError, TQueryKey, TPageParam> & {
+  initialData:
+    | InfiniteData<TPage, TPageParam>
+    | (() => InfiniteData<TPage, TPageParam>)
+}
 
 /**
  * Reactive result returned by {@link injectInfiniteQuery}: a query's result
@@ -661,6 +734,27 @@ export type InfiniteQueryResult<
    * `isError()` is: check `isFetchingPreviousPage()` first.
    */
   isFetchPreviousPageError: Signal<boolean>
+}
+
+/**
+ * The result {@link injectInfiniteQuery} gives for a list whose `initialData`
+ * always seeds it (see {@link DefinedInitialDataInfiniteOptions}): the
+ * signals and functions of an {@link InfiniteQueryResult}, with `data()`
+ * holding the pages from the first read, never `undefined` in its type. It
+ * fits wherever an `InfiniteQueryResult` does.
+ */
+// Omit, like DefinedQueryResult: an intersection would give data() the type
+// TData | undefined.
+export type DefinedInfiniteQueryResult<
+  TPage,
+  TError = Error,
+  TPageParam = unknown,
+> = Omit<InfiniteQueryResult<TPage, TError, TPageParam>, 'data'> & {
+  /**
+   * The pages and their params from the first read on: those the query holds,
+   * or the seed whenever it holds none.
+   */
+  data: Signal<InfiniteData<TPage, TPageParam>>
 }
 
 /** Default query options applied to every query unless overridden per-query. */

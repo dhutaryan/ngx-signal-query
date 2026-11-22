@@ -71,6 +71,8 @@ Every entry behaves exactly like a standalone `injectQuery`: its own cache entry
 
 {% endraw %}
 
+Each result's `data()` has `undefined` in its type, even when a definition's `initialData` always seeds its query: `injectQueries` gives all its queries one result type, while `injectQuery` gives such a query a `data()` without `undefined`.
+
 > You could also fetch the whole batch in a single `queryFn` with `forkJoin`. That gives one cache entry for the batch: no per-item caching or deduplication, and one failure fails everything. `injectQueries` keeps every item a query of its own.
 
 ## The list is reactive
