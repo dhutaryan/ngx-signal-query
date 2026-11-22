@@ -10,7 +10,7 @@ const todos = this.#client.getQueryData<Todo[]>(['todos'])
 
 This is a one-time read, **not** reactive. It doesn't subscribe, doesn't trigger a fetch, and won't update when the data changes, not even in a template or a `computed`. For live data in a component, use `injectQuery`; reach for `getQueryData` inside imperative code — a mutation hook, an event handler, an effect — where you just need the value as it stands.
 
-> The type is on you: `getQueryData<Todo[]>(...)`. Keys carry no type information, so the generic isn't inferred — pass it explicitly and make sure it matches what the query stores.
+> A key written out, as here, carries no type: the generic gives it, `getQueryData<Todo[]>(...)`, and TypeScript takes it on trust, so make sure it matches what the query stores. A key from a `queryOptions()` definition carries its data type: `getQueryData(this.#queries.list().queryKey)` is `Todo[] | undefined` with no generic, and `setQueryData` with it types the updater and rejects data that doesn't fit. See [Query Options](/queries/query-options#the-key-carries-the-data-type).
 
 ## Writing: `setQueryData`
 

@@ -7,6 +7,36 @@ import type { Observable } from 'rxjs'
  */
 export type QueryKey = readonly unknown[]
 
+// Only a type: no value is ever made for it, and a tagged key carries nothing
+// at runtime. Not exported: an app's declaration files name DataTag<…>
+// instead (see DataTag). A type built from a tagged key that TypeScript can't
+// write as DataTag<…>, such as NonNullable<> of one, can't be written there
+// either (TS4023); typing such a value QueryKey fixes that.
+declare const dataTagSymbol: unique symbol
+
+/**
+ * A query key that also carries the type of the data cached under it. The
+ * key of a {@link queryOptions} or {@link infiniteQueryOptions} definition
+ * has this type. Only the type changes: at runtime the key is the array it
+ * was written as.
+ *
+ * {@link QueryClient.getQueryData} and {@link QueryClient.setQueryData} take
+ * the data type from such a key, with no generic to write. A generic written
+ * out for it is checked: the data the key carries has to fit it, so
+ * `<Todo[]>` for a todo's key is an error.
+ *
+ * @typeParam TQueryKey - Type of the key itself.
+ * @typeParam TData - Type of the data cached under the key.
+ */
+// The tag is optional, so a key written out still fits where a tagged one is
+// expected, as in a test's stub of a definition. A plain intersection, not a
+// conditional type: an app's declaration files then name DataTag<…> for a
+// definition it exports, rather than spelling out dataTagSymbol, which they
+// can't import.
+export type DataTag<TQueryKey extends QueryKey, TData> = TQueryKey & {
+  readonly [dataTagSymbol]?: TData
+}
+
 /** What a query function is called with (see {@link QueryFunction}). */
 export type QueryFunctionContext<TQueryKey extends QueryKey = QueryKey> = {
   /**

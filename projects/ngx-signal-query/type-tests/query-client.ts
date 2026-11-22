@@ -4,6 +4,7 @@ import { expectTypeOf } from 'expect-type'
 import {
   infiniteQueryOptions,
   keepPreviousData,
+  mutationOptions,
   queryOptions,
   type DefaultedQueryOptions,
   type InfiniteData,
@@ -14,6 +15,9 @@ import {
 type Todo = { id: number; title: string; done: boolean }
 type TodoPage = { todos: Todo[]; nextCursor: number | null }
 type ApiError = { status: number }
+type Shape =
+  | { kind: 'circle'; radius: number }
+  | { kind: 'square'; side: number }
 
 declare const http: HttpClient
 declare const id: number
@@ -23,6 +27,7 @@ declare const newTodo: Todo
 declare const saved: Todo
 // What onMutate returns for a rollback: the list as it was, if it was cached.
 declare const context: { previous: Todo[] | undefined } | undefined
+declare const showList: boolean
 
 // fetchQuery with a generic merge function keeps the data type of queryFn.
 const todos = client.fetchQuery(
@@ -367,3 +372,111 @@ expectTypeOf(
     queryFn: () => http.get<Todo[]>('/api/todos'),
   }),
 ).toEqualTypeOf<DefaultedQueryOptions<Todo[], Error, Todo[]>>()
+
+// A definition's key in getQueryData and setQueryData
+
+// A definition's key carries its data type, so getQueryData and setQueryData
+// take the type from it, with no generic to write.
+expectTypeOf(client.getQueryData(todoQuery.queryKey)).toEqualTypeOf<
+  Todo | undefined
+>()
+expectTypeOf(client.getQueryData(list.queryKey)).toEqualTypeOf<
+  Todo[] | undefined
+>()
+
+// So does the key of a definition with its generics written out.
+expectTypeOf(client.getQueryData(detail.queryKey)).toEqualTypeOf<
+  Todo | undefined
+>()
+
+// An infinite list's key carries the list, with the type of its param.
+expectTypeOf(client.getQueryData(todoList.queryKey)).toEqualTypeOf<
+  InfiniteData<TodoPage, number> | undefined
+>()
+
+// An updater gets the data with that type.
+client.setQueryData(todoQuery.queryKey, (todo) => {
+  expectTypeOf(todo).toEqualTypeOf<Todo | undefined>()
+
+  return todo && { ...todo, done: true }
+})
+client.setQueryData(todoList.queryKey, (data) => {
+  expectTypeOf(data).toEqualTypeOf<InfiniteData<TodoPage, number> | undefined>()
+
+  // The first page only, with its param.
+  return (
+    data && {
+      pages: data.pages.slice(0, 1),
+      pageParams: data.pageParams.slice(0, 1),
+    }
+  )
+})
+
+// Data of another type is an error, from an updater or as a value.
+// @ts-expect-error -- not a whole todo
+client.setQueryData(todoQuery.queryKey, () => ({ id }))
+// @ts-expect-error -- not a whole todo
+client.setQueryData(todoQuery.queryKey, { id })
+// @ts-expect-error -- null isn't the data
+client.setQueryData(list.queryKey, null)
+
+// A rollback puts back what onMutate read, with its type.
+mutationOptions({
+  mutationFn: (title: string) => http.post<Todo>('/api/todos', { title }),
+  onMutate: () => ({ previous: client.getQueryData(list.queryKey) }),
+  onError: (_error, _title, context) => {
+    expectTypeOf(context?.previous).toEqualTypeOf<Todo[] | undefined>()
+
+    client.setQueryData(list.queryKey, context?.previous)
+  },
+})
+
+// A generic written out is checked against what the key holds: one for other
+// data is an error, rather than a type the cache doesn't hold.
+// @ts-expect-error -- the key holds a todo, not a list
+client.getQueryData<Todo[]>(todoQuery.queryKey)
+// @ts-expect-error -- the key holds a todo, not a list
+client.setQueryData<Todo[]>(todoQuery.queryKey, [])
+
+// One that matches it is fine.
+expectTypeOf(client.getQueryData<Todo>(todoQuery.queryKey)).toEqualTypeOf<
+  Todo | undefined
+>()
+
+// A key picked from two definitions takes a generic that fits both.
+expectTypeOf(
+  client.getQueryData<Todo | Todo[]>(
+    showList ? list.queryKey : todoQuery.queryKey,
+  ),
+).toEqualTypeOf<Todo | Todo[] | undefined>()
+
+// A key written out carries no type: the generic gives it, as before, and
+// without one the data is unknown.
+expectTypeOf(client.getQueryData<Todo[]>(['todos'])).toEqualTypeOf<
+  Todo[] | undefined
+>()
+expectTypeOf(client.getQueryData(['todos'])).toBeUnknown()
+
+// A definition's key goes wherever a key does, such as into a filter.
+client.invalidateQueries({ queryKey: todoQuery.queryKey })
+
+// An updater narrows the data as it would any union.
+const shape = queryOptions({
+  queryKey: ['shape'],
+  queryFn: () => http.get<Shape>('/api/shape'),
+})
+
+client.setQueryData(shape.queryKey, (current) => {
+  if (!current || current.kind !== 'circle') return current
+
+  return { ...current, radius: current.radius * 2 }
+})
+
+// An updater with its parameter typed for other data is an error.
+// @ts-expect-error -- the key holds a todo, not a string
+client.setQueryData(todoQuery.queryKey, (todo: string | undefined) => todo)
+
+// For a key written out, the updater's parameter gives the data type, as a
+// generic does.
+// @ts-expect-error -- returns a number, not the list
+client.setQueryData(['todos'], (todos: Todo[] | undefined) => todos?.length)
