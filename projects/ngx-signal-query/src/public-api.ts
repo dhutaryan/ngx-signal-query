@@ -18,6 +18,7 @@ export * from './lib/core/keep-previous-data'
 export * from './lib/core/mutation-options'
 export * from './lib/core/cancelled-error'
 export type {
+  MutateOptions,
   MutationFilters,
   MutationOptions,
   MutationResult,

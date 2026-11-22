@@ -69,16 +69,19 @@ Inline or not, **write `onMutate` above the hooks that take `context`**. TypeScr
 
 ## Overriding per component
 
-The returned object is plain, so spread it to tweak one field locally:
+The returned object is plain, so a component can spread it and change an option. A spread **replaces** what it overrides, hooks included: an `onSuccess` written after `...this.#mutations.add()` runs instead of the definition's, and the list is no longer invalidated. For the component's own reaction to a write, pass callbacks to `mutate()` instead. They run after the definition's hooks, which stay as they are:
 
 ```ts
-protected readonly addTodo = injectMutation(() => ({
-  ...this.#mutations.add(),
-  onSuccess: () => this.toast('Added!'), // this component wants a toast too
-}))
+protected readonly addTodo = injectMutation(() => this.#mutations.add())
+
+protected add(title: string): void {
+  this.addTodo.mutate(title, {
+    onSuccess: () => this.toast('Added!'), // this component wants a toast too
+  })
+}
 ```
 
-Note a spread **replaces** a hook, it doesn't stack — the override's `onSuccess` runs instead of the definition's, not after it. If you want both behaviours, call the original from inside the override.
+See [Callbacks for one call](/mutations/overview#callbacks-for-one-call).
 
 ## Testing
 

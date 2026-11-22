@@ -14,6 +14,7 @@ import {
   from,
   ignoreElements,
   map,
+  merge,
   of,
   take,
   tap,
@@ -156,26 +157,78 @@ export type MutationSnapshot<
   readonly meta: MutationMeta | undefined
 }
 
-/** Reactive result returned by {@link injectMutation}; state fields are signals. */
-export type MutationResult<TData, TError, TVariables> = {
+/**
+ * Callbacks for one call of `mutate()` or `mutateAsync()`, passed as its
+ * second argument: the component's own reaction to that write, such as
+ * closing a dialog. Each takes what the mutation's own hook of the same name
+ * takes (see {@link MutationOptions}).
+ *
+ * They're called once the run is done: after the callbacks of
+ * {@link withMutationCache} and the mutation's own hooks, with the outcome
+ * already in the signals, and before the promise of `mutateAsync()` settles.
+ * Every call gets its own, with its own outcome, also one that a later call
+ * or `reset()` came after. None of them is called if the mutation's host,
+ * the component or service where {@link injectMutation} ran, is destroyed
+ * before the run is done; the mutation's own hooks still run. Nothing waits
+ * for a promise one returns. What one throws, or what such a promise rejects
+ * with, goes to the app's `ErrorHandler`: the outcome and the other
+ * callbacks stay as they are.
+ */
+export type MutateOptions<TData, TError, TVariables, TContext = unknown> = {
+  /** Called with the data, the variables and the context. */
+  onSuccess?: (
+    data: TData,
+    variables: TVariables,
+    context: TContext | undefined,
+  ) => unknown
+  /** Called with the error, the variables and the context. */
+  onError?: (
+    error: TError,
+    variables: TVariables,
+    context: TContext | undefined,
+  ) => unknown
   /**
-   * Triggers the mutation with the given variables. A failed write doesn't
-   * throw: it shows in the signals. If the options function throws, this
-   * throws its error before anything is sent.
+   * Called with the data and `null`, or with `undefined` and the error, then
+   * the variables and the context.
    */
-  mutate: (variables: TVariables) => void
+  onSettled?: (
+    data: TData | undefined,
+    error: TError | null,
+    variables: TVariables,
+    context: TContext | undefined,
+  ) => unknown
+}
+
+/** Reactive result returned by {@link injectMutation}; state fields are signals. */
+export type MutationResult<TData, TError, TVariables, TContext = unknown> = {
+  /**
+   * Triggers the mutation with the given variables. A second argument adds
+   * callbacks for this call alone (see {@link MutateOptions}). A failed write
+   * doesn't throw: it shows in the signals. If the options function throws,
+   * this throws its error before anything is sent.
+   */
+  mutate: (
+    variables: TVariables,
+    options?: MutateOptions<TData, TError, TVariables, TContext>,
+  ) => void
   /**
    * Triggers the mutation as `mutate()` does, and returns a promise of that
    * run: it resolves with the data once the last hook is done, or rejects
-   * with the error once `onError` and `onSettled` are. Unlike `mutate()`, a
-   * failure nobody catches surfaces as an unhandled rejection, as with any
-   * async call. If the options function throws, this throws its error at
-   * once, as `mutate()` does, rather than returning a rejected promise.
+   * with the error once `onError` and `onSettled` are. The callbacks passed
+   * as a second argument are called before it settles, and nothing waits for
+   * a promise they return. Unlike `mutate()`, a failure nobody catches
+   * surfaces as an unhandled rejection, as with any async call. If the
+   * options function throws, this throws its error at once, as `mutate()`
+   * does, rather than returning a rejected promise.
    */
-  mutateAsync: (variables: TVariables) => Promise<TData>
+  mutateAsync: (
+    variables: TVariables,
+    options?: MutateOptions<TData, TError, TVariables, TContext>,
+  ) => Promise<TData>
   /**
    * Resets the state to `idle`. It forgets the result and doesn't stop the
-   * request: a run in flight finishes and fires its hooks.
+   * request: a run in flight finishes and fires its hooks and the callbacks
+   * of its call.
    */
   reset: () => void
   /** Data from the last successful run, or `undefined`. */
@@ -314,9 +367,17 @@ export class Mutation<
   /**
    * Runs the mutation once. `variables` are passed straight to `mutationFn`.
    * Returns a promise of the run, settled as the state is, once its last hook
-   * is done: with the data, or with the error.
+   * is done: with the data, or with the error. `mutateCallbacks` gives the
+   * callbacks passed to the mutate() call that started the run, or nothing
+   * once they're no longer wanted: the run asks for them once its outcome is
+   * in, and calls them before its promise settles.
    */
-  execute(variables: TVariables): Promise<TData> {
+  execute(
+    variables: TVariables,
+    mutateCallbacks?: () =>
+      | MutateOptions<TData, TError, TVariables, TContext>
+      | undefined,
+  ): Promise<TData> {
     const run = deferred<TData>()
     // One of the app's pending tasks, held until the last hook is done:
     // Angular counts the app as busy meanwhile, so a server render and
@@ -382,6 +443,9 @@ export class Mutation<
           ...(outcome.status === 'error' && countFailure(state, outcome.error)),
         }))
         this.#disposeIfDone()
+        // The signals show how it went by now, which the callbacks of the
+        // call may read.
+        this.#runMutateCallbacks(mutateCallbacks?.(), outcome, variables)
 
         if (outcome.status === 'success') {
           run.resolve(outcome.data)
@@ -486,6 +550,36 @@ export class Mutation<
   }
 
   /**
+   * Calls the callbacks of the mutate() call that started the run, in order:
+   * onSuccess or onError, then onSettled. Each is called once the one before
+   * it returns: nothing waits for a promise one returns. One that fails is
+   * reported, and the next is still called.
+   */
+  #runMutateCallbacks(
+    callbacks: MutateOptions<TData, TError, TVariables, TContext> | undefined,
+    outcome: Outcome<TData, TError>,
+    variables: TVariables,
+  ): void {
+    if (!callbacks) return
+
+    const { context } = this.state()
+
+    // Not unsubscribed: it ends by itself, at once or, for a callback that
+    // returns a promise, once that settles, so a rejection is still
+    // reported. Unsubscribing wouldn't stop the promise, only lose its error.
+    merge(
+      runHook(this.#reportError, () =>
+        outcome.status === 'success'
+          ? callbacks.onSuccess?.(outcome.data, variables, context)
+          : callbacks.onError?.(outcome.error, variables, context),
+      ),
+      runHook(this.#reportError, () =>
+        callbacks.onSettled?.(outcome.data, outcome.error, variables, context),
+      ),
+    ).subscribe()
+  }
+
+  /**
    * A run nobody observes any more, and which is no longer in flight, has
    * nothing left to report — drop it. Called from both ends, since the two
    * conditions can be met in either order: a superseded run may settle later,
@@ -510,9 +604,10 @@ function awaitHook<T>(hook: () => T | PromiseLike<T>): Observable<T> {
   })
 }
 
-// Runs a hook that reports an outcome. Only its end matters: what it
-// returns is dropped, and an error it throws goes to reportError, which
-// hands it to the app's ErrorHandler and never throws: the run carries on.
+// Runs a hook or a callback that reports an outcome. Only its end matters:
+// what it returns is dropped, and an error it throws goes to reportError,
+// which hands it to the app's ErrorHandler and never throws: the run carries
+// on.
 function runHook(
   reportError: (error: unknown) => void,
   hook: () => unknown,

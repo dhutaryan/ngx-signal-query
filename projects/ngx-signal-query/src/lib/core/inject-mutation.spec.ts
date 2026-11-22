@@ -41,6 +41,7 @@ import { settled } from '../../spec-helpers/promises'
 import { appIsStable } from '../../spec-helpers/stability'
 import { provideZonelessChangeDetection } from '../../spec-helpers/zoneless'
 import { withDefaultOptions } from '../features/with-default-options'
+import { withMutationCache } from '../features/with-mutation-cache'
 import { injectMutation } from './inject-mutation'
 import { injectQuery } from './inject-query'
 import type { MutationOptions, MutationResult } from './mutation'
@@ -62,7 +63,7 @@ describe('injectMutation', () => {
   // isn't needed — an injection context is enough.
   function setup<TData, TError = Error, TVariables = void, TContext = unknown>(
     optionsFn: () => MutationOptions<TData, TError, TVariables, TContext>,
-  ): MutationResult<TData, TError, TVariables> {
+  ): MutationResult<TData, TError, TVariables, TContext> {
     return TestBed.runInInjectionContext(() => injectMutation(optionsFn))
   }
 
@@ -2315,6 +2316,690 @@ describe('injectMutation', () => {
       // fakeAsync rethrows an unhandled rejection when microtasks run.
       expect(() => flushMicrotasks()).toThrowError(/down/)
     }))
+  })
+
+  // A call of mutate() or mutateAsync() can bring callbacks of its own, for
+  // the component's reaction to that write, such as closing a dialog or
+  // showing a message. They run after the mutation's own hooks, once the
+  // signals show how the run went, for every call, until the host of the
+  // mutation is destroyed.
+  describe('per-call callbacks', () => {
+    it("calls the call's onSuccess and onSettled after the mutation's own hooks, with the data, the variables and the context", () => {
+      const order: string[] = []
+      const onSuccess = jasmine
+        .createSpy('onSuccess')
+        .and.callFake(() => order.push('call onSuccess'))
+      const onError = jasmine.createSpy('onError')
+      const onSettled = jasmine
+        .createSpy('onSettled')
+        .and.callFake(() => order.push('call onSettled'))
+      const m = setup<string, Error, string, { previous: string }>(() => ({
+        mutationFn: (title) => of(`saved ${title}`),
+        onMutate: () => ({ previous: 'a' }),
+        onSuccess: () => order.push('own onSuccess'),
+        onSettled: () => order.push('own onSettled'),
+      }))
+
+      // of() answers at once, so all of it happens inside mutate().
+      m.mutate('b', { onSuccess, onError, onSettled })
+
+      expect(order).toEqual([
+        'own onSuccess',
+        'own onSettled',
+        'call onSuccess',
+        'call onSettled',
+      ])
+      expect(onSuccess).toHaveBeenCalledOnceWith('saved b', 'b', {
+        previous: 'a',
+      })
+      expect(onError).not.toHaveBeenCalled()
+      expect(onSettled).toHaveBeenCalledOnceWith('saved b', null, 'b', {
+        previous: 'a',
+      })
+    })
+
+    it("calls the call's onError and onSettled after the mutation's own hooks when the write fails", () => {
+      const error = new Error('down')
+      const order: string[] = []
+      const onSuccess = jasmine.createSpy('onSuccess')
+      const onError = jasmine
+        .createSpy('onError')
+        .and.callFake(() => order.push('call onError'))
+      const onSettled = jasmine
+        .createSpy('onSettled')
+        .and.callFake(() => order.push('call onSettled'))
+      const m = setup<string, Error, string, { previous: string }>(() => ({
+        mutationFn: () => throwError(() => error),
+        onMutate: () => ({ previous: 'a' }),
+        onError: () => order.push('own onError'),
+        onSettled: () => order.push('own onSettled'),
+      }))
+
+      m.mutate('b', { onSuccess, onError, onSettled })
+
+      expect(order).toEqual([
+        'own onError',
+        'own onSettled',
+        'call onError',
+        'call onSettled',
+      ])
+      expect(onSuccess).not.toHaveBeenCalled()
+      expect(onError).toHaveBeenCalledOnceWith(error, 'b', { previous: 'a' })
+      expect(onSettled).toHaveBeenCalledOnceWith(undefined, error, 'b', {
+        previous: 'a',
+      })
+    })
+
+    it("calls the call's onError and onSettled when onMutate fails, and sends nothing", () => {
+      const error = new Error('no snapshot')
+      const mutationFn = jasmine
+        .createSpy('mutationFn')
+        .and.returnValue(of('saved'))
+      const onError = jasmine.createSpy('onError')
+      const onSettled = jasmine.createSpy('onSettled')
+      const m = setup<string, Error, string>(() => ({
+        mutationFn,
+        onMutate: () => {
+          throw error
+        },
+      }))
+
+      m.mutate('b', { onError, onSettled })
+
+      expect(mutationFn).not.toHaveBeenCalled()
+      expect(onError).toHaveBeenCalledOnceWith(error, 'b', undefined)
+      expect(onSettled).toHaveBeenCalledOnceWith(
+        undefined,
+        error,
+        'b',
+        undefined,
+      )
+    })
+
+    it("runs the callbacks of withMutationCache, then the mutation's own hooks, then the call's", () => {
+      const order: string[] = []
+
+      TestBed.resetTestingModule()
+      TestBed.configureTestingModule({
+        providers: [
+          provideQueryClient(
+            withMutationCache({
+              onSuccess: () => order.push('global onSuccess'),
+              onSettled: () => order.push('global onSettled'),
+            }),
+          ),
+        ],
+      })
+
+      const m = setup<string, Error, string>(() => ({
+        mutationFn: (title) => of(title),
+        onSuccess: () => order.push('own onSuccess'),
+        onSettled: () => order.push('own onSettled'),
+      }))
+
+      m.mutate('b', {
+        onSuccess: () => order.push('call onSuccess'),
+        onSettled: () => order.push('call onSettled'),
+      })
+
+      expect(order).toEqual([
+        'global onSuccess',
+        'own onSuccess',
+        'global onSettled',
+        'own onSettled',
+        'call onSuccess',
+        'call onSettled',
+      ])
+    })
+
+    it("runs a default hook and the call's callback of the same name: the call's replaces nothing", () => {
+      const order: string[] = []
+
+      TestBed.resetTestingModule()
+      TestBed.configureTestingModule({
+        providers: [
+          provideQueryClient(
+            withDefaultOptions({
+              mutations: { onSuccess: () => order.push('default onSuccess') },
+            }),
+          ),
+        ],
+      })
+
+      const m = setup<string, Error, string>(() => ({
+        mutationFn: (title) => of(title),
+      }))
+
+      m.mutate('b', { onSuccess: () => order.push('call onSuccess') })
+
+      expect(order).toEqual(['default onSuccess', 'call onSuccess'])
+    })
+
+    it("keeps the onSuccess of a definition and runs the call's after it, as a dialog that closes itself does", fakeAsync(() => {
+      const invalidate = spyOn(client, 'invalidateQueries').and.resolveTo()
+      const close = jasmine.createSpy('close')
+      // A definition that a service returns, keeping the list in step with
+      // the server.
+      const update = mutationOptions({
+        mutationFn: (change: { id: number; name: string }) => of(change),
+        onSuccess: (_data, { id }) =>
+          client.invalidateQueries({ queryKey: ['connections', id] }),
+      })
+      const m = TestBed.runInInjectionContext(() =>
+        injectMutation(() => update),
+      )
+
+      m.mutate({ id: 7, name: 'VPN' }, { onSuccess: () => close() })
+
+      // The run waits for the promise the definition's onSuccess returns.
+      expect(invalidate).toHaveBeenCalledOnceWith({
+        queryKey: ['connections', 7],
+      })
+      expect(close).not.toHaveBeenCalled()
+
+      flushMicrotasks()
+
+      expect(close).toHaveBeenCalledTimes(1)
+    }))
+
+    it('shows how the run went in the signals by the time they run', () => {
+      const seen: unknown[] = []
+      const saved = setup<string, Error, string>(() => ({
+        mutationFn: (title) => of(title),
+      }))
+      const failed = setup<string, Error, string>(() => ({
+        mutationFn: () => throwError(() => new Error('down')),
+      }))
+
+      saved.mutate('milk', {
+        onSuccess: () =>
+          seen.push([saved.status(), saved.data(), saved.isPending()]),
+      })
+      failed.mutate('milk', {
+        onError: () =>
+          seen.push([
+            failed.status(),
+            failed.error()?.message,
+            failed.isPending(),
+          ]),
+      })
+
+      expect(seen).toEqual([
+        ['success', 'milk', false],
+        ['error', 'down', false],
+      ])
+    })
+
+    it('calls them before the promise of mutateAsync() settles, whichever way it goes', fakeAsync(() => {
+      const order: string[] = []
+      const saved = setup<string, Error, string>(() => ({
+        mutationFn: (title) => of(title),
+      }))
+      const failed = setup<string, Error, string>(() => ({
+        mutationFn: () => throwError(() => new Error('down')),
+      }))
+
+      void saved
+        .mutateAsync('milk', {
+          onSuccess: () => order.push('onSuccess'),
+          onSettled: () => order.push('onSettled'),
+        })
+        .then(() => order.push('resolved'))
+      void failed
+        .mutateAsync('milk', {
+          onError: () => order.push('onError'),
+          onSettled: () => order.push('onSettled'),
+        })
+        .catch(() => order.push('rejected'))
+      flushMicrotasks()
+
+      expect(order).toEqual([
+        'onSuccess',
+        'onSettled',
+        'onError',
+        'onSettled',
+        'resolved',
+        'rejected',
+      ])
+    }))
+
+    // With zone.js, change detection follows what runs in the Angular zone.
+    // The call's callbacks run where its hooks do, so what they start updates
+    // the page too: here a timer, on a plain field rather than a signal.
+    it("runs them in the Angular zone, so a message the call's onSuccess shows can hide itself on a timer", fakeAsync(() => {
+      @Component({
+        template: `
+          <button (click)="save()">Save</button>
+          <p>{{ message }}</p>
+        `,
+      })
+      class SaveTodo {
+        message = ''
+
+        readonly saving = injectMutation(() => ({
+          mutationFn: () =>
+            new Promise<string>((resolve) =>
+              setTimeout(() => resolve('saved'), 100),
+            ),
+        }))
+
+        save(): void {
+          this.saving.mutate(undefined, {
+            onSuccess: () => {
+              this.message = 'Saved'
+              setTimeout(() => (this.message = ''), 3000)
+            },
+          })
+        }
+      }
+
+      const fixture = TestBed.createComponent(SaveTodo)
+      const message = (): string =>
+        fixture.nativeElement.querySelector('p').textContent.trim()
+
+      fixture.autoDetectChanges()
+      fixture.nativeElement.querySelector('button').click()
+
+      tick(100)
+      expect(message()).toBe('Saved')
+
+      tick(3000)
+      expect(message()).toBe('')
+    }))
+
+    // Two rows removed quickly, one mutation for the list: each call gets its
+    // own callbacks. The signals show only the latest call, but both writes
+    // happened, and one of them may have failed.
+    it('calls the callbacks of every call, each with its own outcome, though a later call came before an earlier one landed', () => {
+      const responses: Array<Subject<string>> = []
+      const outcomes: string[] = []
+      const m = setup<string, Error, string>(() => ({
+        mutationFn: () => {
+          const response = new Subject<string>()
+
+          responses.push(response)
+
+          return response
+        },
+      }))
+      const callbacks = {
+        onSuccess: (data: string, id: string) =>
+          outcomes.push(`${id} removed: ${data}`),
+        onError: (error: Error, id: string) =>
+          outcomes.push(`${id} failed: ${error.message}`),
+      }
+
+      m.mutate('a', callbacks)
+      m.mutate('b', callbacks)
+      // The later call lands first, then the earlier one fails.
+      responses[1].next('ok')
+      responses[1].complete()
+      responses[0].error(new Error('locked'))
+
+      expect(outcomes).toEqual(['b removed: ok', 'a failed: locked'])
+      expect(m.variables()).toBe('b')
+      expect(m.isSuccess()).toBe(true)
+    })
+
+    it('calls them for a run that reset() forgot, since its write still happened', () => {
+      const response = new Subject<string>()
+      const onSuccess = jasmine.createSpy('onSuccess')
+      const m = setup<string, Error, void>(() => ({
+        mutationFn: () => response,
+      }))
+
+      m.mutate(undefined, { onSuccess })
+      m.reset()
+      response.next('saved')
+      response.complete()
+
+      expect(onSuccess).toHaveBeenCalledOnceWith('saved', undefined, undefined)
+      // The signals don't bring the forgotten run back.
+      expect(m.isIdle()).toBe(true)
+    })
+
+    it('calls them for a run that clear() forgot', () => {
+      const response = new Subject<string>()
+      const onSuccess = jasmine.createSpy('onSuccess')
+      const m = setup<string, Error, void>(() => ({
+        mutationFn: () => response,
+      }))
+
+      m.mutate(undefined, { onSuccess })
+      client.clear()
+      response.next('saved')
+      response.complete()
+
+      expect(onSuccess).toHaveBeenCalledOnceWith('saved', undefined, undefined)
+    })
+
+    it("doesn't call them once the host is destroyed, while the mutation's own hooks still run and mutateAsync() settles", fakeAsync(() => {
+      const responses: Array<Subject<string>> = []
+      const ownOnSuccess = jasmine.createSpy('own onSuccess')
+      const onSuccess = jasmine.createSpy('onSuccess')
+      const onSettled = jasmine.createSpy('onSettled')
+
+      @Component({ template: '' })
+      class Host {
+        readonly save = injectMutation<string, Error, string>(() => ({
+          mutationFn: () => {
+            const response = new Subject<string>()
+
+            responses.push(response)
+
+            return response
+          },
+          onSuccess: ownOnSuccess,
+        }))
+      }
+
+      const fixture = TestBed.createComponent(Host)
+      const { save } = fixture.componentInstance
+
+      fixture.detectChanges()
+      // This one lands while the host is there.
+      save.mutate('a', { onSuccess, onSettled })
+      responses[0].next('saved a')
+      responses[0].complete()
+
+      // This one is in flight when the host goes.
+      const result = settled(save.mutateAsync('b', { onSuccess, onSettled }))
+
+      fixture.destroy()
+      responses[1].next('saved b')
+      responses[1].complete()
+      flushMicrotasks()
+
+      expect(ownOnSuccess).toHaveBeenCalledTimes(2)
+      expect(onSuccess).toHaveBeenCalledOnceWith('saved a', 'a', undefined)
+      expect(onSettled).toHaveBeenCalledOnceWith(
+        'saved a',
+        null,
+        'a',
+        undefined,
+      )
+      expect(result.value).toBe('saved b')
+    }))
+
+    it("doesn't call them for a mutate() after the host is destroyed, while the write is sent and its hooks run", () => {
+      const sent: string[] = []
+      const ownOnSuccess = jasmine.createSpy('own onSuccess')
+      const onSuccess = jasmine.createSpy('onSuccess')
+
+      @Component({ template: '' })
+      class Host {
+        readonly save = injectMutation(() => ({
+          mutationFn: (title: string) => {
+            sent.push(title)
+
+            return of(title)
+          },
+          onSuccess: ownOnSuccess,
+        }))
+      }
+
+      const fixture = TestBed.createComponent(Host)
+      const { save } = fixture.componentInstance
+
+      fixture.detectChanges()
+      save.mutate('a', { onSuccess })
+      fixture.destroy()
+      // Say from a timer, or the next step of a promise chain.
+      save.mutate('b', { onSuccess })
+
+      expect(sent).toEqual(['a', 'b'])
+      expect(ownOnSuccess).toHaveBeenCalledTimes(2)
+      expect(onSuccess).toHaveBeenCalledOnceWith('a', 'a', undefined)
+    })
+
+    // A dialog closed with Escape while the definition's onSuccess waits for
+    // the list to refetch: the run is done once the refetch is, and by then
+    // the dialog is gone.
+    it("doesn't call them when the host is destroyed while the mutation's own hooks run", fakeAsync(() => {
+      const refetch = deferred<void>()
+      const ownOnSettled = jasmine.createSpy('own onSettled')
+      const onSuccess = jasmine.createSpy('onSuccess')
+      const onSettled = jasmine.createSpy('onSettled')
+
+      @Component({ template: '' })
+      class Dialog {
+        readonly save = injectMutation(() => ({
+          mutationFn: (title: string) => of(title),
+          onSuccess: () => refetch.promise,
+          onSettled: ownOnSettled,
+        }))
+      }
+
+      const fixture = TestBed.createComponent(Dialog)
+
+      fixture.detectChanges()
+      fixture.componentInstance.save.mutate('milk', { onSuccess, onSettled })
+      fixture.destroy()
+      refetch.resolve()
+      flushMicrotasks()
+
+      expect(ownOnSettled).toHaveBeenCalledTimes(1)
+      expect(onSuccess).not.toHaveBeenCalled()
+      expect(onSettled).not.toHaveBeenCalled()
+    }))
+
+    // Whether the host is still there is decided once the run lands, for all
+    // the callbacks of the call: a dialog that closes itself in onSuccess
+    // still gets its onSettled.
+    it("calls the call's onSettled too when its onSuccess destroys the host", () => {
+      const onSettled = jasmine.createSpy('onSettled')
+
+      @Component({ template: '' })
+      class Dialog {
+        readonly save = injectMutation(() => ({
+          mutationFn: (title: string) => of(title),
+        }))
+      }
+
+      const fixture = TestBed.createComponent(Dialog)
+
+      fixture.detectChanges()
+      fixture.componentInstance.save.mutate('milk', {
+        onSuccess: () => fixture.destroy(),
+        onSettled,
+      })
+
+      expect(onSettled).toHaveBeenCalledOnceWith(
+        'milk',
+        null,
+        'milk',
+        undefined,
+      )
+    })
+
+    // The host of a mutation is where injectMutation() ran. A component that
+    // calls mutate() on a mutation a service holds doesn't own it: the
+    // callbacks run as long as the service is there.
+    it('calls them as long as the host of the mutation is there, wherever mutate() was called from', () => {
+      const response = new Subject<string>()
+      const onSuccess = jasmine.createSpy('onSuccess')
+
+      @Injectable({ providedIn: 'root' })
+      class TodoSaver {
+        readonly save = injectMutation<string, Error, string>(() => ({
+          mutationFn: () => response,
+        }))
+      }
+
+      @Component({ template: '' })
+      class Dialog {
+        readonly #saver = inject(TodoSaver)
+
+        submit(): void {
+          this.#saver.save.mutate('Buy milk', { onSuccess })
+        }
+      }
+
+      const fixture = TestBed.createComponent(Dialog)
+
+      fixture.componentInstance.submit()
+      fixture.destroy()
+      response.next('saved')
+      response.complete()
+
+      expect(onSuccess).toHaveBeenCalledOnceWith('saved', 'Buy milk', undefined)
+    })
+
+    it('reports an error a callback throws to the ErrorHandler, once, and changes nothing else', fakeAsync(() => {
+      const handleError = spyOn(TestBed.inject(ErrorHandler), 'handleError')
+      const error = new Error('dialog gone')
+      const onSettled = jasmine.createSpy('onSettled')
+      const m = setup<string, Error, string>(() => ({
+        mutationFn: (title) => of(title),
+      }))
+      const result = settled(
+        m.mutateAsync('milk', {
+          onSuccess: () => {
+            throw error
+          },
+          onSettled,
+        }),
+      )
+
+      expect(() => flush()).not.toThrow()
+      expect(handleError).toHaveBeenCalledOnceWith(error)
+      // The next callback still runs, and the outcome stands.
+      expect(onSettled).toHaveBeenCalledOnceWith(
+        'milk',
+        null,
+        'milk',
+        undefined,
+      )
+      expect(m.isSuccess()).toBe(true)
+      expect(result.value).toBe('milk')
+    }))
+
+    it("reports an error the call's onError throws, still calls onSettled, and rejects with the write's error", fakeAsync(() => {
+      const handleError = spyOn(TestBed.inject(ErrorHandler), 'handleError')
+      const writeError = new Error('down')
+      const messageError = new Error('no message bar')
+      const onSettled = jasmine.createSpy('onSettled')
+      const m = setup<string, Error, string>(() => ({
+        mutationFn: () => throwError(() => writeError),
+      }))
+      const result = settled(
+        m.mutateAsync('milk', {
+          onError: () => {
+            throw messageError
+          },
+          onSettled,
+        }),
+      )
+
+      expect(() => flush()).not.toThrow()
+      expect(handleError).toHaveBeenCalledOnceWith(messageError)
+      expect(onSettled).toHaveBeenCalledOnceWith(
+        undefined,
+        writeError,
+        'milk',
+        undefined,
+      )
+      expect(m.error()).toBe(writeError)
+      expect(result.error).toBe(writeError)
+    }))
+
+    it("settles the run and lets the app settle when the call's onSettled throws", fakeAsync(() => {
+      const handleError = spyOn(TestBed.inject(ErrorHandler), 'handleError')
+      const error = new Error('cleanup failed')
+      const response = new Subject<string>()
+      const m = setup<string, Error, void>(() => ({
+        mutationFn: () => response,
+      }))
+      const result = settled(
+        m.mutateAsync(undefined, {
+          onSettled: () => {
+            throw error
+          },
+        }),
+      )
+
+      response.next('saved')
+      response.complete()
+
+      expect(() => flush()).not.toThrow()
+      expect(handleError).toHaveBeenCalledOnceWith(error)
+      expect(result.value).toBe('saved')
+      expect(appIsStable()).toBe(true)
+    }))
+
+    // A callback is the component's reaction, such as a navigation: the run
+    // doesn't wait for a promise one returns.
+    it("doesn't wait for a promise a callback returns: the run is done and mutateAsync() resolves meanwhile", fakeAsync(() => {
+      const navigation = deferred<boolean>()
+      const onSuccess = jasmine
+        .createSpy('onSuccess')
+        .and.returnValue(navigation.promise)
+      const onSettled = jasmine.createSpy('onSettled')
+      const m = setup<string, Error, string>(() => ({
+        mutationFn: (title) => of(title),
+      }))
+      const result = settled(m.mutateAsync('milk', { onSuccess, onSettled }))
+
+      flushMicrotasks()
+
+      expect(onSuccess).toHaveBeenCalledTimes(1)
+      // onSettled doesn't wait for it either.
+      expect(onSettled).toHaveBeenCalledTimes(1)
+      expect(result.value).toBe('milk')
+      expect(m.isPending()).toBe(false)
+      expect(appIsStable()).toBe(true)
+
+      navigation.resolve(true)
+    }))
+
+    it('reports to the ErrorHandler a promise a callback returns that rejects', fakeAsync(() => {
+      const handleError = spyOn(TestBed.inject(ErrorHandler), 'handleError')
+      const error = new Error('navigation failed')
+      const m = setup<string, Error, string>(() => ({
+        mutationFn: (title) => of(title),
+      }))
+
+      m.mutate('milk', { onSuccess: () => Promise.reject(error) })
+
+      expect(() => flush()).not.toThrow()
+      expect(handleError).toHaveBeenCalledOnceWith(error)
+    }))
+
+    it("doesn't make an effect that calls mutate() depend on what the call's callbacks read", () => {
+      const draft = signal('a')
+      const locale = signal('en')
+      const onSuccess = jasmine
+        .createSpy('onSuccess')
+        .and.callFake(() => locale())
+      let runs = 0
+
+      @Component({ template: '' })
+      class Host {
+        readonly save = injectMutation(() => ({
+          mutationFn: (title: string) => of(title),
+        }))
+
+        constructor() {
+          effect(() => {
+            runs++
+
+            if (runs > 20) return
+
+            this.save.mutate(draft(), { onSuccess })
+          })
+        }
+      }
+
+      const fixture = TestBed.createComponent(Host)
+
+      fixture.detectChanges()
+      locale.set('nl')
+      fixture.detectChanges()
+
+      expect(onSuccess).toHaveBeenCalledTimes(1)
+      // Only a new draft is a reason to save.
+      expect(runs).toBe(1)
+    })
   })
 
   describe('options', () => {

@@ -71,7 +71,7 @@ protected readonly addTodo = injectMutation(() => ({
 
 In braces, as in the first example, the hook returns nothing: the mutation finishes as soon as the write lands, and the list catches up in the background. Pick by what comes next:
 
-- **Return it** when the next thing the user sees needs the fresh data — closing a dialog over the list, or going to the new item.
+- **Return it** when the next thing the user sees needs the fresh data — closing a dialog over the list, with a [callback passed to `mutate()`](/mutations/overview#callbacks-for-one-call) say, or going to the new item.
 - **Don't** when the write is the whole point and the list can catch up on its own.
 
 For several families, return them all:
