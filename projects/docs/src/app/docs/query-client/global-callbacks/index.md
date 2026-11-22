@@ -85,6 +85,8 @@ Each one runs **right before the mutation's own hook of the same name**, or befo
 onMutate (global)  →  onMutate  →  mutationFn  →  onSuccess | onError (global)  →  onSuccess | onError  →  onSettled (global)  →  onSettled
 ```
 
+The callbacks that a call passes to `mutate()` come after all of them, once the run is done: see [Callbacks for one call](/mutations/overview#callbacks-for-one-call).
+
 That's what sets them apart from the default hooks of `withDefaultOptions()`. A default hook is a fallback, which a mutation's own hook replaces; a global callback always runs. So to report every failed write, including one whose own `onError` rolls an optimistic update back, use `withMutationCache()`:
 
 ```ts
@@ -186,7 +188,7 @@ A component's query whose `queryFn` answers at once, with `of()` say, calls them
 
 A callback that throws, other than the global `onMutate` (see [Calling a write off](#calling-a-write-off)), doesn't change the outcome: its error goes to the app's `ErrorHandler`, once, the query keeps its data or its error, and the mutation its result. The callbacks and the hooks after it still run. A promise a callback returns that rejects goes to the `ErrorHandler` the same way.
 
-Nothing waits for a promise that a **query** callback returns: by the time it's called, the query shows the outcome. So on the server, one that rejects after the page is sent, with the app torn down by then, surfaces as an unhandled rejection rather than in the `ErrorHandler`. A request a callback makes with `HttpClient` holds the page up all the same, as any `HttpClient` request does. **Mutation** callbacks are waited for, as the mutation's own hooks are.
+Nothing waits for a promise that a **query** callback returns: by the time it's called, the query shows the outcome. So on the server, one that rejects after the page is sent, with the app torn down by then, surfaces as an unhandled rejection rather than in the `ErrorHandler`. A request a callback makes with `HttpClient` holds the page up all the same, as any `HttpClient` request does. **Mutation** callbacks are waited for, as the mutation's own hooks are, unlike the callbacks a call passes to `mutate()`: nothing waits for those.
 
 ## Default hooks or global callbacks?
 

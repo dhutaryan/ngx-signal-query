@@ -11,6 +11,7 @@ import {
 
 import { QueryClient } from './query-client'
 import {
+  type MutateOptions,
   type Mutation,
   type MutationOptions,
   type MutationResult,
@@ -29,7 +30,9 @@ import {
  * idempotent); opt in via `options.retry`. Whatever of `retry`, `retryDelay`
  * and the `onSuccess` / `onError` / `onSettled` hooks a mutation leaves unset
  * comes from {@link withDefaultOptions}. `mutateAsync(variables)` runs it
- * the same way and returns a promise of the run's data. Both call
+ * the same way and returns a promise of the run's data. Both take callbacks
+ * for that call alone as a second argument, for the component's own
+ * reaction to the write (see {@link MutateOptions}). Both call
  * `optionsFn` each time; if it throws, they throw its error before anything
  * is sent, and the signals keep showing the run before. `mutate()`,
  * `mutateAsync()` and `reset()` are safe to call from an effect: none makes
@@ -38,9 +41,10 @@ import {
  * context. Destroying it doesn't cancel a run in flight: the write has most
  * likely reached the server, so the run finishes and fires its hooks. A
  * `mutate()` that comes after that, say from a timer, runs and fires its
- * hooks too. From `mutate()` until its last hook is done, a run keeps the app
- * busy, whether its component is still there or not: a server render and
- * `whenStable()` wait for it.
+ * hooks too. The callbacks of a call are the exception: none of them is
+ * called once the context is destroyed. From `mutate()` until its last hook
+ * is done, a run keeps the app busy, whether its component is still there or
+ * not: a server render and `whenStable()` wait for it.
  *
  * Must run in an injection context, or be given an explicit `injector`.
  *
@@ -74,7 +78,7 @@ export function injectMutation<
 >(
   optionsFn: () => MutationOptions<TData, TError, TVariables, TContext>,
   options?: { injector?: Injector },
-): MutationResult<TData, TError, TVariables> {
+): MutationResult<TData, TError, TVariables, TContext> {
   if (!options?.injector) assertInInjectionContext(injectMutation)
 
   const injector = options?.injector ?? inject(Injector)
@@ -122,7 +126,10 @@ export function injectMutation<
     //
     // Starts a run for mutate() and mutateAsync(), makes it the run the
     // signals below follow, and returns its promise.
-    const start = (variables: TVariables): Promise<TData> =>
+    const start = (
+      variables: TVariables,
+      callbacks?: MutateOptions<TData, TError, TVariables, TContext>,
+    ): Promise<TData> =>
       untracked(() => {
         // Options are read per call, so a signal used in them stays live.
         // First, so that if optionsFn throws, nothing has changed yet: the
@@ -145,14 +152,18 @@ export function injectMutation<
 
         current.set(run)
 
-        return run.execute(variables)
+        // The callbacks of the call are the host's reaction to the write, so
+        // they're called only if the host is still there once the run lands.
+        // The hooks run either way: they keep the cache in step with the
+        // server.
+        return run.execute(variables, () => (destroyed ? undefined : callbacks))
       })
 
     return {
       // The outcome shows in the signals; a failure mustn't surface as an
       // unhandled rejection too.
-      mutate: (variables) => {
-        start(variables).catch(() => undefined)
+      mutate: (variables, callbacks) => {
+        start(variables, callbacks).catch(() => undefined)
       },
       mutateAsync: start,
       reset: () =>
