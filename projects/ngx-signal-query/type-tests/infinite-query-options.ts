@@ -5,6 +5,7 @@ import type { Observable } from 'rxjs'
 import {
   infiniteQueryOptions,
   keepPreviousData,
+  type DataTag,
   type InfiniteData,
   type InfiniteQueryOptions,
   type QueryKey,
@@ -35,8 +36,14 @@ const todos = infiniteQueryOptions({
   },
 })
 
+// Its key carries the list's type.
 expectTypeOf(todos).toEqualTypeOf<
-  InfiniteQueryOptions<TodoPage, Error, string[], number>
+  InfiniteQueryOptions<
+    TodoPage,
+    Error,
+    DataTag<string[], InfiniteData<TodoPage, number>>,
+    number
+  >
 >()
 
 // The query function gets the key with the type queryKey has, a signal and

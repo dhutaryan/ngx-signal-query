@@ -4,6 +4,8 @@
   "extends": "../../tsconfig.json",
   "compilerOptions": {
     "noEmit": true,
+    /* Checks, without writing them, the declaration files of what a test exports: see type-tests/declaration-emit.ts. tsc reports their errors once the rest compiles. */
+    "declaration": true,
     "types": []
   },
   "include": ["type-tests/**/*.ts"],

@@ -272,6 +272,8 @@ export class TodoQueries {
 // protected readonly todos = injectInfiniteQuery(() => this.#queries.todos())
 ```
 
+Its key carries the list's type, `InfiniteData<TodoPage, number>`, so `getQueryData()` and `setQueryData()` take the type from it: with `this.#queries.todos().queryKey`, the writes in [Updating the pages by hand](#updating-the-pages-by-hand) need no generic.
+
 ## Prefetching
 
 The client's `infiniteQuery()` fetches a list ahead of time, on hover say, so that it opens with its pages, or waits for them in a route resolver. Hand it the list's definition:
@@ -318,5 +320,6 @@ Don't prefetch a list with `fetchQuery()`: it fetches a plain query, so called w
 - **No `direction` in the query function's context.** TanStack still passes it, deprecated, and suggests the param instead.
 - **A component that moved to another key doesn't fetch the rest of the list it left.** In TanStack a refetch in flight goes on with that component's query function, so one that reads the key's value when it runs adds the next key's pages to the old list.
 - **Generics.** `injectInfiniteQuery<TPage, TError, TQueryKey, TPageParam>` puts the page type first, as `injectQuery` does; TanStack has the data type of `select`, which isn't here, in third place.
+- **The key of an `infiniteQueryOptions()` definition carries the param type too.** `getQueryData()` with it gives `InfiniteData<TodoPage, number>`; with TanStack's, `InfiniteData<TodoPage, unknown>`.
 - **`infiniteQuery()` is here; `fetchInfiniteQuery()`, `prefetchInfiniteQuery()` and `ensureInfiniteQueryData()` aren't.** A prefetch is an `infiniteQuery()` whose promise nothing waits for.
 - **`infiniteQuery()` needs `getNextPageParam`**: it takes the list's definition. TanStack's takes options without it unless `pages` is set, and then fails to refetch a stale list of two pages or more.

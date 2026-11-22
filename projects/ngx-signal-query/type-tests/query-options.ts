@@ -1,10 +1,12 @@
 // Type tests for queryOptions: compiled by `pnpm test:types`, never run.
 import type { HttpClient } from '@angular/common/http'
 import { expectTypeOf } from 'expect-type'
+import { of } from 'rxjs'
 import {
   injectQuery,
   keepPreviousData,
   queryOptions,
+  type DataTag,
   type QueryFunction,
   type QueryKey,
   type QueryOptions,
@@ -68,6 +70,14 @@ const list = queryOptions({
 // @ts-expect-error -- no context
 list.queryFn()
 list.queryFn({ queryKey: list.queryKey, signal: new AbortController().signal })
+// A key written out fits as well, as a test might pass one.
+list.queryFn({ queryKey: ['todos'], signal: new AbortController().signal })
+
+// So does a definition written out, as a test's stub of one: Jasmine's
+// `and.returnValue()` takes the type that the stubbed method returns.
+declare function returnValue(stub: typeof list): void
+
+returnValue({ queryKey: ['todos'], queryFn: () => of([]) })
 
 // A function with a parameter of its own is an error: it would get the
 // context as that parameter.
@@ -89,8 +99,10 @@ const fresh = injectQuery(() => withStaleTime(detail))
 
 expectTypeOf(fresh.data()).toEqualTypeOf<Todo | undefined>()
 
-// The definition keeps the type of its key.
-expectTypeOf(detail.queryKey).toEqualTypeOf<readonly ['todo', number]>()
+// The definition keeps the type of its key, which carries the data type.
+expectTypeOf(detail.queryKey).toEqualTypeOf<
+  DataTag<readonly ['todo', number], Todo>
+>()
 
 // A query function typed for one key fits that key, and not another.
 const fetchTodo: QueryFunction<Todo, readonly ['todo', number]> = ({

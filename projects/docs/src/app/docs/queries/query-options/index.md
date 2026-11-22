@@ -89,8 +89,8 @@ const queries = inject(TodoQueries)
 // Invalidate — no hardcoded key
 client.invalidateQueries({ queryKey: queries.list().queryKey })
 
-// Write to the cache directly
-client.setQueryData<Todo[]>(
+// Write to the cache directly: todos is Todo[] | undefined, from the key
+client.setQueryData(
   queries.list().queryKey,
   (todos) => todos && [...todos, newTodo],
 )
@@ -120,16 +120,35 @@ protected readonly todos = injectQuery(() => ({
 }))
 ```
 
-## A rough edge
+## The key carries the data type
 
-Worth knowing, because it's a place where the pattern doesn't fully pay off yet.
-
-**`getQueryData` won't infer the data type from the key.** Keys are plain arrays and carry no type information, so the generic stays explicit:
+A definition's key carries the type of the data cached under it, so `getQueryData` and `setQueryData` take the type from the key, with no generic to write:
 
 ```ts
-// The <Todo[]> is on you — it isn't derived from queries.list()
-const todos = client.getQueryData<Todo[]>(queries.list().queryKey)
+const todos = client.getQueryData(queries.list().queryKey)
+//    ^? Todo[] | undefined
+
+client.setQueryData(
+  queries.detail(5).queryKey,
+  (todo) => todo && { ...todo, done: true },
+)
+
+// A compile error: a list isn't a todo
+client.setQueryData(queries.detail(5).queryKey, [newTodo])
 ```
+
+Only the key's TypeScript type changes: at runtime the key is the array you wrote. A generic you still write is checked: the key's data has to fit it, so `getQueryData<Todo[]>(queries.detail(5).queryKey)` is a compile error, rather than a list that turns out to be a todo at runtime. A key written out by hand carries no type: pass the generic, as before, and TypeScript takes it on trust.
+
+Two cases need a type from you:
+
+- **A key that may be either of two definitions' keys** takes a generic that both fit: `getQueryData<Todo | Todo[]>(showList ? queries.list().queryKey : queries.detail(id).queryKey)`.
+- **A variable, an array or a signal that holds the keys of several definitions** takes the type `QueryKey`. Inferred from the first key, it carries that key's data type, and a key of other data doesn't fit:
+
+```ts
+const keys: QueryKey[] = [queries.list().queryKey, queries.detail(5).queryKey]
+```
+
+If you write a method's return type out, keep the key's type in it: with `QueryOptions<Todo[], Error, DataTag<QueryKey, Todo[]>>` the key still carries `Todo[]`, while with `QueryOptions<Todo[]>` it doesn't, and `getQueryData` gives `unknown` again.
 
 ## Testing
 

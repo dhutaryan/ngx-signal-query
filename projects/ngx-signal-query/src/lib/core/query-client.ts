@@ -17,6 +17,7 @@ import type { MutationOptions } from './mutation'
 import { defaultRetryDelay } from './retryer'
 import { functionalUpdate, whenAllSettled } from './utils'
 import type {
+  DataTag,
   DefaultedQueryOptions,
   InfiniteData,
   InfiniteQueryOptions,
@@ -385,10 +386,21 @@ export class QueryClient {
    * or an effect when the data changes. For data that updates, use
    * {@link injectQuery}.
    *
+   * The data has the type the key carries: the key of a {@link queryOptions}
+   * or {@link infiniteQueryOptions} definition does (see {@link DataTag}), so
+   * there's no generic to write. A key written out carries none: give the
+   * type as the generic, which TypeScript takes on trust. A generic given
+   * for a key that carries a type is checked: the key's data has to fit it,
+   * so `<Todo[]>` for a todo's key is an error. A key that may be either of
+   * two definitions' keys takes a generic both fit, such as
+   * `<Todo | Todo[]>`.
+   *
+   * @typeParam TData - Type of the cached data: what the key carries, or the
+   *   generic.
    * @param key - The query key to read.
    * @returns The cached data, or `undefined`.
    */
-  getQueryData<TData>(key: QueryKey): TData | undefined {
+  getQueryData<TData>(key: DataTag<QueryKey, TData>): TData | undefined {
     return untracked(() => this.#cache.get<TData>(key)?.state().data)
   }
 
@@ -419,6 +431,14 @@ export class QueryClient {
    * A key no component shows is kept for `gcTime` after the last write, then
    * removed.
    *
+   * The data has the type the key carries, as for
+   * {@link QueryClient.getQueryData}: with a definition's key, the updater
+   * gets that type and has to return it, and a value has to be of it, with no
+   * generic to write. A key written out takes the type as the generic, or
+   * from the type of the updater's parameter.
+   *
+   * @typeParam TData - Type of the data: what the key carries, or the
+   *   generic.
    * @param key - The query key to write.
    * @param updater - The new data, or a function `(prev) => next`;
    *   `undefined` writes nothing.
@@ -432,8 +452,13 @@ export class QueryClient {
    * ```
    */
   setQueryData<TData>(
-    key: QueryKey,
-    updater: Updater<TData | undefined, TData | undefined>,
+    key: DataTag<QueryKey, TData>,
+    // NoInfer on the new data only. TData comes from the key, the generic or
+    // the updater's parameter type, and the new data is checked against it:
+    // inferred from the data too, partial data would widen TData and fit. On
+    // the parameter, NoInfer would drop the type that an annotated updater
+    // gives a key written out, and keep an updater from narrowing a union.
+    updater: Updater<TData | undefined, NoInfer<TData> | undefined>,
   ): void {
     untracked(() => {
       // undefined, from the updater or as the value, writes nothing, as in

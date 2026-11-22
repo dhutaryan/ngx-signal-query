@@ -96,6 +96,8 @@ Every query reading `['todos']` shows the new row at once, and any of them rever
 
 The write goes only into a list that's loaded. A default such as `(todos = [])` would give a key nothing has fetched a list of just the new row, which a component showing the key later takes as the whole list. See [Manual Cache Updates](/query-client/manual-cache-updates).
 
+With the list's key from its `queryOptions()` definition, such as `this.#queries.list().queryKey`, there's no `<Todo[]>` to write, or to get wrong: `getQueryData` and `setQueryData` take the type from the key (see [Query Options](/queries/query-options#the-key-carries-the-data-type)).
+
 ### Why `cancelQueries` first
 
 If a background refetch for `['todos']` is already in flight, it will resolve _after_ your optimistic write and overwrite it with the old list — the new row would flash in, then vanish until the mutation completes. `cancelQueries({ queryKey: ['todos'] })` stops that in-flight fetch so your optimistic data is the last word until `onSettled` refetches deliberately. It's synchronous here — no `await` needed.
