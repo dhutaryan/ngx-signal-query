@@ -70,7 +70,8 @@ function names(calls: Call[]): string[] {
   return calls.map((call) => call.callback)
 }
 
-// injectMutation has no effects, so an injection context is enough.
+// An injection context is enough: injectMutation's one effect, which watches
+// the key, doesn't matter here, where no key changes.
 function setup<TData, TError = Error, TVariables = void, TContext = unknown>(
   optionsFn: () => MutationOptions<TData, TError, TVariables, TContext>,
 ): MutationResult<TData, TError, TVariables> {
@@ -354,6 +355,41 @@ describe('withMutationCache', () => {
           context,
           mutation: { state: jasmine.anything(), meta: undefined },
         },
+      ])
+    }))
+
+    // A run without a key gets a snapshot without one: 'hands each callback
+    // the variables, the context that the own onMutate made, and the run with
+    // its meta' and 'hands onError and onSettled the write's error and the
+    // context' compare it as a whole.
+    it('hands each callback the key of the run', fakeAsync(() => {
+      provide()
+
+      const add = setup<string, Error, string>(() => ({
+        mutationKey: ['todos', 'add'],
+        mutationFn: (todo) => of(todo),
+      }))
+      const remove = setup<string, Error, string>(() => ({
+        mutationKey: ['todos', 'remove'],
+        mutationFn: () => throwError(() => new Error('offline')),
+      }))
+
+      add.mutate('milk')
+      remove.mutate('bread')
+      flush()
+
+      expect(
+        calls.map(
+          ({ callback, mutation }) =>
+            `${callback} ${JSON.stringify(mutation.mutationKey)}`,
+        ),
+      ).toEqual([
+        'onMutate ["todos","add"]',
+        'onSuccess ["todos","add"]',
+        'onSettled ["todos","add"]',
+        'onMutate ["todos","remove"]',
+        'onError ["todos","remove"]',
+        'onSettled ["todos","remove"]',
       ])
     }))
 

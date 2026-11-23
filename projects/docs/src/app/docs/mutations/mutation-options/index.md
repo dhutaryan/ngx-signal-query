@@ -32,7 +32,7 @@ export class AddTodoComponent {
 
 ## Why it earns its keep
 
-For queries, the win from `queryOptions` is mostly not repeating the key. For mutations there's no key — so what does `mutationOptions` actually buy you?
+For queries, the win from `queryOptions` is mostly not repeating the key. A mutation's key is optional — so what does `mutationOptions` actually buy you?
 
 **It gives a mutation defined outside `injectMutation` its types.** Inline, `injectMutation(() => ({ … }))` types the hooks for you: the variables, the data, and the `context` argument of `onSuccess` / `onError` / `onSettled`, which is the value `onMutate` returns. An object a service method returns has nothing to take its types from, so its hooks' parameters are implicitly `any`, an error under `strict`. `mutationOptions` types it as `injectMutation` would, so an optimistic rollback type-checks end to end:
 
@@ -97,6 +97,28 @@ it('invalidates todos on success', () => {
 })
 ```
 
-## No `mutationKey`
+## Naming a mutation: `mutationKey`
 
-If you're coming from TanStack Query: there's no `mutationKey` here. Mutations aren't looked up by key, so there's nothing to name them with, and they aren't filtered: `injectIsMutating` takes no filter. `mutationOptions` is purely about typing and reuse, not identity.
+A definition can name its mutation with a `mutationKey`, an array like a query key, from broad to specific. It's optional: a mutation runs the same without one. Give it one to tell its writes apart from the others: for a "Saving…" that counts only some of them (see [Global Indicators](/query-client/global-indicators#scoping-it-with-a-key)), or for the [global callbacks](/query-client/global-callbacks), which get it as `mutation.mutationKey`.
+
+```ts
+updateTodo() {
+  return mutationOptions({
+    mutationKey: ['todos', 'update'],
+    mutationFn: (todo: Todo) =>
+      this.#http.put<Todo>(`/api/todos/${todo.id}`, todo),
+  })
+}
+```
+
+The definition gives the key back typed, ready for a filter:
+
+```ts
+protected readonly saving = injectIsMutating(() => ({
+  mutationKey: this.#todos.updateTodo().mutationKey,
+}))
+```
+
+A definition without a key has no `mutationKey` to read, so it can't end up in a filter, where a key that's `undefined` would match every mutation. For the same reason, a definition's key can't be `undefined`: one that may be missing, such as `id ? ['todos', id] : undefined`, goes in the options you pass to `injectMutation()` instead.
+
+Each run keeps the key that the options give when `mutate()` is called, so the key can use what the component has by then, such as an input. When it changes, the mutation resets: see [When the key changes](/mutations/overview#when-the-key-changes).

@@ -4,6 +4,7 @@ import {
   Component,
   DestroyRef,
   type DoCheck,
+  type OnDestroy,
   EnvironmentInjector,
   ErrorHandler,
   Injectable,
@@ -16,6 +17,7 @@ import {
   createEnvironmentInjector,
   effect,
   inject,
+  input,
   signal,
 } from '@angular/core'
 import {
@@ -59,8 +61,9 @@ describe('injectMutation', () => {
     client = TestBed.inject(QueryClient)
   })
 
-  // injectMutation has no effects (only pull-based computeds), so a real view
-  // isn't needed — an injection context is enough.
+  // An injection context is enough, without a real view: injectMutation's one
+  // effect, which watches the key, only matters once a key changes (see 'a
+  // key that changes').
   function setup<TData, TError = Error, TVariables = void, TContext = unknown>(
     optionsFn: () => MutationOptions<TData, TError, TVariables, TContext>,
   ): MutationResult<TData, TError, TVariables, TContext> {
@@ -208,6 +211,518 @@ describe('injectMutation', () => {
       // …and the abandoned run cleans itself out of the cache.
       expect(client.getMutationCache().getAll().length).toBe(0)
     }))
+  })
+
+  // The key says which mutation a component shows, so once the options give
+  // another key, the component no longer shows the run it started under the
+  // old one: it goes back to idle, the way reset() does.
+  describe('a key that changes', () => {
+    // A todo's page, which the router keeps when it moves on to another todo.
+    // It shows how saving its todo went, and records what it showed.
+    @Component({
+      selector: 'app-todo-page',
+      template: '{{ show(save.status()) }}',
+    })
+    class TodoPage {
+      readonly id = input.required<number>()
+      readonly shown: string[] = []
+      readonly writes: Array<Subject<string>> = []
+      readonly onSuccess = jasmine.createSpy('own onSuccess')
+      readonly save = injectMutation<string, Error, string>(() => ({
+        mutationKey: ['todos', 'update', this.id()],
+        mutationFn: () => {
+          const write = new Subject<string>()
+
+          this.writes.push(write)
+
+          return write
+        },
+        onSuccess: this.onSuccess,
+      }))
+
+      show(status: string): string {
+        this.shown.push(`${this.id()}: ${status}`)
+
+        return status
+      }
+
+      // Answers the latest write.
+      land(data: string): void {
+        const write = this.writes[this.writes.length - 1]
+
+        write.next(data)
+        write.complete()
+      }
+    }
+
+    function open(id: number): ComponentFixture<TodoPage> {
+      const fixture = TestBed.createComponent(TodoPage)
+
+      fixture.componentRef.setInput('id', id)
+      fixture.detectChanges()
+
+      return fixture
+    }
+
+    it('goes back to idle once the key changes, before the page shows the new todo', fakeAsync(() => {
+      const fixture = open(1)
+      const page = fixture.componentInstance
+
+      page.save.mutate('Buy milk')
+      page.land('saved')
+      flushMicrotasks()
+      fixture.detectChanges()
+
+      expect(page.save.status()).toBe('success')
+
+      page.shown.length = 0
+      fixture.componentRef.setInput('id', 2)
+      fixture.detectChanges()
+
+      // Todo 2's page never showed how saving todo 1 went. Deduped: dev
+      // mode checks the template a second time.
+      expect([...new Set(page.shown)]).toEqual(['2: idle'])
+      expect(page.save.data()).toBeUndefined()
+      expect(page.save.variables()).toBeUndefined()
+      // A run that's done and shown by no one leaves the cache.
+      expect(client.getMutationCache().getAll().length).toBe(0)
+    }))
+
+    it("shows the page's own effects the new todo as idle too, not the old outcome", fakeAsync(() => {
+      @Component({
+        selector: 'app-saved-toast-page',
+        template: '',
+      })
+      class Page {
+        readonly id = input.required<number>()
+        readonly seen: string[] = []
+        readonly save = injectMutation<string, Error, string>(() => ({
+          mutationKey: ['todos', 'update', this.id()],
+          mutationFn: (title) => of(title),
+        }))
+
+        constructor() {
+          // Such as a toast for a saved todo.
+          effect(() => this.seen.push(`${this.id()}: ${this.save.status()}`))
+        }
+      }
+
+      const fixture = TestBed.createComponent(Page)
+      const page = fixture.componentInstance
+
+      fixture.componentRef.setInput('id', 1)
+      fixture.detectChanges()
+      page.save.mutate('Buy milk')
+      fixture.detectChanges()
+
+      expect(page.seen).toContain('1: success')
+
+      page.seen.length = 0
+      fixture.componentRef.setInput('id', 2)
+      fixture.detectChanges()
+
+      expect(page.seen).toEqual(['2: idle'])
+    }))
+
+    it('shows an effect the page declares before the mutation the new todo as idle', () => {
+      @Component({ selector: 'app-early-effect-page', template: '' })
+      class Page {
+        readonly id = input.required<number>()
+        readonly seen: string[] = []
+        // Declared before the mutation, so it's made first.
+        readonly log = effect(() =>
+          this.seen.push(`${this.id()}: ${this.save.status()}`),
+        )
+
+        readonly save = injectMutation<string, Error, string>(() => ({
+          mutationKey: ['todos', 'update', this.id()],
+          mutationFn: (title) => of(title),
+        }))
+      }
+
+      const fixture = TestBed.createComponent(Page)
+      const page = fixture.componentInstance
+
+      fixture.componentRef.setInput('id', 1)
+      fixture.detectChanges()
+      page.save.mutate('Buy milk')
+      fixture.detectChanges()
+
+      expect(page.seen).toContain('1: success')
+
+      page.seen.length = 0
+      fixture.componentRef.setInput('id', 2)
+      fixture.detectChanges()
+
+      expect(page.seen).toEqual(['2: idle'])
+    })
+
+    // A store that follows the page's input, written while the page is
+    // checked.
+    it("doesn't show the old outcome when a store's key is set during change detection", () => {
+      @Injectable({ providedIn: 'root' })
+      class TodoStore {
+        readonly id = signal(0)
+        readonly save = injectMutation<string, Error, string>(() => ({
+          mutationKey: ['todos', 'update', this.id()],
+          mutationFn: (title) => of(title),
+        }))
+      }
+
+      @Component({
+        selector: 'app-store-todo-page',
+        template: '{{ show(store.save.status()) }}',
+      })
+      class Page {
+        readonly id = input.required<number>()
+        readonly store = inject(TodoStore)
+        readonly shown: string[] = []
+        readonly toasts: string[] = []
+
+        constructor() {
+          effect(() => this.store.id.set(this.id()))
+          // Such as a toast once the todo is saved.
+          effect(() => {
+            if (this.store.save.isSuccess()) {
+              this.toasts.push(`saved todo ${this.id()}`)
+            }
+          })
+        }
+
+        show(status: string): string {
+          this.shown.push(`${this.id()}: ${status}`)
+
+          return status
+        }
+      }
+
+      const fixture = TestBed.createComponent(Page)
+      const page = fixture.componentInstance
+
+      fixture.componentRef.setInput('id', 1)
+      fixture.detectChanges()
+      page.store.save.mutate('Buy milk')
+      fixture.detectChanges()
+
+      expect(page.toasts).toEqual(['saved todo 1'])
+
+      page.shown.length = 0
+      fixture.componentRef.setInput('id', 2)
+      fixture.detectChanges()
+
+      // Deduped: dev mode checks the template a second time.
+      expect([...new Set(page.shown)]).toEqual(['2: idle'])
+      expect(page.toasts).toEqual(['saved todo 1'])
+    })
+
+    // Angular 19 runs a service's effects in the order they were marked, not
+    // made.
+    it("shows a service's own effect the new key as idle", () => {
+      @Injectable({ providedIn: 'root' })
+      class TodoStore {
+        readonly id = signal(1)
+        readonly seen: string[] = []
+        readonly save = injectMutation<string, Error, string>(() => ({
+          mutationKey: ['todos', 'update', this.id()],
+          mutationFn: (title) => of(title),
+        }))
+
+        constructor() {
+          // Such as a toast for a saved todo.
+          effect(() => this.seen.push(`${this.id()}: ${this.save.status()}`))
+        }
+      }
+
+      const store = TestBed.inject(TodoStore)
+      const app = TestBed.inject(ApplicationRef)
+
+      app.tick()
+      store.save.mutate('Buy milk')
+      app.tick()
+
+      expect(store.seen).toContain('1: success')
+
+      store.seen.length = 0
+      store.id.set(2)
+      app.tick()
+
+      expect(store.seen).toEqual(['2: idle'])
+    })
+
+    it('lets a write in flight go on, while the page shows the new todo as idle', fakeAsync(() => {
+      const fixture = open(1)
+      const page = fixture.componentInstance
+
+      page.save.mutate('Buy milk')
+      fixture.componentRef.setInput('id', 2)
+      fixture.detectChanges()
+
+      expect(page.save.isPending()).toBe(false)
+      expect(page.save.status()).toBe('idle')
+      // It still counts, under the key it was started with.
+      expect(client.isMutating({ mutationKey: ['todos', 'update', 1] })).toBe(1)
+
+      page.land('saved')
+      flushMicrotasks()
+      fixture.detectChanges()
+
+      // Its hooks run: the write went through.
+      expect(page.onSuccess).toHaveBeenCalledOnceWith(
+        'saved',
+        'Buy milk',
+        undefined,
+      )
+      expect(page.save.status()).toBe('idle')
+      expect(client.isMutating()).toBe(0)
+      // Done, and shown by no one: it leaves the cache.
+      expect(client.getMutationCache().getAll().length).toBe(0)
+    }))
+
+    // A call's callbacks are the page's reaction to that write, such as
+    // marking its form saved: once the page shows another todo, they'd act on
+    // that todo's form.
+    it('skips the callbacks of a call whose write is done once the page shows another todo', fakeAsync(() => {
+      const fixture = open(1)
+      const page = fixture.componentInstance
+      const kept = jasmine.createSpy('onSuccess of a write done on todo 1')
+      const onSuccess = jasmine.createSpy('call onSuccess')
+      const onSettled = jasmine.createSpy('call onSettled')
+
+      page.save.mutate('Buy milk', { onSuccess: kept })
+      page.land('saved')
+      flushMicrotasks()
+
+      expect(kept).toHaveBeenCalledTimes(1)
+
+      page.save.mutate('Buy bread', { onSuccess, onSettled })
+      fixture.componentRef.setInput('id', 2)
+      fixture.detectChanges()
+      page.land('saved')
+      flushMicrotasks()
+
+      // The mutation's own hooks keep the cache in step, so they ran.
+      expect(page.onSuccess).toHaveBeenCalledTimes(2)
+      expect(onSuccess).not.toHaveBeenCalled()
+      expect(onSettled).not.toHaveBeenCalled()
+    }))
+
+    it('skips the callbacks of a call whose write is done after the key changed, before the page updated', fakeAsync(() => {
+      const fixture = open(1)
+      const page = fixture.componentInstance
+      const onSuccess = jasmine.createSpy('call onSuccess')
+
+      page.save.mutate('Buy milk', { onSuccess })
+      fixture.componentRef.setInput('id', 2)
+      page.land('saved')
+      flushMicrotasks()
+
+      expect(page.onSuccess).toHaveBeenCalledTimes(1)
+      expect(onSuccess).not.toHaveBeenCalled()
+    }))
+
+    it('shows the next run, started under the new key', fakeAsync(() => {
+      const fixture = open(1)
+      const page = fixture.componentInstance
+
+      page.save.mutate('Buy milk')
+      page.land('saved 1')
+      flushMicrotasks()
+      fixture.componentRef.setInput('id', 2)
+      fixture.detectChanges()
+
+      page.save.mutate('Buy bread')
+      page.land('saved 2')
+      flushMicrotasks()
+      fixture.detectChanges()
+
+      expect(page.save.status()).toBe('success')
+      expect(page.save.data()).toBe('saved 2')
+    }))
+
+    it('goes back to idle again after moving on twice with nothing saved in between', fakeAsync(() => {
+      const fixture = open(1)
+      const page = fixture.componentInstance
+
+      page.save.mutate('Buy milk')
+      page.land('saved 1')
+      flushMicrotasks()
+      fixture.componentRef.setInput('id', 2)
+      fixture.detectChanges()
+      // On to todo 3, before anything is saved on todo 2.
+      fixture.componentRef.setInput('id', 3)
+      fixture.detectChanges()
+
+      page.save.mutate('Buy bread')
+      page.land('saved 3')
+      flushMicrotasks()
+      fixture.detectChanges()
+
+      expect(page.save.status()).toBe('success')
+
+      fixture.componentRef.setInput('id', 4)
+      fixture.detectChanges()
+
+      expect(page.save.status()).toBe('idle')
+    }))
+
+    it('resets a mutation that a service keeps, once a signal in its key changes', fakeAsync(() => {
+      @Injectable({ providedIn: 'root' })
+      class Editor {
+        readonly id = signal(1)
+        readonly save = injectMutation<string, Error, string>(() => ({
+          mutationKey: ['todos', 'update', this.id()],
+          mutationFn: (title) => of(title),
+        }))
+      }
+
+      const editor = TestBed.inject(Editor)
+      const app = TestBed.inject(ApplicationRef)
+
+      editor.save.mutate('Buy milk')
+      app.tick()
+
+      expect(editor.save.status()).toBe('success')
+
+      editor.id.set(2)
+      app.tick()
+
+      expect(editor.save.status()).toBe('idle')
+    }))
+
+    it('keeps showing the run of a mutation without a key', () => {
+      @Component({ template: '' })
+      class Page {
+        readonly id = input.required<number>()
+        // The options read the input, so its change reaches them.
+        readonly save = injectMutation<string, Error, string>(() => ({
+          meta: { todo: this.id() },
+          mutationFn: (title) => of(title),
+        }))
+      }
+
+      const fixture = TestBed.createComponent(Page)
+
+      fixture.componentRef.setInput('id', 1)
+      fixture.detectChanges()
+      fixture.componentInstance.save.mutate('Buy milk')
+      fixture.componentRef.setInput('id', 2)
+      fixture.detectChanges()
+
+      expect(fixture.componentInstance.save.status()).toBe('success')
+    })
+
+    it('keeps showing the run when the key is equal, though made anew', () => {
+      @Component({ template: '' })
+      class Page {
+        readonly todo = input.required<{ id: number; title: string }>()
+        readonly save = injectMutation<string, Error, string>(() => ({
+          mutationKey: ['todos', 'update', this.todo().id],
+          mutationFn: (title) => of(title),
+        }))
+      }
+
+      const fixture = TestBed.createComponent(Page)
+
+      fixture.componentRef.setInput('todo', { id: 1, title: 'Milk' })
+      fixture.detectChanges()
+      fixture.componentInstance.save.mutate('Buy milk')
+      fixture.detectChanges()
+      // The list refetched: the same todo, in a new object.
+      fixture.componentRef.setInput('todo', { id: 1, title: 'Buy milk' })
+      fixture.detectChanges()
+
+      expect(fixture.componentInstance.save.status()).toBe('success')
+    })
+
+    it('reads the options of a mutation without a key only on mutate()', () => {
+      const id = signal(1)
+      const optionsFn = jasmine.createSpy('options').and.callFake(() => ({
+        meta: { todo: id() },
+        mutationFn: (title: string) => of(title),
+      }))
+
+      @Component({ template: '' })
+      class Page {
+        readonly save = injectMutation<string, Error, string>(optionsFn)
+      }
+
+      const fixture = TestBed.createComponent(Page)
+      const onSuccess = jasmine.createSpy('call onSuccess')
+
+      fixture.detectChanges()
+      // With callbacks for the call too: they don't read the options either.
+      fixture.componentInstance.save.mutate('Buy milk', { onSuccess })
+      id.set(2)
+      fixture.detectChanges()
+      id.set(3)
+      fixture.detectChanges()
+
+      expect(onSuccess).toHaveBeenCalledTimes(1)
+      expect(optionsFn).toHaveBeenCalledTimes(1)
+    })
+
+    it("doesn't reset the run while the options give no key, until they give another one", () => {
+      @Component({ template: '' })
+      class Page {
+        readonly todo = input.required<{ id: number } | undefined>()
+        readonly save = injectMutation<string, Error, string>(() => {
+          const todo = this.todo()
+
+          return {
+            mutationKey: todo ? ['todos', 'update', todo.id] : undefined,
+            mutationFn: (title) => of(title),
+          }
+        })
+      }
+
+      const fixture = TestBed.createComponent(Page)
+      const page = fixture.componentInstance
+
+      fixture.componentRef.setInput('todo', { id: 1 })
+      fixture.detectChanges()
+      page.save.mutate('Buy milk')
+      // The next todo is still loading.
+      fixture.componentRef.setInput('todo', undefined)
+      fixture.detectChanges()
+
+      expect(page.save.status()).toBe('success')
+
+      fixture.componentRef.setInput('todo', { id: 2 })
+      fixture.detectChanges()
+
+      expect(page.save.status()).toBe('idle')
+    })
+
+    it("doesn't reset the run, or report an error, while the options can't give a key", () => {
+      const handleError = spyOn(TestBed.inject(ErrorHandler), 'handleError')
+
+      @Component({ template: '' })
+      class Page {
+        readonly todo = input.required<{ id: number } | undefined>()
+        readonly save = injectMutation<string, Error, string>(() => ({
+          mutationKey: ['todos', 'update', this.todo()!.id],
+          mutationFn: (title) => of(title),
+        }))
+      }
+
+      const fixture = TestBed.createComponent(Page)
+      const page = fixture.componentInstance
+
+      fixture.componentRef.setInput('todo', { id: 1 })
+      fixture.detectChanges()
+      page.save.mutate('Buy milk')
+      // The next todo is still loading.
+      fixture.componentRef.setInput('todo', undefined)
+      fixture.detectChanges()
+
+      expect(page.save.status()).toBe('success')
+      expect(handleError).not.toHaveBeenCalled()
+
+      fixture.componentRef.setInput('todo', { id: 2 })
+      fixture.detectChanges()
+
+      expect(page.save.status()).toBe('idle')
+    })
   })
 
   describe('retry', () => {
@@ -1543,6 +2058,34 @@ describe('injectMutation', () => {
       expect(client.getMutationCache().getAll().length).toBe(0)
     })
 
+    it('runs a mutation with a key started after the host is destroyed', () => {
+      const sent: string[] = []
+
+      @Component({ template: '' })
+      class Page {
+        readonly id = input.required<number>()
+        readonly save = injectMutation<string, Error, string>(() => ({
+          mutationKey: ['todos', 'update', this.id()],
+          mutationFn: (title) => {
+            sent.push(title)
+
+            return of(title)
+          },
+        }))
+      }
+
+      const fixture = TestBed.createComponent(Page)
+
+      fixture.componentRef.setInput('id', 1)
+      fixture.detectChanges()
+      fixture.destroy()
+
+      expect(() =>
+        fixture.componentInstance.save.mutate('Buy milk'),
+      ).not.toThrow()
+      expect(sent).toEqual(['Buy milk'])
+    })
+
     // On the server, Angular tears the app down after each render: it marks
     // the app's injector destroyed first, then destroys the components, so a
     // DestroyRef callback runs with the client's injector gone.
@@ -1624,6 +2167,99 @@ describe('injectMutation', () => {
       // The router never destroys it; the spec does, to leave nothing behind.
       route.destroy()
       host.remove()
+    })
+
+    // ngOnDestroy runs before the DestroyRef callbacks, once Angular already
+    // counts the injector as destroyed.
+    it("runs a mutation with a key that its component's ngOnDestroy starts as the whole app is torn down", async () => {
+      const mutationFn = jasmine
+        .createSpy('mutationFn')
+        .and.returnValue(of('saved'))
+
+      @Component({ selector: 'nsq-draft-editor', template: '' })
+      class DraftEditor implements OnDestroy {
+        readonly saveDraft = injectMutation<string, Error, string>(() => ({
+          mutationKey: ['drafts', 'save'],
+          mutationFn,
+        }))
+
+        // Saves the draft on leave.
+        ngOnDestroy(): void {
+          this.saveDraft.mutate('milk')
+        }
+      }
+
+      const host = document.body.appendChild(
+        document.createElement('nsq-draft-editor'),
+      )
+      const app = await createApplication({
+        providers: [provideZonelessChangeDetection(), provideQueryClient()],
+      })
+
+      app.bootstrap(DraftEditor, host)
+
+      expect(() => app.destroy()).not.toThrow()
+      expect(mutationFn).toHaveBeenCalledOnceWith('milk')
+
+      host.remove()
+    })
+
+    it("runs a mutation with a key that a service's ngOnDestroy starts as its injector is destroyed", () => {
+      const mutationFn = jasmine
+        .createSpy('mutationFn')
+        .and.returnValue(of('saved'))
+
+      @Injectable()
+      class DraftEditor implements OnDestroy {
+        readonly saveDraft = injectMutation<string, Error, string>(() => ({
+          mutationKey: ['drafts', 'save'],
+          mutationFn,
+        }))
+
+        ngOnDestroy(): void {
+          this.saveDraft.mutate('milk')
+        }
+      }
+
+      // Such as a route's injector, when the app leaves the route.
+      const injector = createEnvironmentInjector(
+        [DraftEditor],
+        TestBed.inject(EnvironmentInjector),
+      )
+
+      injector.get(DraftEditor)
+
+      expect(() => injector.destroy()).not.toThrow()
+      expect(mutationFn).toHaveBeenCalledOnceWith('milk')
+      expect(client.getMutationCache().getAll().length).toBe(0)
+    })
+
+    it('runs a mutation with a key started after the injector of the service that keeps it is destroyed', () => {
+      const sent: string[] = []
+
+      @Injectable()
+      class Editor {
+        readonly save = injectMutation<string, Error, string>(() => ({
+          mutationKey: ['todos', 'update', 1],
+          mutationFn: (title) => {
+            sent.push(title)
+
+            return of(title)
+          },
+        }))
+      }
+
+      // Such as a route's injector, when the app leaves the route.
+      const injector = createEnvironmentInjector(
+        [Editor],
+        TestBed.inject(EnvironmentInjector),
+      )
+      const editor = injector.get(Editor)
+
+      injector.destroy()
+
+      expect(() => editor.save.mutate('Buy milk')).not.toThrow()
+      expect(sent).toEqual(['Buy milk'])
     })
 
     it('drops a mutation started after the host is destroyed once its request lands', fakeAsync(() => {

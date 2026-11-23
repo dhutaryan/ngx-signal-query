@@ -143,4 +143,4 @@ onError: (_error, _updated, context) => {
 
 Start with **`variables`**. Move to the **cache** approach only when the same change has to appear in more than one place at once, or when the rollback needs to be exact.
 
-> **Note for TanStack Query users.** There's no `injectMutationState` and no `mutationKey` here, so the `variables` approach can't be read from a _different_ component the way it can in TanStack. If the optimistic result must be seen outside the mutation's own component, use the cache approach — it's global by nature.
+> **Note for TanStack Query users.** There's no `injectMutationState` here, so the `variables` approach can't be read from a _different_ component the way it can in TanStack. If the optimistic result must be seen outside the mutation's own component, use the cache approach — it's global by nature.

@@ -1,6 +1,7 @@
 import { TestBed } from '@angular/core/testing'
-import { of, Subject } from 'rxjs'
+import { type Observable, of, Subject } from 'rxjs'
 
+import type { MutationKey } from './mutation'
 import { MutationCache } from './mutation-cache'
 
 describe('MutationCache', () => {
@@ -52,6 +53,85 @@ describe('MutationCache', () => {
       expect(cache.findAll({ status: 'success' }).length).toBe(1)
       expect(cache.findAll({ status: 'pending' }).length).toBe(1)
       expect(cache.findAll({ status: 'idle' }).length).toBe(0)
+    })
+
+    describe('by key', () => {
+      // Built, not started: a run that hasn't started stays in the cache with
+      // no observer.
+      function build(
+        mutationKey?: MutationKey,
+        mutationFn: () => Observable<number> = () => of(1),
+      ) {
+        return cache.build<number, Error, void, unknown>({
+          mutationKey,
+          mutationFn,
+        })
+      }
+
+      function ids(mutations: Array<{ mutationId: number }>): number[] {
+        return mutations.map((mutation) => mutation.mutationId)
+      }
+
+      it("matches the runs whose key starts with the filter's key", () => {
+        const update = build(['todos', 'update', 1])
+        const remove = build(['todos', 'delete', 1])
+
+        build(['users', 'update'])
+        build()
+
+        expect(ids(cache.findAll({ mutationKey: ['todos'] }))).toEqual(
+          ids([update, remove]),
+        )
+        expect(
+          ids(cache.findAll({ mutationKey: ['todos', 'update'] })),
+        ).toEqual(ids([update]))
+        expect(
+          ids(cache.findAll({ mutationKey: ['todos', 'update', 1] })),
+        ).toEqual(ids([update]))
+      })
+
+      it("with exact, matches only an equal key, whatever the order of an object's fields", () => {
+        const title = build(['todos', { id: 1, field: 'title' }])
+
+        build(['todos', { id: 1, field: 'title' }, 'draft'])
+        build(['todos'])
+
+        expect(
+          ids(
+            cache.findAll({
+              mutationKey: ['todos', { field: 'title', id: 1 }],
+              exact: true,
+            }),
+          ),
+        ).toEqual(ids([title]))
+      })
+
+      it("doesn't match a run without a key to a filter with one, even an empty one", () => {
+        const keyed = build(['todos'])
+        const keyless = build()
+
+        expect(ids(cache.findAll({ mutationKey: [] }))).toEqual(ids([keyed]))
+        expect(ids(cache.findAll({}))).toEqual(ids([keyed, keyless]))
+        expect(ids(cache.findAll({ exact: true }))).toEqual(
+          ids([keyed, keyless]),
+        )
+      })
+
+      it('matches the key and the status together', () => {
+        const saving = build(['todos', 'update'], () => new Subject<number>())
+        const saved = build(['todos', 'update'])
+        const other = build(['users', 'update'], () => new Subject<number>())
+
+        // Held, the way injectMutation holds a run, so the one that's done stays.
+        for (const run of [saving, saved, other]) {
+          run.addObserver()
+          run.execute()
+        }
+
+        expect(
+          ids(cache.findAll({ mutationKey: ['todos'], status: 'pending' })),
+        ).toEqual(ids([saving]))
+      })
     })
   })
 

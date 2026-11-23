@@ -8,6 +8,7 @@ import {
   injectMutation,
   mutationOptions,
   withMutationCache,
+  type MutationKey,
   type MutationMeta,
   type MutationSnapshot,
   type MutationState,
@@ -51,7 +52,7 @@ withMutationCache({
   },
 })
 
-// The snapshot holds the state and the meta.
+// The snapshot holds the state, the meta and the key.
 withMutationCache({
   onError: (_error, _variables, _context, mutation) => {
     expectTypeOf(mutation.state).toEqualTypeOf<
@@ -60,6 +61,7 @@ withMutationCache({
     expectTypeOf(mutation.meta).toEqualTypeOf<
       Record<string, unknown> | undefined
     >()
+    expectTypeOf(mutation.mutationKey).toEqualTypeOf<MutationKey | undefined>()
   },
 })
 
@@ -68,6 +70,8 @@ withMutationCache({
   onError: (_error, _variables, _context, mutation) => {
     // @ts-expect-error -- the snapshot can't be changed
     mutation.meta = {}
+    // @ts-expect-error -- nor can its key
+    mutation.mutationKey = ['todos']
     // @ts-expect-error -- nor can its state
     mutation.state.status = 'success'
   },

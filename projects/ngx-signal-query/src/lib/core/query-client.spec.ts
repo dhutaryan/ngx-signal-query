@@ -2335,6 +2335,39 @@ describe('QueryClient', () => {
     })
   })
 
+  describe('isMutating', () => {
+    it('counts the pending runs whose key matches the filters', () => {
+      const cache = client.getMutationCache()
+
+      for (const mutationKey of [
+        ['todos', 'update'],
+        ['todos'],
+        ['users'],
+        undefined,
+      ]) {
+        cache
+          .build<number, Error, void, unknown>({
+            mutationKey,
+            mutationFn: () => new Subject<number>(),
+          })
+          .execute()
+      }
+
+      // A run that's done counts no more, though a component still shows it.
+      const saved = cache.build<number, Error, void, unknown>({
+        mutationKey: ['todos'],
+        mutationFn: () => of(1),
+      })
+
+      saved.addObserver()
+      saved.execute()
+
+      expect(client.isMutating()).toBe(4)
+      expect(client.isMutating({ mutationKey: ['todos'] })).toBe(2)
+      expect(client.isMutating({ mutationKey: ['todos'], exact: true })).toBe(1)
+    })
+  })
+
   // An effect that calls the client should depend only on what it reads
   // itself. What the call reads to do its job, the cache or a query's state,
   // mustn't become a dependency of the effect, or the call repeats whenever

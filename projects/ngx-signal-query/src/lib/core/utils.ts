@@ -13,7 +13,8 @@ export function functionalUpdate<TInput, TOutput>(
 }
 
 // True when `filter` is a (deep) prefix of `key`, e.g. ['app'] matches
-// ['app', 1]. Used to invalidate/find groups of queries by partial key.
+// ['app', 1]. Used to find groups of queries, and of mutations, by partial
+// key.
 /** @internal */
 export function partialMatchKey(key: QueryKey, filter: QueryKey): boolean {
   return partialDeepEqual(key, filter)

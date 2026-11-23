@@ -7,6 +7,7 @@ import {
 } from '@angular/core/testing'
 import { Subject } from 'rxjs'
 
+import { mountHost } from '../../spec-helpers/host'
 import { injectIsFetching } from './inject-is-fetching'
 import { injectQueries } from './inject-queries'
 import { injectQuery } from './inject-query'
@@ -73,6 +74,47 @@ describe('injectIsFetching', () => {
 
     expect(all()).toBe(3)
     expect(aOnly()).toBe(2)
+  })
+
+  describe('filters as a function', () => {
+    it('counts only the matching queries', () => {
+      const todos = injectIsFetching(() => ({ queryKey: ['todos'] }), {
+        injector,
+      })
+      const exactly = injectIsFetching(
+        () => ({ queryKey: ['todos'], exact: true }),
+        { injector },
+      )
+
+      client.fetchQuery(['todos'], () => new Subject<number>())
+      client.fetchQuery(['todos', 1], () => new Subject<number>())
+      client.fetchQuery(['users'], () => new Subject<number>())
+
+      expect(todos()).toBe(2)
+      expect(exactly()).toBe(1)
+    })
+
+    it('lets a component count the fetches of its own todo, with an input in the key', () => {
+      const {
+        created: fetching,
+        value,
+        fixture,
+      } = mountHost(
+        (id) => injectIsFetching(() => ({ queryKey: ['todo', id()] })),
+        1,
+      )
+
+      client.fetchQuery(['todo', 1], () => new Subject<number>())
+      client.fetchQuery(['todo', 2], () => new Subject<number>())
+      client.fetchQuery(['todo', 2, 'comments'], () => new Subject<number>())
+
+      expect(fetching()).toBe(1)
+
+      value.set(2)
+      fixture.detectChanges()
+
+      expect(fetching()).toBe(2)
+    })
   })
 
   // A query is created on the first read of its result, so a computed that
