@@ -13,7 +13,7 @@ import {
 } from './query'
 import { QueryCache } from './query-cache'
 import { MutationCache } from './mutation-cache'
-import type { MutationOptions } from './mutation'
+import type { MutationFilters, MutationOptions } from './mutation'
 import { defaultRetryDelay } from './retryer'
 import { functionalUpdate, whenAllSettled } from './utils'
 import type {
@@ -631,13 +631,17 @@ export class QueryClient {
   }
 
   /**
-   * Returns the number of mutations currently pending. A snapshot: it doesn't
-   * update a template, a `computed` or an effect. For a count that updates,
-   * use {@link injectIsMutating}.
+   * Returns the number of matching mutations currently pending. A snapshot:
+   * it doesn't update a template, a `computed` or an effect. For a count that
+   * updates, use {@link injectIsMutating}.
+   *
+   * @param filters - Which mutations to count, by their key (see
+   *   {@link MutationFilters}); omit to count all.
    */
-  isMutating(): number {
+  isMutating(filters?: Omit<MutationFilters, 'status'>): number {
     return untracked(
-      () => this.#mutationCache.findAll({ status: 'pending' }).length,
+      () =>
+        this.#mutationCache.findAll({ ...filters, status: 'pending' }).length,
     )
   }
 

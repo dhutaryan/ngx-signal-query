@@ -97,7 +97,7 @@ provideQueryClient(
 )
 ```
 
-`variables` and `context` are the run's: `context` is what the mutation's own `onMutate` returned, and what the global `onMutate` returns is dropped. `mutation` holds the run's `state`, still `'pending'` while the hooks run, and its `meta`.
+`variables` and `context` are the run's: `context` is what the mutation's own `onMutate` returned, and what the global `onMutate` returns is dropped. `mutation` holds the run's `state`, still `'pending'` while the hooks run, its `meta`, and its `mutationKey`, if it has one.
 
 As with the mutation's own hooks, a callback that returns a promise holds the run: the mutation stays `'pending'`, and `mutateAsync()` settles, once it's done.
 
@@ -201,4 +201,4 @@ Nothing waits for a promise that a **query** callback returns: by the time it's 
 
 They work together: the global callback first, then the mutation's own hook, or the default one if it has none.
 
-If you come from TanStack Query: these are its `QueryCache` and `MutationCache` callbacks, given to the client as features. The differences: a callback that throws here, other than `onMutate`, goes to the `ErrorHandler` and leaves the outcome as it is; `query` and `mutation` are snapshots, with no `options`; and `meta` reaches only the callbacks, not `queryFn` or `mutationFn`.
+If you come from TanStack Query: these are its `QueryCache` and `MutationCache` callbacks, given to the client as features. The differences: a callback that throws here, other than `onMutate`, goes to the `ErrorHandler` and leaves the outcome as it is; `query` and `mutation` are snapshots, with no `options` (a mutation's key is `mutation.mutationKey`); and `meta` reaches only the callbacks, not `queryFn` or `mutationFn`.

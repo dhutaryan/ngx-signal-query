@@ -33,6 +33,16 @@ protected readonly todosLoading = injectIsFetching({ queryKey: ['todos'] })
 
 So one page can show a spinner for _its_ data while the global bar tracks everything.
 
+Pass a function instead when the filters read a signal or an input. It's read the way a query's options are, so the count follows them:
+
+```ts
+// The fetches of the todo this page shows
+readonly id = input.required<number>()
+protected readonly todoLoading = injectIsFetching(() => ({
+  queryKey: ['todo', this.id()],
+}))
+```
+
 ## `injectIsMutating`
 
 The write-side counterpart — a **signal of how many mutations are currently pending**:
@@ -57,7 +67,21 @@ Handy for a global "saving…" indicator, or to warn before navigating away whil
 
 A mutation counts until its hooks are done, so an async `onSuccess` in its options keeps the indicator on.
 
-Unlike `injectIsFetching`, it takes **no filters** — it always counts mutations in the `'pending'` state, nothing else. Mutations have no key to scope by, and "how many writes are in flight" is the one question a global indicator asks.
+### Scoping it with a key
+
+Give the mutations a [`mutationKey`](/mutations/mutation-options#naming-a-mutation-mutationkey), and pass a function that returns [filters](/query-client/filters#mutation-filters) to count only some of them. A todo's row can show "Saving…" for its own todo, wherever the write starts: in the row, a dialog or a service:
+
+```ts
+export class TodoRow {
+  readonly todo = input.required<Todo>()
+
+  protected readonly saving = injectIsMutating(() => ({
+    mutationKey: ['todos', 'update', this.todo().id],
+  }))
+}
+```
+
+The function is read the way a query's options are, so it can read the input, and the count follows it. A write counts under the key it was started with. Only pending writes count, so the filters take no `status`. Outside an injection context, pass an injector after them: `injectIsMutating(() => filters, { injector })`.
 
 ## They're just signals
 

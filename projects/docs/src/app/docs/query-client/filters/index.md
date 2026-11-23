@@ -44,12 +44,29 @@ Prefix matching is the same rule keys are hashed by, so property order inside an
 
 So the same `{ queryKey: ['todos'] }` can invalidate the todo family, or count just the todo requests in flight — one filter, many uses.
 
-## Mutations aren't filtered
+## Mutation filters
 
-Queries are the only thing you filter. Mutations have no key, so there's nothing to match by prefix — and the one place you might expect a mutation filter, [`injectIsMutating`](/query-client/global-indicators), doesn't take one. It always counts mutations in the `'pending'` state, which is the only question a global "saving…" indicator asks.
+Mutations are filtered by their [`mutationKey`](/mutations/mutation-options#naming-a-mutation-mutationkey), the same way:
 
-(There is a `MutationFilters` type with a `status` field, but no public API accepts it — it's used internally.)
+```ts
+type MutationFilters = {
+  mutationKey?: MutationKey // which keys to match
+  exact?: boolean // match this key exactly, instead of by prefix
+  status?: MutationStatus // not where only pending ones count
+}
+```
+
+`mutationKey` matches by prefix, and `exact: true` turns that off, as for queries. A mutation without a key never matches a filter that has one, not even `mutationKey: []`. A write is matched by the key its options gave when `mutate()` was called.
+
+### Where mutation filters are used
+
+| API                               | Effect on the matched mutations |
+| --------------------------------- | ------------------------------- |
+| `injectIsMutating(() => filters)` | count how many are pending      |
+| `isMutating(filters?)`            | the same, once                  |
+
+Both count pending mutations only, so they take no `status`. `injectIsMutating` takes the filters as a function, which can read an input (see [Global Indicators](/query-client/global-indicators#scoping-it-with-a-key)); `isMutating()` takes them as a value.
 
 ## A note if you're coming from TanStack Query
 
-Query filters here are deliberately small. TanStack lets you match by `predicate`, by active/inactive status, by staleness, by fetch status. None of that exists — filters are `queryKey` + `exact`. If you need to select a subset those can't express, structure your **keys** so a prefix covers it instead.
+Query filters here are deliberately small. TanStack lets you match by `predicate`, by active/inactive status, by staleness, by fetch status. None of that exists — query filters are `queryKey` + `exact`, and mutation filters `mutationKey` + `exact`. If you need to select a subset those can't express, structure your **keys** so a prefix covers it instead.

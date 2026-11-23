@@ -33,11 +33,25 @@ import { requestOutsideZone } from './zone'
 export type MutationStatus = 'idle' | 'pending' | 'success' | 'error'
 
 /**
- * Selects mutations by status, for the library's own lookups. No public API
- * takes it, `injectIsMutating` included.
+ * Names a mutation, the way a query key names a query: an array, from broad
+ * to specific, such as `['todos', 'update']`. Filters match runs by it (see
+ * {@link MutationFilters}).
+ */
+export type MutationKey = readonly unknown[]
+
+/**
+ * Selects mutations by their key and status. {@link injectIsMutating} and
+ * `isMutating()` take it without `status`, since they count pending runs.
  */
 export type MutationFilters = {
-  /** Match mutations in this status. */
+  /**
+   * Match the runs whose key starts with this key, or, with `exact`, equals
+   * it. A run without a key doesn't match.
+   */
+  mutationKey?: MutationKey
+  /** Require an exact key match instead of a prefix match. */
+  exact?: boolean
+  /** Match runs in this status. */
   status?: MutationStatus
 }
 
@@ -95,6 +109,19 @@ export type MutationOptions<TData, TError, TVariables, TContext> = {
    * called from: in the zone for a click handler.
    */
   mutationFn: (variables: TVariables) => Observable<TData> | Promise<TData>
+  /**
+   * Names the mutation, so that filters, such as those {@link injectIsMutating}
+   * takes, can pick out its runs (see {@link MutationFilters}). Each run keeps
+   * the key the options give when `mutate()` is called.
+   *
+   * A key that changes, such as one with an input in it on a page that the
+   * router keeps for the next item, resets the mutation the way `reset()`
+   * does: the signals go back to `'idle'`, and a run in flight goes on and
+   * fires its hooks. The callbacks passed to a `mutate()` aren't called if,
+   * once its run is done, the options give another key than the call was
+   * made under. A mutation without a key is never reset this way.
+   */
+  mutationKey?: MutationKey
   /** Retry policy. Defaults to no retry (writes are not idempotent). */
   retry?: RetryValue<TError>
   /** Delay between retries. See {@link RetryDelayValue}. */
@@ -143,7 +170,8 @@ export type MutationOptions<TData, TError, TVariables, TContext> = {
 /**
  * A run of a mutation, as a cache callback gets it (see
  * {@link withMutationCache}): its state when the callback runs, still
- * `'pending'` while the hooks run, and the `meta` of its options.
+ * `'pending'` while the hooks run, and the `meta` and `mutationKey` of its
+ * options.
  */
 export type MutationSnapshot<
   TData = unknown,
@@ -155,6 +183,11 @@ export type MutationSnapshot<
   readonly state: Readonly<MutationState<TData, TError, TVariables, TContext>>
   /** The `meta` of the mutation's options, if they have one. */
   readonly meta: MutationMeta | undefined
+  /** The `mutationKey` of the mutation's options, if they have one. */
+  // Optional, unlike meta: an app's test that builds a snapshot by hand
+  // still compiles, the way it did before keys (see Mutation#snapshot for
+  // the one a callback gets).
+  readonly mutationKey?: MutationKey
 }
 
 /**
@@ -167,9 +200,11 @@ export type MutationSnapshot<
  * {@link withMutationCache} and the mutation's own hooks, with the outcome
  * already in the signals, and before the promise of `mutateAsync()` settles.
  * Every call gets its own, with its own outcome, also one that a later call
- * or `reset()` came after. None of them is called if the mutation's host,
- * the component or service where {@link injectMutation} ran, is destroyed
- * before the run is done; the mutation's own hooks still run. Nothing waits
+ * or `reset()` came after. None of them is called if, once the run is done,
+ * the mutation's host, the component or service where {@link injectMutation}
+ * ran, is destroyed, or the options give another `mutationKey` than the call
+ * was made under (see {@link MutationOptions}); the mutation's own hooks
+ * still run. Nothing waits
  * for a promise one returns. What one throws, or what such a promise rejects
  * with, goes to the app's `ErrorHandler`: the outcome and the other
  * callbacks stay as they are.
@@ -342,6 +377,11 @@ export class Mutation<
     this.#callbacks = callbacks
   }
 
+  /** The key of the run's options, which filters match it by. */
+  get mutationKey(): MutationKey | undefined {
+    return this.#options.mutationKey
+  }
+
   get observerCount(): number {
     return this.#observers
   }
@@ -403,12 +443,7 @@ export class Mutation<
     // pending, and in the cache, until its last hook is done. Nothing stops
     // it before that: the write has most likely reached the server (see
     // removeObserver), so clearing the cache only forgets the run.
-    awaitHook(() =>
-      this.#callbacks.onMutate?.(variables, {
-        state: this.state(),
-        meta: this.#options.meta,
-      }),
-    )
+    awaitHook(() => this.#callbacks.onMutate?.(variables, this.#snapshot()))
       .pipe(
         // Only the mutation's own onMutate makes the context.
         concatMap(() => awaitHook(() => this.#options.onMutate?.(variables))),
@@ -504,9 +539,9 @@ export class Mutation<
     variables: TVariables,
   ): Observable<never> {
     const { context } = this.state()
-    // The run as the app's callbacks get it. Its state stays as it is until
-    // the hooks are done: the outcome is written after them.
-    const mutation = { state: this.state(), meta: this.#options.meta }
+    // One snapshot serves all four hooks: the run's state doesn't change
+    // until they're done, since the outcome is written after them.
+    const mutation = this.#snapshot()
 
     return concat(
       runHook(this.#reportError, () =>
@@ -577,6 +612,22 @@ export class Mutation<
         callbacks.onSettled?.(outcome.data, outcome.error, variables, context),
       ),
     ).subscribe()
+  }
+
+  /**
+   * What the app's callbacks get of the run: its current state, and the
+   * meta and key of its options. A run without a key gets no `mutationKey`
+   * field, so its snapshot is what it was before keys: an app's test that
+   * compares a whole snapshot still passes.
+   */
+  #snapshot(): MutationSnapshot<TData, TError, TVariables, TContext> {
+    const { meta, mutationKey } = this.#options
+
+    return {
+      state: this.state(),
+      meta,
+      ...(mutationKey && { mutationKey }),
+    }
   }
 
   /**

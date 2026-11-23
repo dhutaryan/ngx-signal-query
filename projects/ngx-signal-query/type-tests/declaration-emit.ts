@@ -9,6 +9,7 @@ import {
   infiniteQueryOptions,
   injectInfiniteQuery,
   injectQuery,
+  mutationOptions,
   queryOptions,
 } from 'ngx-signal-query'
 
@@ -40,6 +41,12 @@ export const todoPages = infiniteQueryOptions({
 // A key on its own, and a definition with an option changed.
 export const todosKey = todos.queryKey
 export const freshTodos = { ...todos, staleTime: 60_000 }
+
+// A mutation's definition with its key, whose type names MutationKey.
+export const updateTodo = mutationOptions({
+  mutationKey: ['todos', 'update'],
+  mutationFn: (todo: Todo) => http.put<Todo>(`/api/todos/${todo.id}`, todo),
+})
 
 // A service whose methods return definitions, as the docs keep queries.
 @Injectable({ providedIn: 'root' })

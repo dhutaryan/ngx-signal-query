@@ -27,18 +27,18 @@ export class AddTodoComponent {
 }
 ```
 
-`mutationFn` takes whatever you pass to `mutate()` and returns an `Observable` or a `Promise`, same as a `queryFn`. There's no key: a mutation isn't stored in the cache.
+`mutationFn` takes whatever you pass to `mutate()` and returns an `Observable` or a `Promise`, same as a `queryFn`. A mutation needs no key: its result isn't cached for others to read, the way a query's data is. Give it a [`mutationKey`](/mutations/mutation-options#naming-a-mutation-mutationkey) only to tell its writes apart from others, such as for a "Saving…" that counts one kind.
 
 ## Mutation states
 
 A mutation has **four** states — one more than a query, because it starts out having done nothing at all:
 
-| `status()`  | meaning                                           |
-| ----------- | ------------------------------------------------- |
-| `'idle'`    | not run yet (or `reset()` was called)             |
-| `'pending'` | running right now                                 |
+| `status()` | meaning |
+| --- | --- |
+| `'idle'` | not run yet (or `reset()` was called, or [its key changed](#when-the-key-changes)) |
+| `'pending'` | running right now |
 | `'success'` | the last run succeeded; `data()` holds the result |
-| `'error'`   | the last run failed; `error()` holds the failure  |
+| `'error'` | the last run failed; `error()` holds the failure |
 
 The matching booleans are `isIdle()`, `isPending()`, `isSuccess()` and `isError()`.
 
@@ -82,6 +82,27 @@ The result of a mutation sticks around after it finishes. `reset()` puts it back
 Useful for clearing an error banner, or resetting a form after a successful save.
 
 `reset()` means _"forget the result"_, not _"stop the request"_. If a mutation is still in flight when you call it, the signals go back to `'idle'` but the write itself carries on, and its hooks and the [call's callbacks](#callbacks-for-one-call) still fire. That's deliberate — the request has probably reached the server already, and aborting it wouldn't un-send the write, it would only stop the cache from finding out that it happened.
+
+### When the key changes
+
+A mutation with a [`mutationKey`](/mutations/mutation-options#naming-a-mutation-mutationkey) that reads an input resets itself when that key changes. Say the router keeps a todo's page as the user moves on to the next todo:
+
+```ts
+export class TodoPage {
+  readonly #http = inject(HttpClient)
+  readonly id = input.required<number>()
+
+  protected readonly save = injectMutation(() => ({
+    mutationKey: ['todos', 'update', this.id()],
+    mutationFn: (todo: Todo) =>
+      this.#http.put<Todo>(`/api/todos/${todo.id}`, todo),
+  }))
+}
+```
+
+Once `id` changes, `save` reads as `'idle'`, the way it does after `reset()`: the page never sees how saving the previous todo went, in its template or in its effects. A save still in flight carries on and fires its hooks, and `injectIsMutating()` counts it under the key it was started with. The [callbacks passed to its `mutate()`](#callbacks-for-one-call) don't run, though: by the time it's done, the page shows another todo. The same goes for a mutation that a service holds, with a signal in its key, such as a store whose id the page sets from its input.
+
+An equal key, though made anew, changes nothing, and neither do options that give no key for a while, such as while the next todo loads. A mutation without a key keeps showing its last run until the next `mutate()` or `reset()`.
 
 ## Side effects
 
@@ -155,6 +176,7 @@ They come with a few rules:
 
 - **Every call gets its own.** Two calls in flight each get their callbacks, with their own outcome, though the signals show only the latest call. `reset()` and the client's `clear()` don't drop them either: the write happened.
 - **They belong to the component that created the mutation.** If it's destroyed before the run is done, its hooks included, the callbacks don't run, while the hooks still do. That's the component where `injectMutation()` ran, not the one that called `mutate()`: for a mutation that a service holds, they run as long as the service is there. To have them stop with a dialog, create the mutation in the dialog, from the service's [definition](/mutations/mutation-options).
+- **And to the key the call was made under.** With a `mutationKey`, they don't run if, by the time the run is done, the options give another key: the component shows [another item](#when-the-key-changes) by then, and marking a form saved or navigating away would act on the wrong one. The hooks still run.
 - **Nothing waits for them.** By the time they're called, the mutation is no longer pending, and `mutateAsync()` settles right after them. A promise one returns isn't waited for.
 - **A failing one changes nothing else.** What one throws, or what a promise it returns rejects with, goes to the app's `ErrorHandler`, as with a failing hook. The outcome and the other callbacks stay as they are.
 

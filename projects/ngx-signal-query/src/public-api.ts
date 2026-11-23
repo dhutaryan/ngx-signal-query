@@ -20,6 +20,7 @@ export * from './lib/core/cancelled-error'
 export type {
   MutateOptions,
   MutationFilters,
+  MutationKey,
   MutationOptions,
   MutationResult,
   MutationSnapshot,

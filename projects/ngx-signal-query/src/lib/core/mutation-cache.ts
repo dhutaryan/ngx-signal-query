@@ -4,11 +4,13 @@ import { Cache } from './cache'
 import { injectHostApp } from './host-app'
 import {
   type MutationFilters,
+  type MutationKey,
   type MutationOptions,
   Mutation,
 } from './mutation'
 import { injectMutationCacheCallbacks } from './mutation-cache-callbacks'
 import { lazyPendingTasks } from './pending-tasks'
+import { hashKey, partialMatchKey } from './utils'
 
 /** @internal */
 @Injectable()
@@ -48,12 +50,17 @@ export class MutationCache extends Cache<
   findAll(
     filters: MutationFilters = {},
   ): Array<Mutation<unknown, unknown, unknown, unknown>> {
+    const { status } = filters
+
     // Reads the reactive `entries()` so findAll() works inside computed().
-    const all = this.entries()
-
-    if (!filters.status) return all
-
-    return all.filter((mutation) => mutation.state().status === filters.status)
+    // The key is checked before the state, so a computed tracks the state of
+    // only the runs whose key matches: a run's key never changes, so no other
+    // run can come to match.
+    return this.entries().filter(
+      (mutation) =>
+        matchesKey(mutation.mutationKey, filters) &&
+        (!status || mutation.state().status === status),
+    )
   }
 
   remove<TData, TError, TVariables, TContext>(
@@ -61,4 +68,19 @@ export class MutationCache extends Cache<
   ): void {
     this.removeEntry(String(mutation.mutationId))
   }
+}
+
+// Whether a run's key matches the filters, the way a query's key does: it
+// starts with the filters' key or, with `exact`, equals it. A run without a
+// key matches only filters without one.
+function matchesKey(
+  key: MutationKey | undefined,
+  { mutationKey, exact }: MutationFilters,
+): boolean {
+  if (!mutationKey) return true
+  if (!key) return false
+
+  return exact
+    ? hashKey(key) === hashKey(mutationKey)
+    : partialMatchKey(key, mutationKey)
 }
