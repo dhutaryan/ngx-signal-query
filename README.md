@@ -8,8 +8,10 @@ A data fetching, caching and mutation library for Angular, built on signals and 
 
 - 🔌 **Observables end to end.** Return `http.get()` from a `queryFn` or `mutationFn`. For a query, unsubscribing is the cancellation: once no component needs it, the request is aborted, with no `AbortSignal` plumbing.
 - 🅰️ **Angular all the way down.** State is signals, configuration is `provideQueryClient(withDefaultOptions(...))`, and default mutation hooks run in an injection context, so a global `onError` can `inject()` what it needs.
+- 🎯 **Reliable mutations.** Callbacks passed to `mutate()` run for every call, not only the latest one, so two deletes in flight each get their own `onSuccess`. A hook that throws doesn't turn a saved write into an error: the mutation still ends in `'success'`, and the error goes to your app's `ErrorHandler`.
+- 🧪 **Tests like any `HttpClient` service.** Flush a request with `HttpTestingController` and check `data()` on the next line, with no `await`.
 - 🪶 **Small.** Tree-shakable ESM, no runtime dependencies beyond `tslib`.
-- 🧭 **Familiar concepts.** `queryKey`, `staleTime`, `invalidateQueries` and `placeholderData` mean what you'd expect. Moving to TanStack Query later is mostly mechanical: wrap Observables in `lastValueFrom` and swap the provider.
+- 🧭 **Familiar concepts.** `queryKey`, `staleTime`, `invalidateQueries` and `placeholderData` mean what you'd expect.
 
 ## Features
 
