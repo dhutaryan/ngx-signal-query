@@ -99,7 +99,7 @@ it('invalidates todos on success', () => {
 
 ## Naming a mutation: `mutationKey`
 
-A definition can name its mutation with a `mutationKey`, an array like a query key, from broad to specific. It's optional: a mutation runs the same without one. Give it one to tell its writes apart from the others: for a "Saving…" that counts only some of them (see [Global Indicators](/query-client/global-indicators#scoping-it-with-a-key)), or for the [global callbacks](/query-client/global-callbacks), which get it as `mutation.mutationKey`.
+A definition can name its mutation with a `mutationKey`, an array like a query key, from broad to specific. It's optional: a mutation runs the same without one. Give it one to tell its writes apart from the others: for a "Saving…" that counts only some of them (see [Global Indicators](/query-client/global-indicators#scoping-it-with-a-key)), for a list of the ones in flight in another component (see [`injectMutationState`](/query-client/global-indicators#injectmutationstate)), or for the [global callbacks](/query-client/global-callbacks), which get it as `mutation.mutationKey`.
 
 ```ts
 updateTodo() {

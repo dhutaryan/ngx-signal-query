@@ -76,7 +76,7 @@ export class TodosComponent {
 
 Clicking to the next page then shows its rows at once, while they refetch in the background. A mutation's `mutate()`, `mutateAsync()` and `reset()`, and a query's `refetch()`, are just as safe in an effect.
 
-The flip side: a read is a **snapshot**. `getQueryData()`, `isFetching()` and `isMutating()` return the value as it is when you call them, and a template, a `computed` or an effect that calls them doesn't update when it changes. For state that updates, use `injectQuery` — with `enabled: false` if you only want to watch what's in the cache — and `injectIsFetching()` / `injectIsMutating()`.
+The flip side: a read is a **snapshot**. `getQueryData()`, `isFetching()` and `isMutating()` return the value as it is when you call them, and a template, a `computed` or an effect that calls them doesn't update when it changes. For state that updates, use `injectQuery` — with `enabled: false` if you only want to watch what's in the cache — and `injectIsFetching()` / `injectIsMutating()`, or `injectMutationState()` for the writes themselves.
 
 ## For loading indicators, prefer the signals
 

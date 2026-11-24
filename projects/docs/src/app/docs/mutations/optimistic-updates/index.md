@@ -49,7 +49,40 @@ export class TodosComponent {
 
 The dimmed row appears the instant you submit, and when the refetch lands the real todo takes its place — no flicker, because the row was there the whole time. On error there's nothing to undo: the optimistic row simply isn't in the cache to begin with.
 
-This is the approach to reach for first. It's less code and easier to reason about — **when the optimistic result only needs to show in one place.** Because it reads the mutation's own `variables()`, it's local to the component that owns the mutation.
+This is the approach to reach for first. It's less code and easier to reason about — **when the optimistic result only needs to show in one place.** Because it reads the mutation's own `variables()`, it's local to the component that owns the mutation, unless another component reads them as below.
+
+### From another component
+
+When the todo is added somewhere else, such as in a dialog, give the mutation a [`mutationKey`](/mutations/mutation-options#naming-a-mutation-mutationkey), and let the list read the titles being added with [`injectMutationState`](/query-client/global-indicators#injectmutationstate):
+
+```ts
+// In the dialog:
+protected readonly addTodo = injectMutation(() => ({
+  mutationKey: ['todos', 'add'],
+  mutationFn: (title: string) =>
+    this.#http.post<Todo>('/api/todos', { title }),
+  // Returned, so the add stays pending until the list has the new todo.
+  onSettled: () => this.#client.invalidateQueries({ queryKey: ['todos'] }),
+}))
+
+// In the list:
+protected readonly adding = injectMutationState(() => ({
+  filters: { mutationKey: ['todos', 'add'], status: 'pending' },
+  select: (mutation) => mutation.state.variables as string,
+}))
+```
+
+{% raw %}
+
+```html
+@for (title of adding(); track $index) {
+  <li style="opacity: 0.5">{{ title }}</li>
+}
+```
+
+{% endraw %}
+
+An add shows in the list while it's in flight, also once the dialog is closed, and leaves it when it's done: the refetched list has the todo by then. If it fails, the dimmed row just goes away, so report the failure from the mutation's own `onError`, which runs even after the dialog is gone.
 
 ## Approach 2: writing to the cache
 
@@ -135,12 +168,12 @@ onError: (_error, _updated, context) => {
 
 ## Which to use
 
-|             | `variables`   | cache                      |
-| ----------- | ------------- | -------------------------- |
-| code        | minimal       | more                       |
-| rollback    | none needed   | manual snapshot            |
-| shows up in | one component | everywhere the key is read |
+|             | `variables`                    | cache                      |
+| ----------- | ------------------------------ | -------------------------- |
+| code        | minimal                        | more                       |
+| rollback    | none needed                    | manual snapshot            |
+| shows up in | where you render the variables | everywhere the key is read |
 
-Start with **`variables`**. Move to the **cache** approach only when the same change has to appear in more than one place at once, or when the rollback needs to be exact.
+Start with **`variables`**. Move to the **cache** approach only when everything that reads the data has to show the change, such as a counter and a detail view as well as the list, or when the rollback needs to be exact.
 
-> **Note for TanStack Query users.** There's no `injectMutationState` here, so the `variables` approach can't be read from a _different_ component the way it can in TanStack. If the optimistic result must be seen outside the mutation's own component, use the cache approach — it's global by nature.
+> **Note for TanStack Query users.** `injectMutationState` lists what the mutation cache holds: the writes in flight and the outcome that each mutation still shows. A write that's done isn't kept for a `gcTime` after that, so the list has no history of the writes that went through.

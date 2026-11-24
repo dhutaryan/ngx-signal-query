@@ -5,6 +5,7 @@ import type { HttpClient } from '@angular/common/http'
 import { expectTypeOf } from 'expect-type'
 import {
   injectMutation,
+  injectMutationState,
   mutationOptions,
   withMutationCache,
   type MutationMeta,
@@ -34,6 +35,15 @@ withMutationCache({
     expectTypeOf(mutation.meta).toEqualTypeOf<AppMutationMeta | undefined>()
   },
 })
+
+// So does injectMutationState's select.
+injectMutationState(() => ({
+  select: (mutation) => {
+    expectTypeOf(mutation.meta).toEqualTypeOf<AppMutationMeta | undefined>()
+
+    return mutation.meta?.invalidates
+  },
+}))
 
 // A mutation's meta must fit it.
 mutationOptions({

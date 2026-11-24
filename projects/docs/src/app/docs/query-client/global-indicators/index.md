@@ -1,4 +1,4 @@
-A single query's `isFetching()` tells you about that query. Sometimes you want the whole picture instead — "is _anything_ loading?" for a top-bar spinner, or "is _anything_ saving?" for a global "unsaved changes" guard. Two helpers give you exactly that, as signals.
+A single query's `isFetching()` tells you about that query. Sometimes you want the whole picture instead — "is _anything_ loading?" for a top-bar spinner, or "is _anything_ saving?" for a global "unsaved changes" guard. Two helpers give you exactly that, as signals, and a third lists the writes behind the count.
 
 ## `injectIsFetching`
 
@@ -83,9 +83,47 @@ export class TodoRow {
 
 The function is read the way a query's options are, so it can read the input, and the count follows it. A write counts under the key it was started with. Only pending writes count, so the filters take no `status`. Outside an injection context, pass an injector after them: `injectIsMutating(() => filters, { injector })`.
 
+## `injectMutationState`
+
+The counters say how many writes are in flight; `injectMutationState` says which. It's a **signal of the runs that match the filters**, whichever component or service started them, in the order they started. Each item is the run's state, or what `select` returns for it. Here a list marks the todos being deleted, from its own rows, a dialog or a service:
+
+```ts
+export class TodoList {
+  protected readonly deletingIds = injectMutationState(() => ({
+    filters: { mutationKey: ['todos', 'delete'], status: 'pending' },
+    select: (mutation) => mutation.state.variables as number,
+  }))
+}
+```
+
+{% raw %}
+
+```html
+@for (todo of todos.data() ?? []; track todo.id) {
+  <li [class.deleting]="deletingIds().includes(todo.id)">{{ todo.title }}</li>
+}
+```
+
+{% endraw %}
+
+`select` gets each run the way the [global callbacks](/query-client/global-callbacks) do: its `state`, `meta` and `mutationKey`. The filters can match any mutation, so its types are `unknown` there. Say what you expect with `as`, as above, or in the type of its parameter: `(mutation: MutationSnapshot<void, Error, number>) => mutation.state.variables` gives `number | undefined`. Nothing checks either against the mutations the filters match. Without `select`, each item is the run's state.
+
+The filters take a `status`, unlike those of the counters, and a definition's key fits them, such as `this.#todos.remove().mutationKey`. They're a function, read the way a query's options are, so they can use an input, and the list follows it. Outside an injection context, pass an injector after them, as for `injectIsMutating`.
+
+### What it lists
+
+It lists what the mutation cache holds:
+
+- **every write in flight**, its hooks included, until `clear()` forgets it. A hook that returns `invalidateQueries()` keeps its write listed until the list is fresh, so a deleted row keeps its mark until it's gone;
+- **the run that each `injectMutation()` still shows**, with its outcome: its latest run, until its next `mutate()` or `reset()`, a change of its key, or the destroy of the component or service where it ran.
+
+A run that's done and that no mutation shows leaves the list at once: it isn't a history of writes. A write sent from a dialog that's closed at once stays listed while it's in flight, but not once it's failed. What has to outlive the component that started a write, such as a message about how it went, belongs in the mutation's own hooks, which run either way.
+
+Like `data()`, the list stays the same array while the same runs are listed with equal items, and an item keeps its reference while it's equal and its run is still listed, even once a run before it leaves. So `includes()` finds the object a write was started with, and `@for` keeps the rows of the writes that stay.
+
 ## They're just signals
 
-Both return plain `Signal<number>`, so they compose like any other signal — no subscriptions, no async pipe. Combine them, derive from them, read them in a `computed`:
+All three return plain signals, so they compose like any other signal — no subscriptions, no async pipe. Combine them, derive from them, read them in a `computed`:
 
 ```ts
 // "The app is busy" — either reading or writing
