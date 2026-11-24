@@ -60,13 +60,14 @@ type MutationFilters = {
 
 ### Where mutation filters are used
 
-| API                               | Effect on the matched mutations |
-| --------------------------------- | ------------------------------- |
-| `injectIsMutating(() => filters)` | count how many are pending      |
-| `isMutating(filters?)`            | the same, once                  |
+| API | Effect on the matched mutations |
+| --- | --- |
+| `injectIsMutating(() => filters)` | count how many are pending |
+| `isMutating(filters?)` | the same, once |
+| `injectMutationState(() => ({ filters }))` | list them: their states, or what `select` returns |
 
-Both count pending mutations only, so they take no `status`. `injectIsMutating` takes the filters as a function, which can read an input (see [Global Indicators](/query-client/global-indicators#scoping-it-with-a-key)); `isMutating()` takes them as a value.
+`injectIsMutating` and `isMutating()` count pending mutations only, so they take no `status`; `injectMutationState` takes it. The two `inject` functions take the filters in a function, which can read an input (see [Global Indicators](/query-client/global-indicators#scoping-it-with-a-key)); `isMutating()` takes them as a value.
 
 ## A note if you're coming from TanStack Query
 
-Query filters here are deliberately small. TanStack lets you match by `predicate`, by active/inactive status, by staleness, by fetch status. None of that exists — query filters are `queryKey` + `exact`, and mutation filters `mutationKey` + `exact`. If you need to select a subset those can't express, structure your **keys** so a prefix covers it instead.
+Query filters here are deliberately small. TanStack lets you match by `predicate`, by active/inactive status, by staleness, by fetch status. None of that exists — query filters are `queryKey` + `exact`, and mutation filters `mutationKey` + `exact`, with `status` for `injectMutationState`. If you need to select a subset those can't express, structure your **keys** so a prefix covers it instead.

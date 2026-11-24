@@ -27,7 +27,7 @@ export class AddTodoComponent {
 }
 ```
 
-`mutationFn` takes whatever you pass to `mutate()` and returns an `Observable` or a `Promise`, same as a `queryFn`. A mutation needs no key: its result isn't cached for others to read, the way a query's data is. Give it a [`mutationKey`](/mutations/mutation-options#naming-a-mutation-mutationkey) only to tell its writes apart from others, such as for a "Saving…" that counts one kind.
+`mutationFn` takes whatever you pass to `mutate()` and returns an `Observable` or a `Promise`, same as a `queryFn`. A mutation needs no key: nothing looks its result up by key, the way components look up a query's data. Give it a [`mutationKey`](/mutations/mutation-options#naming-a-mutation-mutationkey) only to tell its writes apart from others, such as for a "Saving…" that counts one kind, or to list the ones in flight in another component.
 
 ## Mutation states
 

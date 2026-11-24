@@ -201,4 +201,4 @@ Nothing waits for a promise that a **query** callback returns: by the time it's 
 
 They work together: the global callback first, then the mutation's own hook, or the default one if it has none.
 
-If you come from TanStack Query: these are its `QueryCache` and `MutationCache` callbacks, given to the client as features. The differences: a callback that throws here, other than `onMutate`, goes to the `ErrorHandler` and leaves the outcome as it is; `query` and `mutation` are snapshots, with no `options` (a mutation's key is `mutation.mutationKey`); and `meta` reaches only the callbacks, not `queryFn` or `mutationFn`.
+If you come from TanStack Query: these are its `QueryCache` and `MutationCache` callbacks, given to the client as features. The differences: a callback that throws here, other than `onMutate`, goes to the `ErrorHandler` and leaves the outcome as it is; `query` and `mutation` are snapshots, with no `options` (a mutation's key is `mutation.mutationKey`); and `meta` reaches only the callbacks and the `select` of `injectMutationState`, not `queryFn` or `mutationFn`.

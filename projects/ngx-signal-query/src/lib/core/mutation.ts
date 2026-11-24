@@ -40,7 +40,8 @@ export type MutationStatus = 'idle' | 'pending' | 'success' | 'error'
 export type MutationKey = readonly unknown[]
 
 /**
- * Selects mutations by their key and status. {@link injectIsMutating} and
+ * Selects the runs of mutations by their key and status.
+ * {@link injectMutationState} takes it whole; {@link injectIsMutating} and
  * `isMutating()` take it without `status`, since they count pending runs.
  */
 export type MutationFilters = {
@@ -55,23 +56,28 @@ export type MutationFilters = {
   status?: MutationStatus
 }
 
-/** Full state snapshot of a mutation (the reactive source behind {@link MutationResult}). */
+/**
+ * The state of one run of a mutation: an item that
+ * {@link injectMutationState} lists without `select`, the `state` a cache
+ * callback gets, and the source of what the signals of
+ * {@link injectMutation} show for its latest run.
+ */
 export type MutationState<TData, TError, TVariables, TContext> = {
-  /** Current {@link MutationStatus}. */
+  /** The run's {@link MutationStatus}. */
   status: MutationStatus
-  /** Data resolved by the last successful run, or `undefined`. */
+  /** Data the run resolved with, or `undefined`. */
   data: TData | undefined
-  /** Error of the last failed run, or `null`. */
+  /** Error the run failed with, or `null`. */
   error: TError | null
-  /** Variables passed to the most recent `mutate()` call. */
+  /** Variables of the `mutate()` call that started the run. */
   variables: TVariables | undefined
-  /** Value returned by `onMutate` for the current run, or what its promise resolved to. */
+  /** Value returned by `onMutate` for the run, or what its promise resolved to. */
   context: TContext | undefined
-  /** Number of consecutive failures in the current run. */
+  /** Number of consecutive failures in the run. */
   failureCount: number
-  /** Error of the most recent failure, or `null`. */
+  /** Error of the run's most recent failure, or `null`. */
   failureReason: TError | null
-  /** Timestamp (ms) when the current run was submitted; `0` if never. */
+  /** Timestamp (ms) when the run was submitted; `0` if never. */
   submittedAt: number
 }
 
@@ -110,9 +116,10 @@ export type MutationOptions<TData, TError, TVariables, TContext> = {
    */
   mutationFn: (variables: TVariables) => Observable<TData> | Promise<TData>
   /**
-   * Names the mutation, so that filters, such as those {@link injectIsMutating}
-   * takes, can pick out its runs (see {@link MutationFilters}). Each run keeps
-   * the key the options give when `mutate()` is called.
+   * Names the mutation, so that filters, such as those
+   * {@link injectIsMutating} and {@link injectMutationState} take, can pick
+   * out its runs (see {@link MutationFilters}). Each run keeps the key the
+   * options give when `mutate()` is called.
    *
    * A key that changes, such as one with an input in it on a page that the
    * router keeps for the next item, resets the mutation the way `reset()`
@@ -158,7 +165,8 @@ export type MutationOptions<TData, TError, TVariables, TContext> = {
     context: TContext | undefined,
   ) => Promise<unknown> | unknown
   /**
-   * What the app's cache callbacks need to know about the mutation, such as
+   * What the app's cache callbacks, or the `select` of
+   * {@link injectMutationState}, need to know about the mutation, such as
    * the queries to invalidate once it succeeds (see
    * {@link withMutationCache}). The library itself doesn't read it. Its type
    * is the `mutationMeta` that the app declares on {@link Register}, if it
@@ -168,10 +176,10 @@ export type MutationOptions<TData, TError, TVariables, TContext> = {
 }
 
 /**
- * A run of a mutation, as a cache callback gets it (see
- * {@link withMutationCache}): its state when the callback runs, still
- * `'pending'` while the hooks run, and the `meta` and `mutationKey` of its
- * options.
+ * A run of a mutation, as a cache callback (see {@link withMutationCache})
+ * and the `select` of {@link injectMutationState} get it: its state when
+ * they're called, still `'pending'` while the hooks run, and the `meta` and
+ * `mutationKey` of its options.
  */
 export type MutationSnapshot<
   TData = unknown,
@@ -179,14 +187,14 @@ export type MutationSnapshot<
   TVariables = unknown,
   TContext = unknown,
 > = {
-  /** The run's state when the callback runs. */
+  /** The run's state when the callback or `select` is called. */
   readonly state: Readonly<MutationState<TData, TError, TVariables, TContext>>
   /** The `meta` of the mutation's options, if they have one. */
   readonly meta: MutationMeta | undefined
   /** The `mutationKey` of the mutation's options, if they have one. */
   // Optional, unlike meta: an app's test that builds a snapshot by hand
   // still compiles, the way it did before keys (see Mutation#snapshot for
-  // the one a callback gets).
+  // the one that the callbacks and select get).
   readonly mutationKey?: MutationKey
 }
 
@@ -443,7 +451,7 @@ export class Mutation<
     // pending, and in the cache, until its last hook is done. Nothing stops
     // it before that: the write has most likely reached the server (see
     // removeObserver), so clearing the cache only forgets the run.
-    awaitHook(() => this.#callbacks.onMutate?.(variables, this.#snapshot()))
+    awaitHook(() => this.#callbacks.onMutate?.(variables, this.snapshot()))
       .pipe(
         // Only the mutation's own onMutate makes the context.
         concatMap(() => awaitHook(() => this.#options.onMutate?.(variables))),
@@ -495,6 +503,23 @@ export class Mutation<
     return run.promise
   }
 
+  /**
+   * What the app's callbacks and the `select` of
+   * {@link injectMutationState} get of the run: its current state, and the
+   * meta and key of its options. A run without a key gets no `mutationKey`
+   * field, so its snapshot is what it was before keys: an app's test that
+   * compares a whole snapshot still passes.
+   */
+  snapshot(): MutationSnapshot<TData, TError, TVariables, TContext> {
+    const { meta, mutationKey } = this.#options
+
+    return {
+      state: this.state(),
+      meta,
+      ...(mutationKey && { mutationKey }),
+    }
+  }
+
   /** Sends the write, retrying as `retry` allows, and emits its data once. */
   #request(variables: TVariables): Observable<TData> {
     // Mutations default to no retry (not idempotent — a retried POST could
@@ -541,7 +566,7 @@ export class Mutation<
     const { context } = this.state()
     // One snapshot serves all four hooks: the run's state doesn't change
     // until they're done, since the outcome is written after them.
-    const mutation = this.#snapshot()
+    const mutation = this.snapshot()
 
     return concat(
       runHook(this.#reportError, () =>
@@ -612,22 +637,6 @@ export class Mutation<
         callbacks.onSettled?.(outcome.data, outcome.error, variables, context),
       ),
     ).subscribe()
-  }
-
-  /**
-   * What the app's callbacks get of the run: its current state, and the
-   * meta and key of its options. A run without a key gets no `mutationKey`
-   * field, so its snapshot is what it was before keys: an app's test that
-   * compares a whole snapshot still passes.
-   */
-  #snapshot(): MutationSnapshot<TData, TError, TVariables, TContext> {
-    const { meta, mutationKey } = this.#options
-
-    return {
-      state: this.state(),
-      meta,
-      ...(mutationKey && { mutationKey }),
-    }
   }
 
   /**
