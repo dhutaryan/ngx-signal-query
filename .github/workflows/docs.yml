@@ -46,10 +46,19 @@ jobs:
       - name: Build docs
         run: pnpm docs:build:gh
 
-      # GitHub Pages has no SPA fallback: serving 404.html as a copy of
-      # index.html lets deep links like /introduction survive a hard refresh.
-      - name: Add SPA fallback
-        run: cp dist/docs/browser/index.html dist/docs/browser/404.html
+      # The build prerenders every page into its own index.html, but not the
+      # root, which only redirects to /introduction. The app shell
+      # (index.csr.html) fills both gaps: index.html for the root, and
+      # 404.html, which GitHub Pages serves for any URL without a page. The app
+      # then sends both to /introduction.
+      - name: Add the root page and the 404 fallback
+        run: |
+          cp dist/docs/browser/index.csr.html dist/docs/browser/index.html
+          cp dist/docs/browser/index.csr.html dist/docs/browser/404.html
+
+      # Lists every page at its canonical address, for Google Search Console.
+      - name: Add the sitemap
+        run: node projects/docs/scripts/sitemap.mjs dist/docs/browser
 
       # Stop GitHub Pages from running the output through Jekyll.
       - name: Disable Jekyll

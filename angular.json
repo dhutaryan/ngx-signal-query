@@ -82,6 +82,8 @@
           "builder": "@ng-doc/builder:application",
           "options": {
             "browser": "projects/docs/src/main.ts",
+            "server": "projects/docs/src/main.server.ts",
+            "outputMode": "static",
             "polyfills": [
               "zone.js"
             ],
@@ -128,7 +130,12 @@
                   "maximumError": "8kB"
                 }
               ],
-              "outputHashing": "all"
+              "outputHashing": "all",
+              "optimization": {
+                "styles": {
+                  "inlineCritical": false
+                }
+              }
             },
             "development": {
               "optimization": false,

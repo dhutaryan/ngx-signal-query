@@ -1,5 +1,14 @@
 <!doctype html>
-<html lang="en">
+<!--
+  "auto" follows the system theme, in the prerendered pages too. A theme the
+  reader picks in the navbar is saved, and ng-doc's inline script puts it back
+  before the next page shows, except Light: ng-doc saves it as an empty string,
+  so it comes back as "auto". The build doesn't inline critical CSS
+  (angular.json): that CSS left out the dark theme and part of the layout, so
+  the page first showed light on a dark system, and its layout shifted once the
+  full CSS came.
+-->
+<html lang="en" data-theme="auto">
 <head>
   <meta charset="utf-8">
   <title>ngx-signal-query: server state for Angular on signals and RxJS</title>

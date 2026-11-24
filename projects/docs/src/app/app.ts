@@ -1,4 +1,4 @@
-import { Component, inject } from '@angular/core'
+import { Component } from '@angular/core'
 import { RouterLink, RouterOutlet } from '@angular/router'
 import {
   NgDocNavbarComponent,
@@ -6,7 +6,6 @@ import {
   NgDocSidebarComponent,
   NgDocThemeToggleComponent,
 } from '@ng-doc/app'
-import { NgDocThemeService } from '@ng-doc/app/services/theme'
 import { NgDocButtonIconComponent, NgDocTooltipDirective } from '@ng-doc/ui-kit'
 
 @Component({
@@ -88,10 +87,4 @@ import { NgDocButtonIconComponent, NgDocTooltipDirective } from '@ng-doc/ui-kit'
     `,
   ],
 })
-export class App {
-  readonly #theme = inject(NgDocThemeService)
-
-  constructor() {
-    this.#theme.set('auto')
-  }
-}
+export class App {}
