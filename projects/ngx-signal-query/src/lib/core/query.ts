@@ -36,8 +36,9 @@ export interface QuerySubscriber<TData, TError = Error, TQueryFnData = TData> {
   /**
    * How this observer would fetch the query right now, and when it wants it
    * refetched, read from its live options; `null` while it doesn't want the
-   * query fetched: it is disabled, its options throw, or its key has already
-   * moved on to another query.
+   * query fetched: it is disabled, its options throw, its key has already
+   * moved on to another query, or its owner asks for no query with it, such
+   * as injectQueries for a key that has left its list.
    */
   fetchOptions():
     | (FetchArgs<TData, TError, TQueryFnData> &
@@ -54,8 +55,8 @@ export interface QuerySubscriber<TData, TError = Error, TQueryFnData = TData> {
 
   /**
    * How this observer would refetch the query by hand, as its refetch()
-   * does, enabled or not; `null` while its options throw, or once its key has
-   * moved on to another query.
+   * does, enabled or not; `null` while its options throw, once its key has
+   * moved on to another query, or while its owner asks for no query with it.
    */
   refetchOptions(): ReturnType<
     QuerySubscriber<TData, TError, TQueryFnData>['fetchOptions']
@@ -67,7 +68,8 @@ export interface QuerySubscriber<TData, TError = Error, TQueryFnData = TData> {
    * moved it there yet. While its options throw, whether that's the query it
    * shows: nothing says its key moved on, and the request it asked for
    * stands. Destroyed or not: a queryFn still reads what it read before its
-   * observer went away.
+   * observer went away. Never while its owner asks for no query with it: a
+   * queryFn that reads a signal when it runs may ask for another key by then.
    */
   asksFor(queryHash: string): boolean
 
@@ -81,7 +83,7 @@ export interface QuerySubscriber<TData, TError = Error, TQueryFnData = TData> {
   /**
    * How this observer merges data written into the query by hand, read from
    * its live options, whether it's enabled or not; `undefined` while its
-   * options throw.
+   * options throw, or while its owner asks for no query with it.
    */
   structuralSharing(): StructuralSharingValue<TData> | undefined
 }
@@ -300,8 +302,9 @@ interface InFlightFetch<TData, TError, TQueryFnData> {
   // while the component may move on to another key, and its own queryFn is
   // asked for first anyway while it shows the query (see #nextQueryFn). Each
   // request after the first one of the fetch, a retry's included, falls back
-  // to that queryFn while it still asks for this query. Replaced whole, so
-  // the two always belong together.
+  // to whoever asked last while it still asks for this query, with the
+  // queryFn that its options give by then, or with this one (see
+  // #nextQueryFn). Replaced whole, so the two always belong together.
   lastAsked: {
     readonly by: Asker<TData, TError, TQueryFnData>
     readonly queryFn: QueryFunction<TQueryFnData>
@@ -480,7 +483,8 @@ export class Query<TData, TError = Error, TQueryFnData = TData> {
   // How data written into the query by hand merges with what it holds: as
   // its first observer with a say decides, enabled or not; with none, the way
   // its data was fetched; undefined if neither has a say. An observer whose
-  // options throw has no say.
+  // options throw has no say, and neither has one whose owner asks for no
+  // query with it (see QuerySubscriber.structuralSharing).
   structuralSharing(): StructuralSharingValue<TData> | undefined {
     for (const observer of this.#observers) {
       const sharing = observer.structuralSharing()
@@ -1000,10 +1004,16 @@ export class Query<TData, TError = Error, TQueryFnData = TData> {
   // last (see InFlightFetch.lastAsked), while it still asks for this query
   // (see QuerySubscriber.asksFor). A caller no component owns, such as
   // query(), always does; a component does whether enabled or not, and even
-  // once it went away. Not simply the queryFn the fetch started with: a
-  // queryFn may read its key's value only when it runs, like
-  // `() => api(this.id())` does, and by then its component may have moved on
-  // to another key, its effects caught up or not. Null once
+  // once it went away, but not while its owner asks for no query with it,
+  // such as injectQueries for a key that has left its list. Not simply the
+  // queryFn the fetch started with: a queryFn may read its key's value only
+  // when it runs, like `() => api(this.id())` does, and by then its component
+  // may have moved on to another key, its effects caught up or not. A
+  // component's queryFn is the one that its options give now (see
+  // QuerySubscriber.refetchOptions): in an injectQueries list, the key may
+  // have moved to another place in the list, whose queryFn reads another
+  // signal. While they give none, because they throw or its effects haven't
+  // moved it to this query yet, it's the one that it asked with. Null once
   // no queryFn asks for this query: no request is made then (see
   // FetchAttempt). `wanted` says whether anyone still wants the data: not
   // once the component the queryFn came from went away. Its queryFn still
@@ -1025,7 +1035,10 @@ export class Query<TData, TError = Error, TQueryFnData = TData> {
     if (by === 'caller') return { queryFn, wanted: true }
 
     return by.asksFor(this.queryHash)
-      ? { queryFn, wanted: by.fetches(this.queryHash) }
+      ? {
+          queryFn: by.refetchOptions()?.queryFn ?? queryFn,
+          wanted: by.fetches(this.queryHash),
+        }
       : null
   }
 

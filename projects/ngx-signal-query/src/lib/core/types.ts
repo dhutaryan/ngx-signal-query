@@ -597,7 +597,9 @@ export type QueryResult<TData, TError = Error> = {
    * follows one let land if it's cancelled or removed, or if by the time it
    * lands this query has moved to another key or been destroyed and no
    * enabled component shows the key: the promise then resolves as soon as
-   * it's done. It never rejects: a failure shows in `error`.
+   * it's done. A result of {@link injectQueries} whose key has left the list
+   * fetches nothing, and the promise resolves at once. It never rejects: a
+   * failure shows in `error`.
    */
   refetch: () => Promise<{ data: TData | undefined; error: TError | null }>
 }

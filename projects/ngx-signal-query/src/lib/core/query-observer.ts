@@ -85,8 +85,8 @@ export type FetchArgsBuilder<TOptions, TData, TError, TQueryFnData> = (
  * One observed query: its reactive {@link QueryResult} and a `destroy()` that
  * ends the observation (drops the cache observer, stops polling). For a layer
  * built on the observer, such as an infinite query's: the state of the query
- * it shows, its live options, and `asObserver`, which runs `act` on its behalf
- * (see createQueryObserver).
+ * it shows, its options, and `asObserver`, which runs `act` on its behalf with
+ * the live options (see createQueryObserver).
  *
  * @internal
  */
@@ -103,6 +103,8 @@ export interface QueryObserver<
   options: Signal<
     DefaultedObserverOptions<TOptions, TData, TError, TQueryFnData>
   >
+  // Gives what `act` gives, or undefined without running it while the owner
+  // asks for no query with the observer.
   asObserver: <R>(
     act: (on: {
       q: Query<TData, TError, TQueryFnData>
@@ -110,7 +112,7 @@ export interface QueryObserver<
       args: ObserverFetchArgs<TData, TError, TQueryFnData>
       by: QuerySubscriber<TData, TError, TQueryFnData>
     }) => R,
-  ) => R
+  ) => R | undefined
 }
 
 /**
@@ -129,7 +131,12 @@ export interface QueryObserver<
  * `effect()` called directly in that context.
  *
  * Every fetch made on behalf of the observer runs with what `fetchArgs` builds
- * from the live options (see FetchArgsBuilder).
+ * from the live options (see FetchArgsBuilder): those that `liveOptionsFn`
+ * gives right now, or, without it, those that `optionsFn` gives. An owner
+ * whose `optionsFn` may lag behind passes `liveOptionsFn`, like injectQueries
+ * does: it hands each query's observer its options from an effect, which runs
+ * only at change detection. While `liveOptionsFn` gives null, the owner asks
+ * for no query with the observer, and nothing is fetched on its behalf.
  *
  * @internal
  */
@@ -143,6 +150,7 @@ export function createQueryObserver<
   optionsFn: () => TOptions,
   injector: Injector,
   fetchArgs: FetchArgsBuilder<TOptions, TData, TError, TQueryFnData>,
+  liveOptionsFn?: () => TOptions | null,
 ): QueryObserver<TData, TError, TQueryFnData, TOptions> {
   const client = injector.get(QueryClient)
   const cache = client.getQueryCache()
@@ -153,23 +161,37 @@ export function createQueryObserver<
     refs.push(effect(fn, { injector, manualCleanup: true }))
   }
 
-  // Single source of truth for defaulted options; resolves config defaults
-  // (staleTime, gcTime) once instead of scattering the logic across effects.
-  // The defaults don't depend on what queryFn gives, so the client fills them
-  // in for any kind of query. Its types know only a plain query, whose
-  // queryFn gives the data itself: the options go in typed as such, and come
-  // back typed as they are, with the defaults filled in.
-  const defaultedOptions = computed(
-    () =>
-      client.defaultQueryOptions(
-        optionsFn() as unknown as QueryOptions<TData, TError>,
-      ) as unknown as DefaultedObserverOptions<
-        TOptions,
-        TData,
-        TError,
-        TQueryFnData
-      >,
-  )
+  // Resolves config defaults (staleTime, gcTime) in one place instead of
+  // scattering the logic across effects. The defaults don't depend on what
+  // queryFn gives, so the client fills them in for any kind of query. Its
+  // types know only a plain query, whose queryFn gives the data itself: the
+  // options go in cast to a plain query's, and come back with their own type,
+  // the defaults filled in.
+  const withDefaults = (
+    options: TOptions,
+  ): DefaultedObserverOptions<TOptions, TData, TError, TQueryFnData> =>
+    client.defaultQueryOptions(
+      options as unknown as QueryOptions<TData, TError>,
+    ) as unknown as DefaultedObserverOptions<
+      TOptions,
+      TData,
+      TError,
+      TQueryFnData
+    >
+
+  // Single source of truth for the options that the effects go by.
+  const defaultedOptions = computed(() => withDefaults(optionsFn()))
+
+  // The live options, with the defaults filled in: null while the owner asks
+  // for no query with the observer (see liveOptionsFn). Without
+  // liveOptionsFn, this is defaultedOptions itself.
+  const live: Signal<ReturnType<typeof defaultedOptions> | null> = liveOptionsFn
+    ? computed(() => {
+        const options = liveOptionsFn()
+
+        return options === null ? null : withDefaults(options)
+      })
+    : defaultedOptions
 
   // A query the observer turned to, and how many times something had landed
   // in it by then.
@@ -190,11 +212,13 @@ export function createQueryObserver<
   // so the observer goes on from this rather than starting over.
   let switchedSince: TurnedTo | undefined
 
-  // Resolves the query for a key, seeding one with no data yet with
-  // initialData (see applyInitialData), each time the key is resolved. It
-  // writes signals (the cache's entries, the query's state, since), so
-  // callers run it untracked: reached from a computed, a tracked write throws
-  // NG0600.
+  // Resolves the query for a key, seeding one with no data yet with the
+  // initialData of `options` (see applyInitialData), each time the key is
+  // resolved. `options` are those that the effects go by, unless a fetch
+  // made on the observer's behalf passes the live ones that it fetches with,
+  // like asObserver and the poll do. It writes signals (the cache's entries,
+  // the query's state, since), so callers run it untracked: reached from a
+  // computed, a tracked write throws NG0600.
   //
   // A query other than the one it resolved last is one the observer turns
   // to: the first one, the next key's, a key it comes back to, or a new
@@ -206,8 +230,10 @@ export function createQueryObserver<
   // noted then (see switchedSince). Each fetch that the observer asks for
   // resolves its query here first, so a response that comes back at once
   // lands after that, whenever the effects catch up.
-  const resolve = (key: QueryKey): Query<TData, TError, TQueryFnData> => {
-    const options = untracked(defaultedOptions)
+  const resolve = (
+    key: QueryKey,
+    options: ReturnType<typeof defaultedOptions> = untracked(defaultedOptions),
+  ): Query<TData, TError, TQueryFnData> => {
     const q = cache.getOrCreate<TData, TError, TQueryFnData>(
       key,
       options.gcTime,
@@ -308,21 +334,22 @@ export function createQueryObserver<
   })
 
   // The live options for the library's own reads, made from someone else's
-  // call: null while optionsFn throws. The owner's effects still report that
-  // error to Angular, and a read like this mustn't fail the caller or
-  // interrupt other queries.
+  // call: null while they throw, and while the owner asks for no query with
+  // the observer. The owner's effects still report such an error to Angular,
+  // and a read like this mustn't fail the caller or interrupt other queries.
   const liveOptions = (): ReturnType<typeof defaultedOptions> | null => {
     try {
-      return untracked(defaultedOptions)
+      return untracked(live)
     } catch {
       return null
     }
   }
 
   // How this observer would refetch q by hand, as refetch() does, enabled or
-  // not, from the live options; null while they throw, or once the key has
-  // moved on. Before the key effect above catches up, queryFn already fetches
-  // the next query's data, so q must not be fetched with it.
+  // not, from the live options; null while there are none (see liveOptions),
+  // or once the key has moved on. Before the key effect above catches up,
+  // queryFn already fetches the next query's data, so q must not be fetched
+  // with it.
   const refetchOptionsFor = (
     q: Query<TData, TError, TQueryFnData>,
   ): ReturnType<
@@ -349,8 +376,9 @@ export function createQueryObserver<
   // refetch that invalidateQueries() or refetchQueries() asks for, one on
   // window focus or on reconnect, the refetch an invalidation queues during a
   // first load, and the queryFn of each request after the first one of a
-  // fetch, a retry's included. Only refetch(), and the refetch it queues, go
-  // by the options whether the observer is enabled or not.
+  // fetch, a retry's included. Only refetch(), the refetch it queues, and the
+  // later requests of a fetch that it asked for last (see Query#nextQueryFn)
+  // go by the options whether the observer is enabled or not.
   const fetchOptionsFor = (
     q: Query<TData, TError, TQueryFnData>,
   ): ReturnType<
@@ -375,12 +403,17 @@ export function createQueryObserver<
   const subscriber: QuerySubscriber<TData, TError, TQueryFnData> = {
     fetchOptions: () => (shown ? fetchOptionsFor(shown) : null),
     refetchOptions: () => (shown ? refetchOptionsFor(shown) : null),
+    // Reads live itself, not through liveOptions(): that gives null both while
+    // the options throw and while the owner asks for no query, and asksFor
+    // answers the two differently (see QuerySubscriber.asksFor).
     asksFor: (queryHash) => {
-      const options = liveOptions()
+      try {
+        const options = untracked(live)
 
-      return (
-        (options ? hashKey(options.queryKey) : shown?.queryHash) === queryHash
-      )
+        return options !== null && hashKey(options.queryKey) === queryHash
+      } catch {
+        return shown?.queryHash === queryHash
+      }
     },
     fetches: (queryHash) => !destroyed && subscriber.asksFor(queryHash),
     structuralSharing: () => liveOptions()?.structuralSharing,
@@ -388,11 +421,13 @@ export function createQueryObserver<
 
   // Runs `act` on behalf of this observer, on the query that the live options
   // ask for: `act` gets that query, the options, the fetch args built from
-  // them, and the subscriber that tells the query who asks. The key and the
-  // fetch args come from one read of the options, so a fetch can't go to
-  // another key's query, whatever order the effects run in. Untracked, like
-  // the client's methods: called from an effect, it mustn't make the effect
-  // depend on the options or on the query.
+  // them, and the subscriber that tells the query who asks. The key, the
+  // initialData that a new query is seeded with and the fetch args come from
+  // one read of the options, so a fetch can't go to another key's query, nor
+  // seed its query from older options, whatever order the effects run in. While the owner asks for no
+  // query with the observer, it runs nothing and gives undefined. Untracked,
+  // like the client's methods: called from an effect, it mustn't make the
+  // effect depend on the options or on the query.
   const asObserver: QueryObserver<
     TData,
     TError,
@@ -400,10 +435,12 @@ export function createQueryObserver<
     TOptions
   >['asObserver'] = (act) =>
     untracked(() => {
-      const options = defaultedOptions()
+      const options = live()
+
+      if (options === null) return undefined
 
       return act({
-        q: resolve(options.queryKey),
+        q: resolve(options.queryKey, options),
         options,
         args: fetchArgs(options),
         by: subscriber,
@@ -497,25 +534,24 @@ export function createQueryObserver<
 
     if (!ms) return
 
-    // Fetches the key with the options as they are when it fires, which may
-    // have changed since the effect ran. The key's entry is q, unless
+    // Fetches the key with the live options as they are when it fires, which
+    // may have changed since the effect ran. The key's entry is q, unless
     // removeQueries dropped it: then the poll puts the key back, as TanStack's
     // observer does before every fetch, and the follow effect moves this
     // observer there.
     //
-    // While the page is hidden, the poll is skipped unless the options ask to
-    // keep polling there, as in TanStack: nobody sees the data, and coming
+    // While the page is hidden, the poll is skipped unless those options ask
+    // to keep polling there, as in TanStack: nobody sees the data, and coming
     // back refetches it if it's stale. The timer keeps its schedule, so the
     // poll due next goes out once the page shows again.
     const poll = (): void => {
       const options = fetchOptionsFor(q)
+      const current = liveOptions()
 
-      if (!options) return
+      if (!options || !current) return
 
-      const { refetchIntervalInBackground } = untracked(defaultedOptions)
-
-      if (refetchIntervalInBackground || pageVisible()) {
-        resolve(q.key).fetch(options, { by: subscriber })
+      if (current.refetchIntervalInBackground || pageVisible()) {
+        resolve(q.key, current).fetch(options, { by: subscriber })
       }
     }
 
@@ -597,9 +633,13 @@ export function createQueryObserver<
     // intent — get current data): a fetch in flight is replaced, or, with no
     // data yet, let land first (see Query#refetch). However the fetch ends,
     // the signals show it, so the promise resolves with their data and error
-    // and never rejects.
+    // and never rejects. While the owner asks for no query with the
+    // observer, nothing is fetched (see asObserver), and it resolves with
+    // them right away.
     refetch: () =>
-      asObserver(({ q, args, by }) => q.refetch(args, { by, byHand: true }))
+      Promise.resolve(
+        asObserver(({ q, args, by }) => q.refetch(args, { by, byHand: true })),
+      )
         .catch(() => undefined)
         .then(() => ({ data: result.data(), error: result.error() })),
   }
