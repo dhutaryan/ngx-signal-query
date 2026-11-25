@@ -27,9 +27,12 @@ import type {
 
 /**
  * The handle a QueryObserver registers with a query (Query#addObserver):
- * the query keeps these as its observers. It asks them how to fetch it
- * whenever it fetches on their behalf (see fetchOptions), and how data
- * written into it by hand merges.
+ * the query keeps these as its observers. When the query fetches for them
+ * without being asked by them, for invalidateQueries() or refetchQueries(),
+ * on window focus or on reconnect, for a queued refetch, or for each request
+ * after a fetch's first, it asks them how to fetch it (see fetchOptions and
+ * refetchOptions). It also asks them how data written into it by hand
+ * merges (see structuralSharing).
  *
  * @internal
  */
@@ -160,17 +163,21 @@ export interface InternalQueryState<TData, TError = Error> extends QueryState<
   TData,
   TError
 > {
-  // Set as a fetch starts: its direction, or null for a fetch that adds no
-  // page. Kept once the fetch lands or fails, so a failure tells which fetch
-  // it came from, such as the one for the next page. Put back, along with the
-  // status and the error, when a fetch is stopped with nothing in its place.
+  /**
+   * Set as a fetch starts: its direction, or null for a fetch that adds no
+   * page. Kept once the fetch lands or fails, so a failure tells which fetch
+   * it came from, such as the one for the next page. Put back, along with the
+   * status and the error, when a fetch is stopped with nothing in its place.
+   */
   fetchDirection: FetchDirection | null
-  // How many times something has landed in the query: a fetch, with data or
-  // with an error, or a write that puts data in it by hand, such as
-  // setQueryData or data that a server render fetched. A fetch counts once,
-  // with its outcome, not once for each failed attempt; initialData doesn't
-  // count. A stopped fetch leaves it as it is. Observers tell from it whether
-  // the query was fetched at all, and whether since they started showing it.
+  /**
+   * How many times something has landed in the query: a fetch, with data or
+   * with an error, or a write that puts data in it by hand, such as
+   * setQueryData or data that a server render fetched. A fetch counts once,
+   * with its outcome, not once for each failed attempt; initialData doesn't
+   * count. A stopped fetch leaves it as it is. Observers tell from it whether
+   * the query was fetched at all, and whether since they started showing it.
+   */
   fetchedCount: number
 }
 
@@ -266,85 +273,113 @@ export function applyInitialData<TData, TError, TQueryFnData>(
   query.setData(data, { updatedAt, seed: true })
 }
 
-// Who asks for a fetch: a component, by the handle it shows the query with,
-// or 'client', a QueryClient call such as query(), infiniteQuery() or
-// fetchQuery(), whose queryFn fetches this key for good.
+/**
+ * Who asks for a fetch: a component, by the handle it shows the query with,
+ * or 'client', a QueryClient call such as query(), infiniteQuery() or
+ * fetchQuery(), whose queryFn always fetches this key.
+ */
 type Asker<TData, TError, TQueryFnData> =
   | QuerySubscriber<TData, TError, TQueryFnData>
   | 'client'
 
-// A refetch asked for while a fetch of a query with no data yet runs, to run
-// once that fetch ends (see refetch).
+/**
+ * A refetch asked for while a fetch of a query with no data yet runs, to run
+ * once that fetch ends (see refetch).
+ */
 interface QueuedRefetch<TData, TError, TQueryFnData> {
-  // Settles the promise that everyone who asked for the refetch shares.
+  /** Settles the promise that everyone who asked for the refetch shares. */
   readonly outcome: Deferred<TData>
-  // What the last QueryClient call, such as query(), asked to fetch with, if
-  // one asked.
+  /**
+   * What the last fetchQuery() call with cancelRefetch asked to fetch with,
+   * if one asked: the only QueryClient call that queues a refetch.
+   */
   clientArgs: FetchArgs<TData, TError, TQueryFnData> | undefined
-  // The component that asked last by hand, with its refetch(), if one did.
+  /** The component that asked last by hand, with its refetch(), if one did. */
   byHand: QuerySubscriber<TData, TError, TQueryFnData> | undefined
 }
 
-// The fetch in flight, from its first attempt until it lands, fails or is
-// stopped. What it needs lives here and goes with it, so nothing carries over
-// to the next fetch.
+/**
+ * The fetch in flight, from its first attempt until it lands, fails or is
+ * stopped. What it needs lives here and goes with it, so nothing carries over
+ * to the next fetch.
+ */
 interface InFlightFetch<TData, TError, TQueryFnData> {
-  // Settles the promise that every caller joining the fetch shares.
+  /** Settles the promise that every caller joining the fetch shares. */
   readonly outcome: Deferred<TData>
-  // Its attempts: unsubscribing stops them.
+  /** Its attempts: unsubscribing stops them. */
   readonly subscription: Subscription
-  // Gives the signal each request of the fetch is made with: one for all its
-  // attempts, as in TanStack (see #request). Aborted when the fetch is
-  // stopped or replaced, not when it lands or fails.
+  /**
+   * Gives the signal each request of the fetch is made with: one for all its
+   * attempts, as in TanStack (see #request). Aborted when the fetch is
+   * stopped or replaced, not when it lands or fails.
+   */
   readonly abortController: AbortController
-  // The state the fetch started from, or the last write made during it:
-  // stopping the fetch with nothing in its place goes back to it (see
-  // #stop).
+  /**
+   * The state the fetch started from, or the last write made during it:
+   * stopping the fetch with nothing in its place goes back to it (see
+   * #stop).
+   */
   before: InternalQueryState<TData, TError>
-  // Who asked for the fetch last, and the queryFn it asked with: whoever
-  // started it, then each asker that joins it, and a 'client' that asks for
-  // a refetch while it runs on a query with no data yet (see refetch). A
-  // component that joins doesn't replace a 'client', whose queryFn fetches
-  // this key for good, while the component may move on to another key; its
-  // own queryFn comes first anyway while it shows the query and wants it
-  // fetched. #nextQueryFn falls back to it for each request after the
-  // fetch's first. Replaced whole, so the two always belong together.
+  /**
+   * Who asked for the fetch last, and the queryFn it asked with: whoever
+   * started it, then each asker that joins it, and a 'client' that asks for
+   * a refetch while it runs on a query with no data yet (see refetch). A
+   * component that joins doesn't replace a 'client', whose queryFn always
+   * fetches this key, while the component may move on to another key; its
+   * own queryFn comes first anyway while it shows the query and wants it
+   * fetched. #nextQueryFn falls back to it for each request after the
+   * fetch's first. Replaced whole, so the two always belong together.
+   */
   lastAsked: {
     readonly by: Asker<TData, TError, TQueryFnData>
     readonly queryFn: QueryFunction<TQueryFnData>
   }
-  // Whether stopping the fetch aborts its request: unsubscribing tears an
-  // Observable down (HttpClient aborts the request), and aborting the signal
-  // stops a request made with it, as fetch() makes one; any other promise
-  // runs to the end anyway. A query function that reads the signal is taken
-  // to make its request with it. Each request sets it (see #request), so
-  // while the fetch waits to retry, the last one decides.
+  /**
+   * Whether stopping the fetch aborts its request: unsubscribing tears an
+   * Observable down (HttpClient aborts the request), and aborting the signal
+   * stops a request made with it, as fetch() makes one; any other promise
+   * runs to the end anyway. A query function that reads the signal is taken
+   * to make its request with it. Each request sets it (see #request), so
+   * while the fetch waits to retry, the last one decides.
+   */
   abortable: boolean
-  // Set once the last observer leaves while the request runs on: the request
-  // lands as usual, but a failure isn't tried again. Whoever joins the fetch
-  // wants its data, so joining clears it.
+  /**
+   * Set once the last observer leaves while the request runs on: the request
+   * lands as usual, but a failure isn't tried again. Whoever joins the fetch
+   * wants its data, so joining clears it.
+   */
   retriesStopped: boolean
-  // Set when the query is invalidated while the fetch is in flight, or from
-  // the start if the data the fetch goes on from is marked: what was read
-  // before the change leaves the query marked stale once the response
-  // lands. An attempt that starts over clears it (see FetchAttempt): it
-  // reads the data after the change.
+  /**
+   * Set when the query is invalidated while the fetch is in flight, or from
+   * the start if the data the fetch goes on from is marked: what was read
+   * before the change leaves the query marked stale once the response
+   * lands. An attempt that starts over clears it (see FetchAttempt): it
+   * reads the data after the change.
+   */
   invalidated: boolean
-  // The refetch to run once the fetch ends; null while nobody asked for one.
+  /**
+   * The refetch to run once the fetch ends; null while nobody asked for one.
+   */
   queuedRefetch: QueuedRefetch<TData, TError, TQueryFnData> | null
-  // Set when a refetch is asked for while the fetch is in flight, for the
-  // same reason, and cleared the same way: the refetch runs only if it was
-  // asked for since the last attempt that started over began.
+  /**
+   * Set when a refetch is asked for while the fetch is in flight, for the
+   * same reason, and cleared the same way: the refetch runs only if it was
+   * asked for since the last attempt that started over began.
+   */
   refetchAsked: boolean
-  // Removes the app's pending task the fetch holds. While it's held, Angular
-  // counts the app as busy: a server render and whenStable() wait for the
-  // fetch, whatever its queryFn gets the data with. Removed once the outcome
-  // is in the state, or when the fetch stops.
+  /**
+   * Removes the app's pending task the fetch holds. While it's held, Angular
+   * counts the app as busy: a server render and whenStable() wait for the
+   * fetch, whatever its queryFn gets the data with. Removed once the outcome
+   * is in the state, or when the fetch stops.
+   */
   readonly removeTask: () => void
-  // The failures the checks of its responses found (see #checked): another
-  // attempt would bring the same, so each ends the attempts at once. This
-  // fetch's own only: a query function that passes another query's failure
-  // on is retried as any failure is.
+  /**
+   * The failures the checks of its responses found (see #checked): another
+   * attempt would bring the same, so each ends the attempts at once. This
+   * fetch's own only: a query function that passes another query's failure
+   * on is retried as any failure is.
+   */
   readonly checkFailures: WeakSet<object>
 }
 
@@ -378,17 +413,19 @@ export class Query<TData, TError = Error, TQueryFnData = TData> {
   // eslint-disable-next-line @typescript-eslint/member-ordering
   readonly state = this.#state.asReadonly()
 
-  // The fetch in flight; null while nothing is.
+  /** The fetch in flight; null while nothing is. */
   #inFlight: InFlightFetch<TData, TError, TQueryFnData> | null = null
-  // The structuralSharing of the fetch whose response the query holds.
+  /** The structuralSharing of the fetch whose response the query holds. */
   #fetchedStructuralSharing: StructuralSharingValue<TData> | undefined
   readonly #observers = new Set<QuerySubscriber<TData, TError, TQueryFnData>>()
   #gcTime = 0
   #gcTimer: ReturnType<typeof setTimeout> | null = null
-  // Set by destroy(): the query is thrown away. Code still busy with it may
-  // call it after that, such as the end of its fetch, or a loop over the
-  // cache's queries, once a callback of the app removed it: it starts no
-  // refetch then, and no gc timer.
+  /**
+   * Set by destroy(): the query is thrown away. Code still busy with it may
+   * call it after that, such as the end of its fetch, or a loop over the
+   * cache's queries, once a callback of the app removed it: it starts no
+   * refetch then, and no gc timer.
+   */
   #destroyed = false
   readonly #cache: Pick<QueryCache, 'remove'>
   readonly #pendingTasks: Pick<PendingTasks, 'add'>
@@ -420,15 +457,17 @@ export class Query<TData, TError = Error, TQueryFnData = TData> {
     return this.#observers.size
   }
 
-  // Keeps the longest gcTime asked for by anything that used the query:
-  // whoever created it, each component that showed it, each query(),
-  // infiniteQuery() or fetchQuery() call. A shorter one doesn't cut short a
-  // longer one asked for before. A longer one starts a running gc countdown
-  // over with it: a call that finds fresh data fetches and writes nothing,
-  // so nothing else would. Never below 0. A NaN, such as `Number()` of a
-  // missing setting, keeps the query as Infinity does, but only until the
-  // next gcTime replaces it, as in TanStack: Math.max with a NaN would keep
-  // it for good.
+  /**
+   * Keeps the longest gcTime asked for by anything that used the query:
+   * whoever created it, each component that showed it, each query(),
+   * infiniteQuery() or fetchQuery() call. A shorter one doesn't cut short a
+   * longer one asked for before. A longer one starts a running gc countdown
+   * over with it: a call that finds fresh data fetches and writes nothing,
+   * so nothing else would. Never below 0. A NaN, such as `Number()` of a
+   * missing setting, keeps the query as Infinity does, but only until the
+   * next gcTime replaces it, as in TanStack: Math.max with a NaN would keep
+   * it for good.
+   */
   updateGcTime(ms: number): void {
     const previous = this.#gcTime
 
@@ -459,10 +498,12 @@ export class Query<TData, TError = Error, TQueryFnData = TData> {
     }
   }
 
-  // Refetches the query if a component shows it: the first observer that
-  // wants it fetched decides how, as in TanStack (see refetch). Returns the
-  // refetch's promise, or undefined if no observer wants the query fetched
-  // or the query is destroyed.
+  /**
+   * Refetches the query if a component shows it: the first observer that
+   * wants it fetched decides how, as in TanStack (see refetch). Returns the
+   * refetch's promise, or undefined if no observer wants the query fetched
+   * or the query is destroyed.
+   */
   refetchIfActive(): Promise<TData> | undefined {
     if (this.#destroyed) return
 
@@ -475,24 +516,28 @@ export class Query<TData, TError = Error, TQueryFnData = TData> {
     return
   }
 
-  // Refetches the query now that the user is back on the page, if one of its
-  // observers wants that: its refetchOnWindowFocus is 'always', or true while
-  // the data is stale for its staleTime. The first such observer decides
-  // how, as in TanStack.
+  /**
+   * Refetches the query now that the user is back on the page, if one of its
+   * observers wants that: its refetchOnWindowFocus is 'always', or true while
+   * the data is stale for its staleTime. The first such observer decides
+   * how, as in TanStack.
+   */
   onFocus(): void {
     this.#refetchOn('refetchOnWindowFocus')
   }
 
-  // The same once the network is back, by refetchOnReconnect.
+  /** The same once the network is back, by refetchOnReconnect. */
   onOnline(): void {
     this.#refetchOn('refetchOnReconnect')
   }
 
-  // How data written into the query by hand merges with what it holds: as
-  // its first observer with a say decides, enabled or not; with none, the way
-  // its data was fetched; undefined if neither has a say. An observer whose
-  // options throw has no say, and neither has an unlisted one (see
-  // QuerySubscriber.structuralSharing).
+  /**
+   * How data written into the query by hand merges with what it holds: as
+   * its first observer with a say decides, enabled or not; with none, the way
+   * its data was fetched; undefined if neither has a say. An observer whose
+   * options throw has no say, and neither has an unlisted one (see
+   * QuerySubscriber.structuralSharing).
+   */
   structuralSharing(): StructuralSharingValue<TData> | undefined {
     for (const observer of this.#observers) {
       const sharing = observer.structuralSharing()
@@ -503,19 +548,21 @@ export class Query<TData, TError = Error, TQueryFnData = TData> {
     return this.#fetchedStructuralSharing
   }
 
-  // Without a structuralSharing setting the response is stored as is: the
-  // default is the client's to resolve. Without a behavior, the fetch makes
-  // one request, whose data the query stores. Once the fetch lands or fails,
-  // the app's callbacks get the query with the `meta` of this call (see
-  // QueryCacheCallbacks): a caller that joins the fetch doesn't change it.
-  //
-  // Returns a promise of the data as the query stores it, which every caller
-  // that joins the fetch shares. A fetch that replaces this one settles it
-  // with its own outcome; one stopped with nothing in its place settles it as
-  // cancel() or destroy() says. Nobody has to wait for it.
-  //
-  // `by` is who asks: the component the fetch is made for, or, by default,
-  // 'client', a QueryClient call such as query().
+  /**
+   * Without a structuralSharing setting the response is stored as is: the
+   * default is the client's to resolve. Without a behavior, the fetch makes
+   * one request, whose data the query stores. Once the fetch lands or fails,
+   * the app's callbacks get the query with the `meta` of this call (see
+   * QueryCacheCallbacks): a caller that joins the fetch doesn't change it.
+   *
+   * Returns a promise of the data as the query stores it, which every caller
+   * that joins the fetch shares. A fetch that replaces this one settles it
+   * with its own outcome; one stopped with nothing in its place settles it as
+   * cancel() or destroy() says. Nobody has to wait for it.
+   *
+   * `by` is who asks: the component the fetch is made for, or, by default,
+   * 'client', a QueryClient call such as query().
+   */
   fetch(
     {
       queryFn,
@@ -760,16 +807,18 @@ export class Query<TData, TError = Error, TQueryFnData = TData> {
     return outcome.promise
   }
 
-  // Refetches the query with `args` on behalf of `by`, which is one of:
-  // - the first component that wants the query fetched, for an invalidation;
-  // - a component itself, by its refetch() (byHand);
-  // - 'client', for fetchQuery() with cancelRefetch.
-  // The fetch in flight may predate the reason. With data, it is replaced.
-  // With none yet, it is let land and show, and the query is fetched once
-  // more after it (see #refetchIfAsked), however many refetches are asked
-  // for meanwhile. Whoever asks gets that refetch's promise, and a 'client'
-  // hands its queryFn over for the retries to come, like a 'client' that
-  // joins does.
+  /**
+   * Refetches the query with `args` on behalf of `by`, which is one of:
+   * - the first component that wants the query fetched, for an invalidation;
+   * - a component itself, by its refetch() (byHand);
+   * - 'client', for fetchQuery() with cancelRefetch.
+   * The fetch in flight may predate the reason. With data, it is replaced.
+   * With none yet, it is let land and show, and the query is fetched once
+   * more after it (see #refetchIfAsked), however many refetches are asked
+   * for meanwhile. Whoever asks gets that refetch's promise, and a 'client'
+   * hands its queryFn over for the retries to come, like a 'client' that
+   * joins does.
+   */
   refetch(
     args: FetchArgs<TData, TError, TQueryFnData>,
     {
@@ -811,10 +860,12 @@ export class Query<TData, TError = Error, TQueryFnData = TData> {
     return running.queuedRefetch.outcome.promise
   }
 
-  // Without a structuralSharing setting the data is stored as is: which one
-  // a write uses is the client's to resolve. A write counts in
-  // InternalQueryState.fetchedCount, unless it's a `seed`: initialData, which
-  // nothing fetched.
+  /**
+   * Without a structuralSharing setting the data is stored as is: which one
+   * a write uses is the client's to resolve. A write counts in
+   * InternalQueryState.fetchedCount, unless it's a `seed`: initialData, which
+   * nothing fetched.
+   */
   setData(
     data: TData,
     {
@@ -868,8 +919,10 @@ export class Query<TData, TError = Error, TQueryFnData = TData> {
     )
   }
 
-  // Stops the fetch in flight. Whoever waits for it gets the data the query
-  // holds, as in TanStack, or a CancelledError if it holds none.
+  /**
+   * Stops the fetch in flight. Whoever waits for it gets the data the query
+   * holds, as in TanStack, or a CancelledError if it holds none.
+   */
   cancel(): void {
     const { data } = this.state()
     const fetching = this.#inFlight !== null
@@ -885,24 +938,30 @@ export class Query<TData, TError = Error, TQueryFnData = TData> {
     if (fetching) this.#scheduleGc()
   }
 
-  // The query is thrown away with its data, so whoever waits for its fetch
-  // gets a CancelledError, as in TanStack.
+  /**
+   * The query is thrown away with its data, so whoever waits for its fetch
+   * gets a CancelledError, as in TanStack.
+   */
   destroy(): void {
     this.#destroyed = true
     this.#stop((outcome) => outcome.reject(new CancelledError()))
     this.#clearGcTimer()
   }
 
-  // Inclusive: data fetched exactly `staleTime` ago is already stale. This
-  // matters for seeded data (initialData is stamped with the current time), so
-  // the default staleTime of 0 still means "stale at once" → background
-  // refetch, rather than depending on whether a millisecond happened to pass.
+  /**
+   * Inclusive: data fetched exactly `staleTime` ago is already stale. This
+   * matters for seeded data (initialData is stamped with the current time), so
+   * the default staleTime of 0 still means "stale at once" → background
+   * refetch, rather than depending on whether a millisecond happened to pass.
+   */
   #isStale(staleTime: number): boolean {
     return Date.now() - this.state().updatedAt >= staleTime
   }
 
-  // Stops the fetch in flight, if any, and settles its promise with settle.
-  // A refetch queued after it is dropped: whoever asked for it gets the same.
+  /**
+   * Stops the fetch in flight, if any, and settles its promise with settle.
+   * A refetch queued after it is dropped: whoever asked for it gets the same.
+   */
   #stop(settle: (outcome: Deferred<TData>) => void): void {
     const inFlight = this.#inFlight
 
@@ -933,13 +992,15 @@ export class Query<TData, TError = Error, TQueryFnData = TData> {
     inFlight.removeTask()
   }
 
-  // Runs the refetch queued after the fetch that just ended (see
-  // #queuedRefetchArgs), unless an attempt that started over began after the
-  // refetch was last asked for: then all the data the fetch lands with was
-  // read after the reason for the refetch (see InFlightFetch.refetchAsked).
-  // A query destroyed meanwhile, by a callback of the app that heard of the
-  // fetch, refetches nothing. Whoever asked gets the refetch's outcome, or
-  // the fetch's.
+  /**
+   * Runs the refetch queued after the fetch that just ended (see
+   * #queuedRefetchArgs), unless an attempt that started over began after the
+   * refetch was last asked for: then all the data the fetch lands with was
+   * read after the reason for the refetch (see InFlightFetch.refetchAsked).
+   * A query destroyed meanwhile, by a callback of the app that heard of the
+   * fetch, refetches nothing. Whoever asked gets the refetch's outcome, or
+   * the fetch's.
+   */
   #refetchIfAsked(inFlight: InFlightFetch<TData, TError, TQueryFnData>): void {
     const queued = inFlight.queuedRefetch
 
@@ -957,15 +1018,17 @@ export class Query<TData, TError = Error, TQueryFnData = TData> {
     )
   }
 
-  // What the queued refetch runs with, and who it's made for, from the
-  // first of these that there is:
-  // 1. the args of the last 'client' that asked;
-  // 2. the component that asked by hand, while it still shows the query,
-  //    enabled or not: how its refetch() would refetch the query;
-  // 3. the first component that wants the query fetched: how an
-  //    invalidation would refetch it.
-  // With none of them, the refetch is dropped: an invalidation leaves alone
-  // a query that only disabled components show.
+  /**
+   * What the queued refetch runs with, and who it's made for, from the
+   * first of these that there is:
+   * 1. the args of the last 'client' that asked;
+   * 2. the component that asked by hand, while it still shows the query,
+   *    enabled or not: how its refetch() would refetch the query;
+   * 3. the first component that wants the query fetched: how an
+   *    invalidation would refetch it.
+   * With none of them, the refetch is dropped: an invalidation leaves alone
+   * a query that only disabled components show.
+   */
   #queuedRefetchArgs({
     clientArgs,
     byHand,
@@ -990,9 +1053,11 @@ export class Query<TData, TError = Error, TQueryFnData = TData> {
     return null
   }
 
-  // A fetch in flight is kept, as in TanStack, and the observers aren't even
-  // asked: fetch() would drop the refetch anyway. A destroyed query refetches
-  // nothing.
+  /**
+   * A fetch in flight is kept, as in TanStack, and the observers aren't even
+   * asked: fetch() would drop the refetch anyway. A destroyed query refetches
+   * nothing.
+   */
   #refetchOn(option: 'refetchOnWindowFocus' | 'refetchOnReconnect'): void {
     if (this.#inFlight || this.#destroyed) return
 
@@ -1009,27 +1074,29 @@ export class Query<TData, TError = Error, TQueryFnData = TData> {
     }
   }
 
-  // The queryFn for each request of a fetch after its first, a retry's first
-  // request included, from the first of these that there is:
-  // 1. the first observer that wants the query fetched now, the one that
-  //    refetchIfActive picks;
-  // 2. whoever asked for the fetch last (see InFlightFetch.lastAsked), while
-  //    it still asks for this query (see QuerySubscriber.asksFor): a
-  //    'client' always does; a component does whether enabled or not, and
-  //    even once it went away, but not while it is unlisted. A component
-  //    gives the queryFn that its options give now (see
-  //    QuerySubscriber.refetchOptions), or, while they give none (they
-  //    throw, or its effects haven't moved it to this query yet), the one
-  //    that it asked with;
-  // 3. none: no request is made then (see FetchAttempt).
-  // Not simply the queryFn the fetch started with: a queryFn may read its
-  // key's value only when it runs, like `() => api(this.id())` does, and by
-  // then its component may have moved on to another key, or the key to
-  // another place in an injectQueries list, whose queryFn reads another
-  // signal. `wanted` is false once the component the queryFn came from went
-  // away: its queryFn still makes the rest of a fetch that runs on without
-  // it, such as the next page, but no retry, like when the last observer
-  // leaves (see removeObserver).
+  /**
+   * The queryFn for each request of a fetch after its first, a retry's first
+   * request included, from the first of these that there is:
+   * 1. the first observer that wants the query fetched now, the one that
+   *    refetchIfActive picks;
+   * 2. whoever asked for the fetch last (see InFlightFetch.lastAsked), while
+   *    it still asks for this query (see QuerySubscriber.asksFor): a
+   *    'client' always does; a component does whether enabled or not, and
+   *    even once it went away, but not while it is unlisted. A component
+   *    gives the queryFn that its options give now (see
+   *    QuerySubscriber.refetchOptions), or, while they give none (they
+   *    throw, or its effects haven't moved it to this query yet), the one
+   *    that it asked with;
+   * 3. none: no request is made then (see FetchAttempt).
+   * Not simply the queryFn the fetch started with: a queryFn may read its
+   * key's value only when it runs, like `() => api(this.id())` does, and by
+   * then its component may have moved on to another key, or the key to
+   * another place in an injectQueries list, whose queryFn reads another
+   * signal. `wanted` is false once the component the queryFn came from went
+   * away: its queryFn still makes the rest of a fetch that runs on without
+   * it, such as the next page, but no retry, like when the last observer
+   * leaves (see removeObserver).
+   */
   #nextQueryFn(inFlight: InFlightFetch<TData, TError, TQueryFnData>): {
     queryFn: QueryFunction<TQueryFnData>
     wanted: boolean
@@ -1052,16 +1119,18 @@ export class Query<TData, TError = Error, TQueryFnData = TData> {
       : null
   }
 
-  // One request of a fetch: made outside Angular's zone, with its outcome
-  // brought back to where the fetch was asked for from (see
-  // requestOutsideZone): with zone.js, what the request waits on mustn't
-  // keep the app from counting as stable. The task the fetch holds keeps the
-  // app busy until the outcome is in all the same. It hands the query
-  // function the query's key and the fetch's signal, on top of what the
-  // behavior adds for this request (`extra`), takes the first value an
-  // Observable gives and lets go of it, and sets whether stopping the fetch
-  // aborts it: it does for an Observable, and for a request whose query
-  // function reads the signal.
+  /**
+   * One request of a fetch: made outside Angular's zone, with its outcome
+   * brought back to where the fetch was asked for from (see
+   * requestOutsideZone): with zone.js, what the request waits on mustn't
+   * keep the app from counting as stable. The task the fetch holds keeps the
+   * app busy until the outcome is in all the same. It hands the query
+   * function the query's key and the fetch's signal, on top of what the
+   * behavior adds for this request (`extra`), takes the first value an
+   * Observable gives and lets go of it, and sets whether stopping the fetch
+   * aborts it: it does for an Observable, and for a request whose query
+   * function reads the signal.
+   */
   #request(
     queryFn: QueryFunction<TQueryFnData>,
     inFlight: InFlightFetch<TData, TError, TQueryFnData>,
@@ -1091,12 +1160,14 @@ export class Query<TData, TError = Error, TQueryFnData = TData> {
     return this.#checked(response, inFlight)
   }
 
-  // A response gives one value, and not undefined, or it fails the fetch: it
-  // went through, and another one would bring the same, so the failure
-  // counts but isn't tried again (see InFlightFetch.checkFailures). undefined
-  // is what a query holds while it has no data: null says "nothing here".
-  // Checked before the merge, so a structuralSharing function only ever gets
-  // data.
+  /**
+   * A response gives one value, and not undefined, or it fails the fetch: it
+   * went through, and another one would bring the same, so the failure
+   * counts but isn't tried again (see InFlightFetch.checkFailures). undefined
+   * is what a query holds while it has no data: null says "nothing here".
+   * Checked before the merge, so a structuralSharing function only ever gets
+   * data.
+   */
   #checked<T>(
     response: Observable<T>,
     inFlight: InFlightFetch<TData, TError, TQueryFnData>,
@@ -1122,11 +1193,13 @@ export class Query<TData, TError = Error, TQueryFnData = TData> {
     )
   }
 
-  // Removes the query gcTime from now, unless something uses it by then: an
-  // observer, or a fetch of it in flight. Called whenever the query may have
-  // become unused: when it's created, when its last observer leaves, when a
-  // fetch of it ends, when data is written into it by hand. Also when its
-  // gcTime changes, so the countdown starts over with the new one.
+  /**
+   * Removes the query gcTime from now, unless something uses it by then: an
+   * observer, or a fetch of it in flight. Called whenever the query may have
+   * become unused: when it's created, when its last observer leaves, when a
+   * fetch of it ends, when data is written into it by hand. Also when its
+   * gcTime changes, so the countdown starts over with the new one.
+   */
   #scheduleGc(): void {
     this.#clearGcTimer()
 

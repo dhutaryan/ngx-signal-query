@@ -86,7 +86,7 @@ export type FetchArgsBuilder<TOptions, TData, TError, TQueryFnData> = (
  * One observed query: its reactive {@link QueryResult} and a `destroy()` that
  * ends the observation (unregisters from the query, stops polling). For a
  * layer built on the observer, such as an infinite query's: the state of the
- * query it shows, its options, and `asObserver`, which runs `act` on its
+ * observed query, its options, and `asObserver`, which runs `act` on its
  * behalf with the live options (see createQueryObserver).
  *
  * @internal
@@ -204,16 +204,16 @@ export function createQueryObserver<
 
   // The observer holds its query in several places, each for its own reader:
   // - switched: the query that the key or follow effect last moved it to;
-  // - query: the query that the result signals read: switched, or, before
-  //   the key effect first runs, the current key's query, resolved on the
-  //   spot;
+  // - query: the observed query, which the result signals read: switched,
+  //   or, before the key effect first runs, the current key's query,
+  //   resolved on the spot;
   // - shown: the query the subscriber is registered with, which catches up
   //   with query when the subscriber effect runs;
   // - cached: the cache's entry for the key right now, undefined after
   //   removeQueries;
   // - since: the query that resolve() turned the observer to last, with its
-  //   fetchedCount, isFetchedAfterMount's baseline (switchedSince holds
-  //   since as it was at the last switch).
+  //   fetchedCount at that point: isFetchedAfterMount's baseline.
+  //   switchedSince holds `since` as it was at the last switch.
 
   // A query the observer turned to, and how many times something had landed
   // in it by then.
@@ -227,7 +227,7 @@ export function createQueryObserver<
   // InternalQueryState.fetchedCount).
   const since = signal<TurnedTo | undefined>(undefined)
 
-  // since as it was when the effects last switched the observer to a query
+  // `since` as it was when the effects last switched the observer to a query
   // (see switchTo). The observer may turn to another query before the
   // effects move it there, as refetch() does for the next key. If the key
   // comes back before they do, they never left the query they switched to,
@@ -238,18 +238,18 @@ export function createQueryObserver<
   // initialData of `options` (see applyInitialData). `options` are those
   // that the effects go by, unless a fetch made on the observer's behalf
   // passes the live ones that it fetches with, like asObserver and the poll
-  // do. It writes signals (the cache's entries, the query's state, since),
+  // do. It writes signals (the cache's entries, the query's state, `since`),
   // so callers run it untracked: reached from a computed, a tracked write
   // throws NG0600.
   //
   // When it gives another query than last time (the first one, a new key's,
   // a key coming back, a new entry after removeQueries or clear()), the
-  // observer turns to that query: since records it with its fetchedCount,
-  // isFetchedAfterMount's baseline. For the query the effects last switched
-  // to, since takes back the baseline noted at the switch (switchedSince).
-  // Each fetch that the observer asks for resolves its query here first, so
-  // a response that comes back at once counts as landing after the
-  // baseline, however late the effects catch up.
+  // observer turns to that query: `since` records it with its fetchedCount
+  // at that point, isFetchedAfterMount's baseline. For the query the effects
+  // last switched to, `since` takes back the baseline noted at the switch
+  // (switchedSince). Each fetch that the observer asks for resolves its
+  // query here first, so a response that comes back at once counts as
+  // landing after the baseline, however late the effects catch up.
   const resolve = (
     key: QueryKey,
     options: ReturnType<typeof defaultedOptions> = untracked(defaultedOptions),
@@ -311,7 +311,7 @@ export function createQueryObserver<
 
   // Switches the observer to q, first keeping the data of the query it
   // leaves for the placeholderData function. q comes from resolve(), which
-  // has just turned the observer to it, so since is q's.
+  // has just turned the observer to it, so `since` is q's.
   const switchTo = (q: Query<TData, TError, TQueryFnData>): void => {
     untracked(() => {
       const prev = switched()
@@ -400,9 +400,10 @@ export function createQueryObserver<
   // - a refetch on window focus or on reconnect;
   // - the refetch an invalidation queues during a first load;
   // - the queryFn of each request after a fetch's first, a retry's included.
-  // Only refetch() fetches whether the observer is enabled or not, and so do
-  // the refetch it queues and the later requests of a fetch that it asked
-  // for last (see Query#nextQueryFn).
+  // What the observer is asked for by hand, refetch(), fetchNextPage() and
+  // fetchPreviousPage(), fetches whether it is enabled or not, and so do the
+  // refetch that refetch() queues and the later requests of a fetch that the
+  // observer asked for last (see Query#nextQueryFn).
   const fetchOptionsFor = (
     q: Query<TData, TError, TQueryFnData>,
   ): ReturnType<
@@ -472,8 +473,9 @@ export function createQueryObserver<
       })
     })
 
-  // Subscriber effect: registers the subscriber with the query the observer
-  // shows, and moves it there on a switch.
+  // Subscriber effect: registers the subscriber with the observed query,
+  // query(), and moves it there on a switch. shown is the query it last
+  // registered with.
   track((cleanup) => {
     const q = query()
 
@@ -645,9 +647,9 @@ export function createQueryObserver<
     isError: computed(() => resolved().status === 'error'),
     isPlaceholderData: computed(() => resolved().isPlaceholderData),
     isFetched: computed(() => query().state().fetchedCount > 0),
-    // query() first: a first read resolves the query, which sets since. Until
-    // the effects catch up with a query the observer has turned to, the
-    // query it shows has nothing landed since.
+    // query() first: a first read resolves the query, which sets `since`.
+    // Until the effects catch up with a query the observer has turned to,
+    // the observed query has nothing landed since.
     isFetchedAfterMount: computed(() => {
       const q = query()
       const turnedTo = since()
