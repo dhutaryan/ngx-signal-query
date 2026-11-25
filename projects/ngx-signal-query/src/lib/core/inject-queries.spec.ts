@@ -15,6 +15,7 @@ import {
   TestBed,
   fakeAsync,
   flush,
+  flushMicrotasks,
   tick,
 } from '@angular/core/testing'
 import { type Observable, map, of, Subject, throwError, timer } from 'rxjs'
@@ -26,11 +27,13 @@ import {
   restoreVisibility,
   setVisibility,
 } from '../../spec-helpers/page-events'
+import { settled } from '../../spec-helpers/promises'
+import { withQueryCache } from '../features/with-query-cache'
 import { injectQueries, type InjectQueriesOptions } from './inject-queries'
 import { injectQuery } from './inject-query'
 import { provideQueryClient } from './provider'
 import { QueryClient } from './query-client'
-import type { QueryKey, QueryResult } from './types'
+import type { QueryKey, QueryOptions, QueryResult } from './types'
 
 // Mounts injectQueries in a host component, as mountHost() mounts anything:
 // its options may read the host's input.required `value`. Returns the results
@@ -538,6 +541,563 @@ describe('injectQueries', () => {
       expect(results().length).toBe(1)
       expect(query?.observerCount).toBe(1)
     })
+
+    it('follows a list whose array of queries changes in place', () => {
+      // The options kept in a signal: adding a todo pushes it into their
+      // array, and the options object around it is new.
+      const options = signal<InjectQueriesOptions<string>>({
+        queries: [{ queryKey: ['todo', 1], queryFn: () => of('todo-1') }],
+      })
+      const { fixture, results } = mount(() => options())
+
+      options.update((current) => {
+        current.queries.push({
+          queryKey: ['todo', 2],
+          queryFn: () => of('todo-2'),
+        })
+
+        return { ...current }
+      })
+      fixture.detectChanges()
+
+      expect(results().map((todo) => todo.data())).toEqual(['todo-1', 'todo-2'])
+    })
+  })
+
+  // The library goes by the options that the list gives each query's key
+  // right now, even before change detection updates the results: a queryFn
+  // that reads a signal when it runs, like `() => api(this.id())` does,
+  // already asks for what the signal holds by then.
+  describe('for a query of the list', () => {
+    // A todo API that answers each request at once with the todo that it
+    // asks for: `api.calls.allArgs()` lists the ids that it was asked for.
+    const todoApi = () =>
+      jasmine
+        .createSpy<(id: number) => Observable<string>>('api')
+        .and.callFake((id) => of(`todo ${id}`))
+
+    // Once a key has left the list, nothing fetches its query for the list
+    // any more, whether change detection has run since or not.
+    describe('once its key has left the list', () => {
+      // A list with a query for the todo that `id` names, as a page showing
+      // the selected todo holds it: its queryFn reads `id` when it runs. `id`
+      // is a signal of the spec's own, so the list moves on to the next todo
+      // the moment it's set, before change detection.
+      function selected(
+        api: (id: number) => Observable<string>,
+        options: Partial<QueryOptions<string>> = {},
+      ) {
+        const id = signal(1)
+        const { fixture, results } = mount(() => ({
+          queries: [
+            { queryKey: ['todo', id()], queryFn: () => api(id()), ...options },
+          ],
+        }))
+
+        return { fixture, results, id }
+      }
+
+      it('fails with the last error when a retry comes due before change detection', fakeAsync(() => {
+        const api = todoApi()
+        const down = new Error('down')
+
+        // Todo 1 is down.
+        api.withArgs(1).and.returnValue(throwError(() => down))
+
+        const { id, results } = selected(api, { retry: 1, retryDelay: 100 })
+
+        // In an app without zone.js, a timer that moves the list on, a
+        // debounce say, may run while the retry waits, and the retry may come
+        // due before change detection runs.
+        tick(50)
+        id.set(2)
+        tick(50)
+
+        expect(api.calls.allArgs()).toEqual([[1]])
+        expect(results()[0].error()).toBe(down)
+      }))
+
+      it("doesn't refetch it when it's invalidated before change detection", () => {
+        const api = todoApi()
+        const { id } = selected(api)
+
+        // As a click handler that selects the next todo and refreshes the
+        // todos would.
+        id.set(2)
+        void client.invalidateQueries({ queryKey: ['todo'] })
+
+        expect(api.calls.allArgs()).toEqual([[1]])
+        expect(client.getQueryData(['todo', 1])).toBe('todo 1')
+      })
+
+      it("doesn't poll it before change detection", fakeAsync(() => {
+        const api = todoApi()
+        const { fixture, id } = selected(api, { refetchInterval: 100 })
+
+        tick(99)
+        id.set(2)
+        tick(1)
+
+        expect(api.calls.allArgs()).toEqual([[1]])
+        expect(client.getQueryData(['todo', 1])).toBe('todo 1')
+
+        fixture.destroy()
+        flush()
+      }))
+
+      it("doesn't refetch it when the user comes back to the page before change detection", () => {
+        const api = todoApi()
+        const { id } = selected(api)
+
+        id.set(2)
+        leaveAndComeBack()
+
+        expect(api.calls.allArgs()).toEqual([[1]])
+        expect(client.getQueryData(['todo', 1])).toBe('todo 1')
+      })
+
+      it('drops the refetch that an invalidation queued during its first load', () => {
+        const api = todoApi()
+        const load = new Subject<string>()
+
+        // Todo 1's first load is still in flight.
+        api.withArgs(1).and.returnValue(load)
+
+        const { id } = selected(api)
+
+        void client.invalidateQueries({ queryKey: ['todo'] })
+        id.set(2)
+        // The load lands before change detection.
+        load.next('todo 1')
+        load.complete()
+
+        expect(api.calls.allArgs()).toEqual([[1]])
+        expect(client.getQueryData(['todo', 1])).toBe('todo 1')
+      })
+
+      it('drops the refetch that its refetch() asked for during its first load', fakeAsync(() => {
+        const api = todoApi()
+        const load = new Subject<string>()
+
+        // Todo 1's first load is still in flight.
+        api.withArgs(1).and.returnValue(load)
+
+        const { id, results } = selected(api)
+        const refetched = settled(results()[0].refetch())
+
+        id.set(2)
+        // The load lands before change detection.
+        load.next('todo 1')
+        load.complete()
+        flushMicrotasks()
+
+        expect(api.calls.allArgs()).toEqual([[1]])
+        expect(client.getQueryData(['todo', 1])).toBe('todo 1')
+        expect(refetched.value).toEqual({ data: 'todo 1', error: null })
+      }))
+
+      it('leaves it to the component still showing it how setQueryData merges into it', () => {
+        const listMerge = jasmine
+          .createSpy('listMerge')
+          .and.callFake((_previous: unknown, data: unknown) => data)
+        const otherMerge = jasmine
+          .createSpy('otherMerge')
+          .and.callFake((_previous: unknown, data: unknown) => data)
+        const { id } = selected(() => of('todo 1'), {
+          staleTime: Infinity,
+          structuralSharing: listMerge,
+        })
+
+        // Another component shows todo 1, with a merge of its own.
+        mountHost(() =>
+          injectQuery(() => ({
+            queryKey: ['todo', 1],
+            queryFn: () => of('todo 1'),
+            staleTime: Infinity,
+            structuralSharing: otherMerge,
+          })),
+        )
+        listMerge.calls.reset()
+
+        id.set(2)
+        client.setQueryData(['todo', 1], 'edited')
+
+        expect(listMerge).not.toHaveBeenCalled()
+        expect(otherMerge).toHaveBeenCalledOnceWith('todo 1', 'edited')
+      })
+
+      it('makes no request for refetch() of its result before change detection', fakeAsync(() => {
+        const api = todoApi()
+        const { id, results } = selected(api)
+
+        id.set(2)
+
+        const refetched = settled(results()[0].refetch())
+
+        flushMicrotasks()
+
+        expect(api.calls.allArgs()).toEqual([[1]])
+        expect(refetched.value).toEqual({ data: 'todo 1', error: null })
+      }))
+
+      it('makes no request for refetch() of its result after change detection', fakeAsync(() => {
+        const api = todoApi()
+        const { fixture, id, results } = selected(api)
+        const [first] = results()
+
+        id.set(2)
+        fixture.detectChanges()
+
+        const refetched = settled(first.refetch())
+
+        flushMicrotasks()
+
+        // Only the load of todo 2, by the query that took its place.
+        expect(api.calls.allArgs()).toEqual([[1], [2]])
+        expect(refetched.value).toEqual({ data: 'todo 1', error: null })
+      }))
+    })
+
+    describe('while its key stays in the list', () => {
+      // A page showing the selected todo, todo 1, next to the one before it,
+      // todo 2: each queryFn reads its signal when it runs, and so do the
+      // `options` a spec adds to each query, which learn which of the two it
+      // shows. Going back trades their keys, and `back()` does it before
+      // change detection.
+      function selectedAndPrevious(
+        api: (id: number) => Observable<string>,
+        options: (
+          id: () => number,
+          shows: 'selected' | 'previous',
+        ) => Partial<QueryOptions<string>> = () => ({}),
+      ) {
+        const current = signal(1)
+        const previous = signal(2)
+        const { fixture, results } = mount(() => ({
+          queries: [
+            {
+              queryKey: ['todo', current()],
+              queryFn: () => api(current()),
+              ...options(current, 'selected'),
+            },
+            {
+              queryKey: ['todo', previous()],
+              queryFn: () => api(previous()),
+              ...options(previous, 'previous'),
+            },
+          ],
+        }))
+        const back = (): void => {
+          current.set(2)
+          previous.set(1)
+        }
+
+        return { fixture, results, back }
+      }
+
+      it('refetches it with the queryFn that the list gives its key now', () => {
+        const api = todoApi()
+        const { back } = selectedAndPrevious(api)
+
+        back()
+        void client.invalidateQueries({ queryKey: ['todo'] })
+
+        expect(api.calls.allArgs()).toEqual([[1], [2], [1], [2]])
+        expect(client.getQueryData(['todo', 1])).toBe('todo 1')
+        expect(client.getQueryData(['todo', 2])).toBe('todo 2')
+      })
+
+      it('refetches it by hand with the queryFn that the list gives its key now', fakeAsync(() => {
+        const api = todoApi()
+        const { results, back } = selectedAndPrevious(api)
+        // The result of todo 1.
+        const [first] = results()
+
+        back()
+
+        const refetched = settled(first.refetch())
+
+        flushMicrotasks()
+
+        expect(api.calls.allArgs()).toEqual([[1], [2], [1]])
+        expect(refetched.value).toEqual({ data: 'todo 1', error: null })
+      }))
+
+      it('seeds it with the initialData that the list gives its key now when refetch() puts it back', () => {
+        const api = todoApi()
+        // Each todo shows a summary from elsewhere until it loads.
+        const { results, back } = selectedAndPrevious(api, (id) => ({
+          initialData: () => `summary ${id()}`,
+        }))
+        // The result of todo 1.
+        const [first] = results()
+
+        client.removeQueries({ queryKey: ['todo', 1], exact: true })
+        back()
+        // The refetch is still in flight.
+        api.and.returnValue(new Subject<string>())
+        void first.refetch()
+
+        expect(client.getQueryData(['todo', 1])).toBe('summary 1')
+      })
+
+      it('seeds it with the initialData that the list gives its key now when a poll puts it back', fakeAsync(() => {
+        const api = todoApi()
+        // Each todo shows a summary from elsewhere until it loads, and polls.
+        const { fixture, back } = selectedAndPrevious(api, (id) => ({
+          initialData: () => `summary ${id()}`,
+          refetchInterval: 100,
+        }))
+
+        client.removeQueries({ queryKey: ['todo', 1], exact: true })
+        back()
+        // The poll is still in flight.
+        api.and.returnValue(new Subject<string>())
+        tick(100)
+
+        expect(client.getQueryData(['todo', 1])).toBe('summary 1')
+
+        fixture.destroy()
+        flush()
+      }))
+
+      it('retries it with the queryFn that the list gives its key now, also when that query is turned off', fakeAsync(() => {
+        const api = todoApi()
+        const down = new Error('down')
+
+        // Todo 1's first request fails.
+        api.withArgs(1).and.returnValues(
+          throwError(() => down),
+          of('todo 1'),
+        )
+
+        // The todo before the selected one shows what the cache holds, and
+        // fetches nothing.
+        const { back } = selectedAndPrevious(api, (_id, shows) => ({
+          retry: 1,
+          retryDelay: 100,
+          enabled: shows === 'selected',
+        }))
+
+        tick(50)
+        // Going back moves todo 1 to the query that is turned off, while its
+        // retry waits.
+        back()
+        tick(50)
+
+        expect(api.calls.allArgs()).toEqual([[1], [1]])
+        expect(client.getQueryData(['todo', 1])).toBe('todo 1')
+      }))
+
+      it("doesn't refetch it when it's invalidated after the list turned it off", () => {
+        const api = todoApi()
+        const enabled = signal(true)
+
+        mount(() => ({
+          queries: [
+            {
+              queryKey: ['todo', 1],
+              queryFn: () => api(1),
+              enabled: enabled(),
+            },
+          ],
+        }))
+
+        // As a click handler that turns the todo off and refreshes the todos
+        // would, before change detection.
+        enabled.set(false)
+        void client.invalidateQueries({ queryKey: ['todo'] })
+
+        expect(api.calls.allArgs()).toEqual([[1]])
+      })
+
+      it('refetches it when the user comes back to the page, as the list asks now', () => {
+        const api = todoApi()
+        // A setting that has the todo refreshed whenever the user comes back
+        // to the page; off, it's kept as it is.
+        const refresh = signal(false)
+
+        mount(() => ({
+          queries: [
+            {
+              queryKey: ['todo', 1],
+              queryFn: () => api(1),
+              staleTime: refresh() ? 0 : Infinity,
+              refetchOnWindowFocus: refresh(),
+            },
+          ],
+        }))
+
+        // Turned on, and the user leaves and comes back, before change
+        // detection.
+        refresh.set(true)
+        leaveAndComeBack()
+
+        expect(api.calls.allArgs()).toEqual([[1], [1]])
+      })
+
+      it('retries a refetch of it as many times as the list says now', fakeAsync(() => {
+        const api = todoApi()
+        const down = new Error('down')
+        const retries = signal(0)
+
+        // The load works, the refetch fails once, and its retry works.
+        api.and.returnValues(
+          of('todo 1'),
+          throwError(() => down),
+          of('todo 1 again'),
+        )
+
+        mount(() => ({
+          queries: [
+            {
+              queryKey: ['todo', 1],
+              queryFn: () => api(1),
+              retry: retries(),
+              retryDelay: 100,
+            },
+          ],
+        }))
+
+        // The list asks for a retry and the todos are refreshed, before
+        // change detection.
+        retries.set(1)
+        void client.invalidateQueries({ queryKey: ['todo'] })
+        tick(100)
+
+        expect(api).toHaveBeenCalledTimes(3)
+        expect(client.getQueryData(['todo', 1])).toBe('todo 1 again')
+      }))
+
+      it("hands the app's callbacks the meta that the list gives it now", fakeAsync(() => {
+        const metas: unknown[] = []
+
+        TestBed.resetTestingModule()
+        TestBed.configureTestingModule({
+          providers: [
+            provideQueryClient(
+              withQueryCache({
+                onSuccess: (_data, query) => metas.push(query.meta),
+              }),
+            ),
+          ],
+        })
+
+        const page = signal(1)
+
+        mount(() => ({
+          queries: [
+            {
+              queryKey: ['todo', 1],
+              queryFn: () => of('todo 1'),
+              meta: { page: page() },
+            },
+          ],
+        }))
+
+        // The list moves to another page and the todos are refreshed, before
+        // change detection.
+        page.set(2)
+        void TestBed.inject(QueryClient).invalidateQueries({
+          queryKey: ['todo'],
+        })
+        flush()
+
+        // The load on mount, then the refetch.
+        expect(metas).toEqual([{ page: 1 }, { page: 2 }])
+      }))
+
+      it('refetches a key listed twice when only its second query is enabled', () => {
+        const api = todoApi()
+
+        // Only the second one is enabled: it loads todo 1, and it refetches
+        // todo 1 when it's invalidated.
+        mount(() => ({
+          queries: [false, true].map((enabled) => ({
+            queryKey: ['todo', 1],
+            queryFn: () => api(1),
+            enabled,
+          })),
+        }))
+        void client.invalidateQueries({ queryKey: ['todo', 1] })
+
+        expect(api.calls.allArgs()).toEqual([[1], [1]])
+      })
+
+      it('refetches each query of a key listed twice with its own queryFn, also once the list has changed', () => {
+        const api = jasmine.createSpy('api').and.returnValue(of('todo 1'))
+        const retries = signal(0)
+        const { fixture, results } = mount(() => ({
+          queries: ['first', 'second'].map((name) => ({
+            queryKey: ['todo', 1],
+            queryFn: () => api(name),
+            staleTime: Infinity,
+            retry: retries(),
+          })),
+        }))
+
+        // The list changes, its keys the same.
+        retries.set(1)
+        fixture.detectChanges()
+        api.calls.reset()
+
+        void results()[0].refetch()
+        void results()[1].refetch()
+
+        expect(api.calls.allArgs()).toEqual([['first'], ['second']])
+      })
+
+      it('makes no request for refetch() of the second query of a key once the list holds the key only once', fakeAsync(() => {
+        const api = todoApi()
+        const count = signal(2)
+        const { results } = mount(() => ({
+          queries: Array.from({ length: count() }, () => ({
+            queryKey: ['todo', 1],
+            queryFn: () => api(1),
+            staleTime: Infinity,
+          })),
+        }))
+
+        // The list drops the second one, before change detection.
+        count.set(1)
+
+        const refetched = settled(results()[1].refetch())
+
+        flushMicrotasks()
+
+        expect(api.calls.allArgs()).toEqual([[1]])
+        expect(refetched.value).toEqual({ data: 'todo 1', error: null })
+      }))
+    })
+
+    // Like a detail page whose item is gone on sign-out before Angular
+    // destroys it: the options function throws until it has an item again.
+    describe('while the options function throws', () => {
+      it("doesn't refetch it when it's invalidated, and does once the options function gives options again", () => {
+        const api = todoApi()
+        const item = signal<{ id: number } | null>({ id: 1 })
+
+        mount(() => {
+          // The queryFn takes the id along, so the request it makes stands
+          // even when the options function can't read the item.
+          const { id } = item()!
+
+          return {
+            queries: [{ queryKey: ['todo', id], queryFn: () => api(id) }],
+          }
+        })
+
+        item.set(null)
+        void client.invalidateQueries({ queryKey: ['todo'] })
+
+        expect(api.calls.allArgs()).toEqual([[1]])
+
+        item.set({ id: 1 })
+        void client.invalidateQueries({ queryKey: ['todo'] })
+
+        expect(api.calls.allArgs()).toEqual([[1], [1]])
+      })
+    })
   })
 
   describe('aggregation', () => {
@@ -622,9 +1182,6 @@ describe('injectQueries', () => {
     }))
   })
 
-  // optionsFn may read what a component only has once it's rendered: its
-  // inputs, and fields declared after the call. So it must not run while the
-  // host is being constructed.
   describe('after removeQueries', () => {
     it('follows a query of the list back into the cache', () => {
       const { fixture, results } = mount(
@@ -647,6 +1204,9 @@ describe('injectQueries', () => {
     })
   })
 
+  // optionsFn may read what a component only has once it's rendered: its
+  // inputs, and fields declared after the call. So it must not run while the
+  // host is being constructed.
   describe('options evaluation', () => {
     it('does not call optionsFn while the host is being constructed', () => {
       const optionsFn = jasmine.createSpy('optionsFn').and.returnValue({
@@ -780,6 +1340,73 @@ describe('injectQueries', () => {
       expect(optionsFn).not.toHaveBeenCalled()
       expect(client.getQueryCache().get(['gone'])).toBeUndefined()
     })
+
+    it('runs the options function once per change of what it reads', () => {
+      const ids = signal([1])
+      let runs = 0
+      const { fixture } = mount(() => {
+        runs++
+
+        return {
+          queries: ids().map((id) => ({
+            queryKey: ['todo', id],
+            queryFn: () => of(`todo-${id}`),
+          })),
+        }
+      })
+
+      expect(runs).toBe(1)
+
+      // The library reads the list in between: an invalidation.
+      ids.set([1, 2])
+      void client.invalidateQueries({ queryKey: ['todo'] })
+      fixture.detectChanges()
+
+      expect(runs).toBe(2)
+    })
+
+    describe('when it gives a query a new key on every run', () => {
+      // Like a key with the current time in it would: each run of the options
+      // function gives the query another key.
+      function mountReport(queryFn: () => Observable<string>) {
+        let runs = 0
+
+        @Component({ template: '' })
+        class Host {
+          readonly results = injectQueries<string>(() => ({
+            queries: [{ queryKey: ['report', ++runs], queryFn }],
+          }))
+        }
+
+        return TestBed.createComponent(Host)
+      }
+
+      it('loads the query', () => {
+        const queryFn = jasmine
+          .createSpy('queryFn')
+          .and.returnValue(of('report'))
+        const fixture = mountReport(queryFn)
+
+        fixture.detectChanges()
+
+        expect(queryFn).toHaveBeenCalledTimes(1)
+        expect(fixture.componentInstance.results()[0].data()).toBe('report')
+      })
+
+      it('keeps the result read before change detection', () => {
+        const queryFn = jasmine
+          .createSpy('queryFn')
+          .and.returnValue(of('report'))
+        const fixture = mountReport(queryFn)
+        // Read before change detection, as a template or a computed may.
+        const [first] = fixture.componentInstance.results()
+
+        fixture.detectChanges()
+
+        expect(fixture.componentInstance.results()[0]).toBe(first)
+        expect(first.data()).toBe('report')
+      })
+    })
   })
 
   describe('in a hidden tab', () => {
@@ -801,6 +1428,57 @@ describe('injectQueries', () => {
 
       // Each fetched once, on mount.
       expect(queryFn.calls.allArgs()).toEqual([[1], [2]])
+
+      fixture.destroy()
+    }))
+
+    // A query of the list that polls every 100 ms, mounted, then hidden:
+    // `background` says whether it keeps polling there.
+    function pollingInBackground(
+      queryFn: () => Observable<string>,
+      keepPolling: boolean,
+    ) {
+      const background = signal(keepPolling)
+      const { fixture } = mount(() => ({
+        queries: [
+          {
+            queryKey: ['report'],
+            queryFn,
+            refetchInterval: 100,
+            refetchIntervalInBackground: background(),
+          },
+        ],
+      }))
+
+      setVisibility('hidden')
+
+      return { fixture, background }
+    }
+
+    it('polls a query once the list asks to keep polling there, before change detection', fakeAsync(() => {
+      const queryFn = jasmine.createSpy('queryFn').and.returnValue(of('report'))
+      const { fixture, background } = pollingInBackground(queryFn, false)
+
+      tick(50)
+      background.set(true)
+      tick(50)
+
+      // Once on mount, then the poll.
+      expect(queryFn).toHaveBeenCalledTimes(2)
+
+      fixture.destroy()
+    }))
+
+    it('stops polling a query once the list asks to stop polling there, before change detection', fakeAsync(() => {
+      const queryFn = jasmine.createSpy('queryFn').and.returnValue(of('report'))
+      const { fixture, background } = pollingInBackground(queryFn, true)
+
+      tick(50)
+      background.set(false)
+      tick(50)
+
+      // Once on mount only.
+      expect(queryFn).toHaveBeenCalledTimes(1)
 
       fixture.destroy()
     }))

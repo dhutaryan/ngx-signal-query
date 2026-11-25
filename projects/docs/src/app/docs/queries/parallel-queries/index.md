@@ -87,6 +87,8 @@ So adding one id to a list of fifty fires one request, not fifty-one, and reorde
 
 Results are matched by key, so the same key twice in `queries` yields two results backed by one cache entry.
 
+Whatever is fetched for the list's queries goes by what the options function gives right now, even before change detection updates the results. A query whose key has left the list isn't fetched for the list any more: not by a retry, a poll, an invalidation or a refetch on window focus or reconnect, and `refetch()` on its result fetches nothing and resolves with what the result shows. A key that stays is fetched with the options that the list gives it now. So a query function that reads a signal when it runs, the id of the selected todo say, doesn't fetch the next todo into the key of the one before.
+
 ## Aggregating results
 
 The return value is a signal of results, so summarising across them is a `computed`:

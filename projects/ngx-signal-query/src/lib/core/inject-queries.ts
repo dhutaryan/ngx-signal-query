@@ -26,8 +26,11 @@ export interface InjectQueriesOptions<TData, TError = Error> {
   queries: Array<QueryOptions<TData, TError>>
 }
 
-// A query kept alive by injectQueries: its observer plus the signal feeding it
-// options, written in place for as long as the key stays in the list.
+// A query kept alive by injectQueries: its observer, and the signal that
+// feeds the observer's effects their options. The effect of injectQueries
+// writes that signal in place for as long as the key stays in the list.
+// Whatever is fetched for the query goes by what optionsFn gives right now
+// instead (see listed).
 interface Entry<TData, TError> {
   hash: string
   options: WritableSignal<QueryOptions<TData, TError>>
@@ -44,10 +47,12 @@ interface Entry<TData, TError> {
  * `staleTime`, retries, error and observer. `optionsFn` is reactive: when the
  * array changes, queries whose `queryKey` is still present are kept (with
  * their options updated), new keys start fetching, and dropped keys release
- * their observer. As with `injectQuery`, `optionsFn` isn't called before the
- * results are first needed, so it can read inputs, `input.required` included,
- * and fields declared after the call. Aggregate across the results with
- * `computed`.
+ * their observer. Whatever is fetched for the queries goes by what
+ * `optionsFn` gives right now, even before change detection updates the
+ * results: a dropped key isn't fetched for the list any more. As with
+ * `injectQuery`, `optionsFn` isn't called before the results are first
+ * needed, so it can read inputs, `input.required` included, and fields
+ * declared after the call. Aggregate across the results with `computed`.
  *
  * Must run in an injection context, or be given an explicit `injector`.
  *
@@ -84,14 +89,52 @@ export function injectQueries<TData, TError = Error>(
   let current: Array<QueryResult<TData, TError>> = []
   let destroyed = false
 
+  // The queries that optionsFn gives, from one run of it each time what it
+  // reads changes. The effect below syncs the entries from them, a read
+  // before the effect's first run does too, and listed finds each entry's
+  // options in them: since all of them see the same run, an entry always
+  // finds its own key, even when optionsFn reads values that aren't signals
+  // or puts the current time in a key. Every run counts as a change, also
+  // one that gives back the same array changed in place: the entries are
+  // synced after each run, as they would be if the effect ran optionsFn
+  // itself.
+  const currentQueries = computed(() => optionsFn().queries, {
+    equal: () => false,
+  })
+
+  // currentQueries by key hash, in list order for a key listed more than
+  // once: a sync run now would hand each entry the options found here at its
+  // hash and rank (see sync). Every fetch made for an entry goes by them
+  // already, not by the options that the effect below handed it last: until
+  // change detection runs that effect, a queryFn that reads a signal when it
+  // runs, like `() => api(this.id())` does, asks for what the signal holds
+  // now. An entry that finds nothing at its hash and rank has left the list,
+  // and asks for no query any more.
+  const listed = computed(() => {
+    const byHash = new Map<string, Array<QueryOptions<TData, TError>>>()
+
+    for (const queryOptions of currentQueries()) {
+      const hash = hashKey(queryOptions.queryKey)
+      const list = byHash.get(hash) ?? []
+
+      list.push(queryOptions)
+      byHash.set(hash, list)
+    }
+
+    return byHash
+  })
+
   // Reconciles the entries with a new list, matching by key hash the way
   // TanStack's QueriesObserver does: a matching entry is reused and handed the
   // new options, an unmatched query gets a fresh observer, and whatever is
-  // left over is destroyed. Duplicate keys are paired up one-to-one in order.
+  // left over is destroyed. Duplicate keys are paired up one-to-one in order,
+  // so an entry keeps its rank among the entries of its key while it lives.
   const sync = (
     queries: Array<QueryOptions<TData, TError>>,
   ): Array<QueryResult<TData, TError>> => {
     const pool = new Map<string, Array<Entry<TData, TError>>>()
+    // How many queries of each key the list has had so far.
+    const seen = new Map<string, number>()
 
     for (const entry of entries) {
       const list = pool.get(entry.hash) ?? []
@@ -102,7 +145,11 @@ export function injectQueries<TData, TError = Error>(
 
     const next = queries.map((queryOptions) => {
       const hash = hashKey(queryOptions.queryKey)
+      // Which of the list's queries with this key it is, counting from 0.
+      const rank = seen.get(hash) ?? 0
       const match = pool.get(hash)?.shift()
+
+      seen.set(hash, rank + 1)
 
       if (match) {
         match.options.set(queryOptions)
@@ -119,6 +166,7 @@ export function injectQueries<TData, TError = Error>(
           () => optionsSignal(),
           injector,
           fetchArgsOf,
+          () => listed().get(hash)?.[rank] ?? null,
         ),
       }
     })
@@ -147,7 +195,7 @@ export function injectQueries<TData, TError = Error>(
 
   effect(
     () => {
-      const { queries } = optionsFn()
+      const queries = currentQueries()
 
       untracked(() => synced.set(sync(queries)))
     },
@@ -166,6 +214,6 @@ export function injectQueries<TData, TError = Error>(
   // it already sees the queries; once destroyed, it creates nothing.
   return computed(
     () =>
-      synced() ?? (destroyed ? [] : untracked(() => sync(optionsFn().queries))),
+      synced() ?? (destroyed ? [] : untracked(() => sync(currentQueries()))),
   )
 }

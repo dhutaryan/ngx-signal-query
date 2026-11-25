@@ -54,8 +54,8 @@ export function createInfiniteQueryObserver<TPage, TError, TPageParam>(
     direction: FetchDirection,
   ): ReturnType<
     InfiniteQueryResult<TPage, TError, TPageParam>['fetchNextPage']
-  > =>
-    asObserver(({ q, options, args, by }) => {
+  > => {
+    const fetched = asObserver(({ q, options, args, by }) => {
       const { data, isFetching } = q.state()
 
       if (data === undefined || data.pages.length === 0 || isFetching) {
@@ -66,8 +66,11 @@ export function createInfiniteQueryObserver<TPage, TError, TPageParam>(
         ? Promise.resolve(data)
         : q.fetch({ ...args, direction }, { by })
     })
+
+    return Promise.resolve(fetched)
       .catch(() => undefined)
       .then(() => ({ data: result.data(), error: result.error() }))
+  }
 
   // Whether there's a page to add, read from the pages the query holds, not
   // from placeholder data, as in TanStack.
