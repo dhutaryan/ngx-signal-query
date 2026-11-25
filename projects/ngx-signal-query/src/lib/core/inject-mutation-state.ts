@@ -47,15 +47,14 @@ export type MutationStateOptions<
  * or service started them, in the order they started: each run's state, or
  * what `select` returns for it.
  *
- * It lists what the mutation cache holds, until `clear()` empties it: the
- * runs in flight, hooks included, and the run that each
- * {@link injectMutation} still shows. A
- * mutation shows its latest run until its next `mutate()` or `reset()`, a
- * change of its `mutationKey`, or the destroy of the component or service
- * where it ran. A run that's done and that no mutation shows leaves the list
- * at once, so the list isn't a history of writes: what has to outlive the
- * component that started a write, such as a message about its failure,
- * belongs in the mutation's own hooks, which run either way.
+ * It lists what the mutation cache holds, until `clear()` empties it: the runs
+ * in flight, hooks included, and the run that each {@link injectMutation} still
+ * shows. A mutation shows its latest run until its next `mutate()` or
+ * `reset()`, a change of its `mutationKey`, or the destroy of the component or
+ * service where it ran. A run that's done and that no mutation shows leaves the
+ * list at once, so the list isn't a history of writes: what has to outlive the
+ * component that started a write, such as a message about its failure, belongs
+ * in the mutation's own hooks, which run either way.
  *
  * The options are a function, called inside the signal's computation, the
  * way {@link injectQuery} calls its options, so the filters and `select` can

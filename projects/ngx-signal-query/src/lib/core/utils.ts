@@ -1,8 +1,11 @@
 import type { QueryKey, StructuralSharingValue, Updater } from './types'
 
-// Resolves an updater: calls it with the previous value if it's a function,
-// otherwise uses it as the value directly.
-/** @internal */
+/**
+ * Resolves an updater: calls it with the previous value if it's a function,
+ * otherwise uses it as the value directly.
+ *
+ * @internal
+ */
 export function functionalUpdate<TInput, TOutput>(
   updater: Updater<TInput, TOutput>,
   input: TInput,
@@ -12,10 +15,13 @@ export function functionalUpdate<TInput, TOutput>(
     : updater
 }
 
-// True when `filter` is a (deep) prefix of `key`, e.g. ['app'] matches
-// ['app', 1]. Used to find groups of queries, and of mutations, by partial
-// key.
-/** @internal */
+/**
+ * True when `filter` is a (deep) prefix of `key`, e.g. ['app'] matches
+ * ['app', 1]. Used to find groups of queries, and of mutations, by partial
+ * key.
+ *
+ * @internal
+ */
 export function partialMatchKey(key: QueryKey, filter: QueryKey): boolean {
   return partialDeepEqual(key, filter)
 }
@@ -57,8 +63,11 @@ export function hashKey(key: QueryKey): string {
   )
 }
 
-// Copied from: https://github.com/jonschlinkert/is-plain-object
-/** @internal */
+/**
+ * Copied from: https://github.com/jonschlinkert/is-plain-object
+ *
+ * @internal
+ */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export function isPlainObject(o: any): o is Record<PropertyKey, unknown> {
   if (!hasObjectPrototype(o)) {
@@ -107,14 +116,17 @@ function hasObjectPrototype(o: any): boolean {
 // Past this many levels replaceEqualDeep takes the new value as is.
 const MAX_SHARING_DEPTH = 500
 
-// Returns `prev` when `next` is deeply equal to it. Otherwise returns `next`
-// with every deeply equal part replaced by the one from `prev`, so whatever
-// didn't change keeps its reference. Only plain objects and arrays are
-// compared, as JSON parsing makes them: any other value (a Date, a class
-// instance, a Map) counts as changed. A value that references itself can't
-// overflow the stack: past MAX_SHARING_DEPTH levels `next` is taken as is.
-// The same algorithm as TanStack Query's replaceEqualDeep.
-/** @internal */
+/**
+ * Returns `prev` when `next` is deeply equal to it. Otherwise returns `next`
+ * with every deeply equal part replaced by the one from `prev`, so whatever
+ * didn't change keeps its reference. Only plain objects and arrays are
+ * compared, as JSON parsing makes them: any other value (a Date, a class
+ * instance, a Map) counts as changed. A value that references itself can't
+ * overflow the stack: past MAX_SHARING_DEPTH levels `next` is taken as is.
+ * The same algorithm as TanStack Query's replaceEqualDeep.
+ *
+ * @internal
+ */
 export function replaceEqualDeep<T>(prev: unknown, next: T, depth?: number): T
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -171,9 +183,12 @@ function isPlainArray(value: unknown): value is unknown[] {
   return Array.isArray(value) && value.length === Object.keys(value).length
 }
 
-// Merges new data into the data a query holds, as its structuralSharing
-// option says: shared, as is, or by the option's own function.
-/** @internal */
+/**
+ * Merges new data into the data a query holds, as its structuralSharing
+ * option says: shared, as is, or by the option's own function.
+ *
+ * @internal
+ */
 export function replaceData<TData>(
   prevData: TData | undefined,
   data: TData,
@@ -190,14 +205,17 @@ export function replaceData<TData>(
 // itself never ends, and real data is never this deep.
 const MAX_JSON_DEPTH = 500
 
-// Whether JSON carries the value over as it is: JSON.parse gives back a value
-// equal to it, of the same kind. Strings, finite numbers, booleans, null,
-// plain objects and arrays without holes do. A Date, a Map, a class instance,
-// a BigInt, NaN, undefined in an array, or a value that references itself
-// don't. An object property that's undefined counts as carried: JSON drops
-// it, and reading it gives undefined all the same. Symbol keys and extra
-// properties on an array aren't checked, and don't make it over.
-/** @internal */
+/**
+ * Whether JSON carries the value over as it is: JSON.parse gives back a value
+ * equal to it, of the same kind. Strings, finite numbers, booleans, null,
+ * plain objects and arrays without holes do. A Date, a Map, a class instance,
+ * a BigInt, NaN, undefined in an array, or a value that references itself
+ * don't. An object property that's undefined counts as carried: JSON drops
+ * it, and reading it gives undefined all the same. Symbol keys and extra
+ * properties on an array aren't checked, and don't make it over.
+ *
+ * @internal
+ */
 export function survivesJson(value: unknown, depth = 0): boolean {
   if (value === null) return true
 
@@ -243,34 +261,46 @@ export function survivesJson(value: unknown, depth = 0): boolean {
 // the timer fires at once.
 const MAX_TIMEOUT = 2 ** 31 - 1
 
-// True for a delay a timer can hold. For anything else, Infinity and negative
-// numbers included, a browser runs the timer at once. TanStack's
-// isValidTimeout checks the same, without the upper bound.
-/** @internal */
+/**
+ * True for a delay a timer can hold. For anything else, Infinity and negative
+ * numbers included, a browser runs the timer at once. TanStack's
+ * isValidTimeout checks the same, without the upper bound.
+ *
+ * @internal
+ */
 export function isValidTimeout(value: unknown): value is number {
   return typeof value === 'number' && value >= 0 && value <= MAX_TIMEOUT
 }
 
-// True for a promise, or for anything else with a then method.
-/** @internal */
+/**
+ * True for a promise, or for anything else with a then method.
+ *
+ * @internal
+ */
 export function isPromiseLike(value: unknown): value is PromiseLike<unknown> {
   return typeof (value as PromiseLike<unknown> | null)?.then === 'function'
 }
 
-// Resolves once every promise has settled, and never rejects. It resolves
-// with nothing: what the promises brought isn't the caller's to see.
-/** @internal */
+/**
+ * Resolves once every promise has settled, and never rejects. It resolves
+ * with nothing: what the promises brought isn't the caller's to see.
+ *
+ * @internal
+ */
 export function whenAllSettled(
   promises: Array<Promise<unknown> | undefined>,
 ): Promise<void> {
   return Promise.allSettled(promises).then(() => undefined)
 }
 
-// A promise with the functions that settle it. TODO: use
-// Promise.withResolvers() instead once every browser the supported Angular
-// versions target has it: Safari 17.4, Chrome 119, Firefox 121 (Angular 20
-// still targets Safari 16).
-/** @internal */
+/**
+ * A promise with the functions that settle it. TODO: use
+ * Promise.withResolvers() instead once every browser the supported Angular
+ * versions target has it: Safari 17.4, Chrome 119, Firefox 121 (Angular 20
+ * still targets Safari 16).
+ *
+ * @internal
+ */
 export interface Deferred<T> {
   promise: Promise<T>
   resolve: (value: T | PromiseLike<T>) => void

@@ -331,8 +331,8 @@ export type StructuralSharingValue<TData> =
  * }
  * ```
  */
-// An interface, unlike the other types here: only an interface takes the
-// fields an app declares on it. Empty: an app adds the fields it needs.
+// An interface, so that an app can add fields to it by declaration merging,
+// which a type alias doesn't allow. Empty: an app adds the fields it needs.
 // eslint-disable-next-line @typescript-eslint/no-empty-object-type
 export interface Register {}
 
@@ -593,13 +593,17 @@ export type QueryResult<TData, TError = Error> = {
    * Forces a fresh fetch. A fetch already in flight is cancelled, or, while
    * there's no data yet, let land and show first. Resolves once a fetch
    * started after the call has settled, or a fetch that replaced it has,
-   * with `data` and `error` as the signals above hold them then. No fetch
-   * follows one let land if it's cancelled or removed, or if by the time it
-   * lands this query has moved to another key or been destroyed and no
-   * enabled component shows the key: the promise then resolves as soon as
-   * it's done. A result of {@link injectQueries} whose key has left the list
-   * fetches nothing, and the promise resolves at once. It never rejects: a
-   * failure shows in `error`.
+   * with `data` and `error` as the signals above hold them then. It never
+   * rejects: a failure shows in `error`.
+   *
+   * It resolves sooner, with no fresh fetch:
+   * - once the fetch let land is done, if it's cancelled or removed, or if
+   *   by the time it lands this query has moved to another key or been
+   *   destroyed and no enabled component shows the key;
+   * - at once, for a result of {@link injectQueries} whose key has left the
+   *   list.
+   *
+   * While `optionsFn` throws, it throws that error, like `mutate()` does.
    */
   refetch: () => Promise<{ data: TData | undefined; error: TError | null }>
 }
@@ -692,7 +696,8 @@ export type InfiniteQueryResult<
    * is waited for instead, and no page is added: call it again once that
    * one is done. With no next page it does nothing, and with no pages yet it
    * fetches the first one. Resolves with `data` and `error` as the signals
-   * hold them once done; it never rejects: a failure shows in `error`.
+   * hold them once done; it never rejects: a failure shows in `error`. While
+   * `optionsFn` throws, it throws that error, like `refetch()` does.
    */
   fetchNextPage: () => Promise<{
     data: InfiniteData<TPage, TPageParam> | undefined

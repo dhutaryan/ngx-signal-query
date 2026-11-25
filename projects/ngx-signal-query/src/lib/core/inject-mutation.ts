@@ -26,30 +26,39 @@ import { hashKey } from './utils'
  * its state as signals.
  *
  * Unlike queries, a mutation does not run on its own — call `mutate(variables)`
- * to trigger `mutationFn`. The `onMutate` / `onSuccess` / `onError` /
- * `onSettled` lifecycle hooks make optimistic updates and cache invalidation
- * straightforward. A hook may return a promise; the mutation stays pending
- * until it settles. Mutations do not retry by default (a retried write is not
- * idempotent); opt in via `options.retry`. Whatever of `retry`, `retryDelay`
- * and the `onSuccess` / `onError` / `onSettled` hooks a mutation leaves unset
- * comes from {@link withDefaultOptions}. `mutateAsync(variables)` runs it
- * the same way and returns a promise of the run's data. Both take callbacks
- * for that call alone as a second argument, for the component's own
- * reaction to the write (see {@link MutateOptions}). Both call
- * `optionsFn` each time; if it throws, they throw its error before anything
- * is sent, and the signals keep showing the run before. `mutate()`,
- * `mutateAsync()` and `reset()` are safe to call from an effect: none makes
- * the effect depend on what it reads, such as the options or the previous
- * run. Bound to the current injection context. Destroying it doesn't cancel
- * a run in flight: the write has most likely reached the server, so the run
+ * to trigger `mutationFn`.
+ *
+ * The `onMutate` / `onSuccess` / `onError` / `onSettled` lifecycle hooks make
+ * optimistic updates and cache invalidation straightforward. A hook may
+ * return a promise; the mutation stays pending until it settles. Mutations do
+ * not retry by default (a retried write is not idempotent); opt in via
+ * `options.retry`. Whatever of `retry`, `retryDelay` and the `onSuccess` /
+ * `onError` / `onSettled` hooks a mutation leaves unset comes from
+ * {@link withDefaultOptions}.
+ *
+ * `mutateAsync(variables)` runs it the same way as `mutate()` and returns a
+ * promise of the run's data. Both take callbacks for that call alone as a
+ * second argument, for the component's own reaction to the write (see
+ * {@link MutateOptions}).
+ *
+ * `mutate()` and `mutateAsync()` call `optionsFn` each time; if it throws,
+ * they throw its error before anything is sent, and the signals keep showing
+ * the run before. They and `reset()` are safe to call from an effect: none
+ * makes the effect depend on what it reads, such as the options or the
+ * previous run.
+ *
+ * Bound to the current injection context. Destroying it doesn't cancel a run
+ * in flight: the write has most likely reached the server, so the run
  * finishes and fires its hooks. A `mutate()` that comes after that, say from
  * a timer, runs and fires its hooks too. The callbacks of a call are the
  * exception: none of them is called once the context is destroyed, or once
  * the options give another `mutationKey` than the call was made under. A key
  * that changes resets the mutation, the way `reset()` does (see
- * {@link MutationOptions}). From `mutate()` until its last hook is done, a
- * run keeps the app busy, whether its component is still there or not: a
- * server render and `whenStable()` wait for it.
+ * {@link MutationOptions}).
+ *
+ * From `mutate()` until its last hook is done, a run keeps the app busy,
+ * whether its component is still there or not: a server render and
+ * `whenStable()` wait for it.
  *
  * Must run in an injection context, or be given an explicit `injector`.
  *

@@ -302,15 +302,15 @@ export class QueryClient {
    *
    * Takes `staleTime`, `gcTime`, `retry`, `retryDelay`, `structuralSharing`
    * and `meta`, and resolves, rejects, retries and caches the way `query()`
-   * does. A key already fetching is waited for, not fetched again,
-   * unless `cancelRefetch` is set: then the fetch in flight is replaced, or,
-   * while the key has no data yet, let land, then fetched once more with this
-   * call's `queryFn` and options (the last such call's, if several came),
-   * unless a retry of it already started after this call. Either way the
-   * promise waits for data read after this call, unless the fetch it waits
-   * behind is cancelled, as when the last component showing the key leaves
-   * while its load runs, an `Observable` or one whose query function read
-   * the signal.
+   * does. A key already fetching is waited for, not fetched again, unless
+   * `cancelRefetch` is set. Then the fetch in flight is replaced; or, while
+   * the key has no data yet, it's let land, and the key is fetched once more
+   * with this call's `queryFn` and options (the last such call's, if several
+   * came), unless a retry of it already started after this call. Either way,
+   * the promise waits for data read after this call, unless the fetch it
+   * waits behind is cancelled. For example, the last component showing the
+   * key cancels its load by leaving while it runs, if the load can be
+   * aborted: its query function returned an `Observable` or read the signal.
    *
    * @typeParam TData - Type of the data resolved by `queryFn`.
    * @typeParam TQueryKey - Type of `key`, which `queryFn` gets the key with.

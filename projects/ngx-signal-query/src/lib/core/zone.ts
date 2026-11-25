@@ -36,7 +36,10 @@ export function requestOutsideZone<T>(
     const land = NgZone.isInAngularZone()
       ? (notify: () => void) =>
           zone.run(() => {
-            // The zone empties out once this task is done (see above).
+            // A no-op microtask, pending until this task is done: without it,
+            // the zone would empty out as soon as run() returns, and change
+            // detection could start in the middle of a tick (NG0101, see
+            // above).
             queueMicrotask(() => undefined)
             notify()
           })

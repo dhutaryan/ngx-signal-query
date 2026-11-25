@@ -8,8 +8,11 @@ import {
 
 import type { RetryDelayValue, RetryValue } from './types'
 
-// Exponential backoff capped at 30s, matching TanStack's default.
-/** @internal */
+/**
+ * Exponential backoff capped at 30s, matching TanStack's default.
+ *
+ * @internal
+ */
 export function defaultRetryDelay(failureCount: number): number {
   return Math.min(1000 * 2 ** failureCount, 30000)
 }
@@ -37,18 +40,21 @@ export function resolveRetryDelay<TError>(
     : retryDelay
 }
 
-// The failure fields of a query's fetch or a mutation's run that ends with
-// `error`. Each failed attempt is counted when it comes in, the last one
-// included (see RetryerConfig.onFail). So when the fetch or run ends with the
-// failure of its last attempt, that failure is already the failureReason and
-// isn't counted again. A response that one of the caller's checks rejects is
-// such a failure too (see RetryerConfig.final). Any other failure counts one
-// more: an onMutate that throws before the attempts, or a failure found after
-// them, such as a structuralSharing function that throws or a mutationFn
-// whose Observable completes without a value. The count is checked as well
-// because an error can be null, and failureReason is null until a failure is
-// counted.
-/** @internal */
+/**
+ * The failure fields of a query's fetch or a mutation's run that ends with
+ * `error`. Each failed attempt is counted when it comes in, the last one
+ * included (see RetryerConfig.onFail). So when the fetch or run ends with the
+ * failure of its last attempt, that failure is already the failureReason and
+ * isn't counted again. A response that one of the caller's checks rejects is
+ * such a failure too (see RetryerConfig.final). Any other failure counts one
+ * more: an onMutate that throws before the attempts, or a failure found after
+ * them, such as a structuralSharing function that throws or a mutationFn
+ * whose Observable completes without a value. The count is checked as well
+ * because an error can be null, and failureReason is null until a failure is
+ * counted.
+ *
+ * @internal
+ */
 export function countFailure<TError>(
   state: { failureCount: number; failureReason: TError | null },
   error: TError,
@@ -84,10 +90,13 @@ export interface RetryerConfig<T, TError> {
   final?: (error: TError) => boolean
 }
 
-// Makes the attempts of a fetch or a run until one succeeds, retrying a
-// failure as `retry` allows, after the wait `retryDelay` gives. A final
-// failure ends them at once.
-/** @internal */
+/**
+ * Makes the attempts of a fetch or a run until one succeeds, retrying a
+ * failure as `retry` allows, after the wait `retryDelay` gives. A final
+ * failure ends them at once.
+ *
+ * @internal
+ */
 export function retryer<T, TError>({
   attempt,
   retry,

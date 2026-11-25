@@ -207,15 +207,14 @@ export type MutationSnapshot<
  * They're called once the run is done: after the callbacks of
  * {@link withMutationCache} and the mutation's own hooks, with the outcome
  * already in the signals, and before the promise of `mutateAsync()` settles.
- * Every call gets its own, with its own outcome, also one that a later call
- * or `reset()` came after. None of them is called if, once the run is done,
- * the mutation's host, the component or service where {@link injectMutation}
- * ran, is destroyed, or the options give another `mutationKey` than the call
- * was made under (see {@link MutationOptions}); the mutation's own hooks
- * still run. Nothing waits
- * for a promise one returns. What one throws, or what such a promise rejects
- * with, goes to the app's `ErrorHandler`: the outcome and the other
- * callbacks stay as they are.
+ * Every call gets its own, with its own outcome, also one that a later call or
+ * `reset()` came after. None of them is called if, once the run is done, the
+ * mutation's host, the component or service where {@link injectMutation} ran,
+ * is destroyed, or the options give another `mutationKey` than the call was
+ * made under (see {@link MutationOptions}); the mutation's own hooks still run.
+ * Nothing waits for a promise one returns. What one throws, or what such a
+ * promise rejects with, goes to the app's `ErrorHandler`: the outcome and the
+ * other callbacks stay as they are.
  */
 export type MutateOptions<TData, TError, TVariables, TContext = unknown> = {
   /** Called with the data, the variables and the context. */

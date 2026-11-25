@@ -7628,6 +7628,19 @@ describe('injectQuery', () => {
       fixture.destroy()
     }))
 
+    it('throws their error from refetch(), and fetches nothing', () => {
+      const request = jasmine.createSpy('request').and.returnValue(of('item'))
+      const fixture = mountPanel(request)
+
+      fixture.componentInstance.item.set(null)
+
+      expect(() => fixture.componentInstance.query.refetch()).toThrowError(
+        TypeError,
+        /'id'/,
+      )
+      expect(request).toHaveBeenCalledTimes(1)
+    })
+
     it('lets setQueryData write its key', () => {
       const fixture = mountPanel(() => of('item'))
 

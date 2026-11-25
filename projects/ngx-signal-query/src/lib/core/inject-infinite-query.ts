@@ -41,9 +41,8 @@ import type {
  *
  * With an `initialData` that always seeds the list, the pages as a value
  * whose type leaves `undefined` out or a function whose return type does, the
- * result is a
- * {@link DefinedInfiniteQueryResult}: its `data()` holds the pages from the
- * first read, with no `undefined` in its type.
+ * result is a {@link DefinedInfiniteQueryResult}: its `data()` holds the
+ * pages from the first read, with no `undefined` in its type.
  *
  * Must run in an injection context, or be given an explicit `injector`.
  *
@@ -130,9 +129,8 @@ export function injectInfiniteQuery<
  *
  * With an `initialData` that always seeds the list, the pages as a value
  * whose type leaves `undefined` out or a function whose return type does, the
- * result is a
- * {@link DefinedInfiniteQueryResult}: its `data()` holds the pages from the
- * first read, with no `undefined` in its type.
+ * result is a {@link DefinedInfiniteQueryResult}: its `data()` holds the
+ * pages from the first read, with no `undefined` in its type.
  *
  * Must run in an injection context, or be given an explicit `injector`.
  *

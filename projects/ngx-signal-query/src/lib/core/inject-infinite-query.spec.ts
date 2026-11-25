@@ -470,6 +470,26 @@ describe('injectInfiniteQuery', () => {
       expect(fetched.value).toEqual({ data: result.data(), error: null })
     }))
 
+    it('is fetched by neither fetchNextPage() nor fetchPreviousPage() while the options function throws: they throw its error', () => {
+      const api = server()
+      const broken = signal(false)
+      const { result } = mount(() => {
+        if (broken()) throw new Error('no options')
+
+        // From the middle of the list, so there's a page on either side.
+        return listOptions(api, { ...previousToo, initialPageParam: 4 })
+      })
+
+      expect(result.hasNextPage()).toBeTrue()
+      expect(result.hasPreviousPage()).toBeTrue()
+
+      broken.set(true)
+
+      expect(() => result.fetchNextPage()).toThrowError('no options')
+      expect(() => result.fetchPreviousPage()).toThrowError('no options')
+      expect(api.sent).toEqual([4])
+    })
+
     it('shows that it is being fetched to every component showing the query', () => {
       const api = server()
       const fetching = mount(() => listOptions(api)).result

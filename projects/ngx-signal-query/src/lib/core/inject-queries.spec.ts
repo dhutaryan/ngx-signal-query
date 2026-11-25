@@ -1097,6 +1097,24 @@ describe('injectQueries', () => {
 
         expect(api.calls.allArgs()).toEqual([[1], [1]])
       })
+
+      it('throws its error from refetch(), and fetches nothing', () => {
+        const api = todoApi()
+        const item = signal<{ id: number } | null>({ id: 1 })
+        const { results } = mount(() => {
+          const { id } = item()!
+
+          return {
+            queries: [{ queryKey: ['todo', id], queryFn: () => api(id) }],
+          }
+        })
+        const [todo] = results()
+
+        item.set(null)
+
+        expect(() => todo.refetch()).toThrowError(TypeError, /'id'/)
+        expect(api.calls.allArgs()).toEqual([[1]])
+      })
     })
   })
 
