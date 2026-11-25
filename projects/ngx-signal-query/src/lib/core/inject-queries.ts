@@ -30,7 +30,7 @@ export interface InjectQueriesOptions<TData, TError = Error> {
 // feeds the observer's effects their options. The effect of injectQueries
 // writes that signal in place for as long as the key stays in the list.
 // Whatever is fetched for the query goes by what optionsFn gives right now
-// instead (see listed).
+// instead (see optionsByHash).
 interface Entry<TData, TError> {
   hash: string
   options: WritableSignal<QueryOptions<TData, TError>>
@@ -86,18 +86,18 @@ export function injectQueries<TData, TError = Error>(
   const injector = options?.injector ?? inject(Injector)
 
   let entries: Array<Entry<TData, TError>> = []
-  let current: Array<QueryResult<TData, TError>> = []
+  let results: Array<QueryResult<TData, TError>> = []
   let destroyed = false
 
   // The queries that optionsFn gives, from one run of it each time what it
   // reads changes. The effect below syncs the entries from them, a read
-  // before the effect's first run does too, and listed finds each entry's
-  // options in them: since all of them see the same run, an entry always
-  // finds its own key, even when optionsFn reads values that aren't signals
-  // or puts the current time in a key. Every run counts as a change, also
-  // one that gives back the same array changed in place: the entries are
-  // synced after each run, as they would be if the effect ran optionsFn
-  // itself.
+  // before the effect's first run does too, and optionsByHash finds each
+  // entry's options in them: since all of them see the same run, an entry
+  // always finds its own key, even when optionsFn reads values that aren't
+  // signals or puts the current time in a key. Every run counts as a change,
+  // also one that gives back the same array changed in place: the entries
+  // are synced after each run, like they would be if the effect ran
+  // optionsFn itself.
   const currentQueries = computed(() => optionsFn().queries, {
     equal: () => false,
   })
@@ -108,9 +108,9 @@ export function injectQueries<TData, TError = Error>(
   // already, not by the options that the effect below handed it last: until
   // change detection runs that effect, a queryFn that reads a signal when it
   // runs, like `() => api(this.id())` does, asks for what the signal holds
-  // now. An entry that finds nothing at its hash and rank has left the list,
-  // and asks for no query any more.
-  const listed = computed(() => {
+  // now. An entry that finds nothing at its hash and rank has left the list:
+  // its observer is unlisted (see createQueryObserver).
+  const optionsByHash = computed(() => {
     const byHash = new Map<string, Array<QueryOptions<TData, TError>>>()
 
     for (const queryOptions of currentQueries()) {
@@ -166,7 +166,7 @@ export function injectQueries<TData, TError = Error>(
           () => optionsSignal(),
           injector,
           fetchArgsOf,
-          () => listed().get(hash)?.[rank] ?? null,
+          () => optionsByHash().get(hash)?.[rank] ?? null,
         ),
       }
     })
@@ -183,9 +183,9 @@ export function injectQueries<TData, TError = Error>(
 
     entries = next
 
-    if (changed) current = entries.map((entry) => entry.observer.result)
+    if (changed) results = entries.map((entry) => entry.observer.result)
 
-    return current
+    return results
   }
 
   // The results of the effect's latest sync; unset until its first run.
