@@ -33,9 +33,10 @@ import type {
 import { hashKey, isValidTimeout } from './utils'
 
 /**
- * The options an observer is created with: those of a query whose queryFn
- * gives TQueryFnData, the query's data itself for a plain query, and
- * whatever else the layer that creates the observer reads from them.
+ * The options an observer is created with: a query's options whose queryFn
+ * gives TQueryFnData, which is the data itself for a plain query and one
+ * page for an infinite query. The layer that creates the observer may add
+ * fields of its own, like an infinite query's page options.
  *
  * @internal
  */
@@ -53,9 +54,9 @@ export type DefaultedObserverOptions<TOptions, TData, TError, TQueryFnData> =
   TOptions & DefaultedQueryOptions<TData, TError, TQueryFnData>
 
 /**
- * What a fetch made on behalf of an observer runs with: its query function
- * and meta, and its retry policy and merge, with the client's defaults filled
- * in.
+ * What a fetch made on behalf of an observer runs with: FetchArgs whose
+ * retry policy and structuralSharing are always set, from the client's
+ * defaults where the options leave them out.
  *
  * @internal
  */
@@ -70,10 +71,10 @@ export type ObserverFetchArgs<TData, TError, TQueryFnData> = FetchArgs<
   >
 
 /**
- * Builds what a fetch made on behalf of an observer runs with from its live
- * options: every fetch that the observer asks for, or that the query makes
- * for it, goes by it. fetchArgsOf builds it for a plain query; a query whose
- * data is made of several responses adds how a fetch gets it (a behavior).
+ * Builds the fetch args from an observer's live options, for every fetch
+ * made on its behalf: those it asks for and those the query makes for it.
+ * injectQuery and injectQueries pass fetchArgsOf; an infinite query adds
+ * its behavior, which fetches the pages.
  *
  * @internal
  */
@@ -83,10 +84,10 @@ export type FetchArgsBuilder<TOptions, TData, TError, TQueryFnData> = (
 
 /**
  * One observed query: its reactive {@link QueryResult} and a `destroy()` that
- * ends the observation (drops the cache observer, stops polling). For a layer
- * built on the observer, such as an infinite query's: the state of the query
- * it shows, its options, and `asObserver`, which runs `act` on its behalf with
- * the live options (see createQueryObserver).
+ * ends the observation (unregisters from the query, stops polling). For a
+ * layer built on the observer, such as an infinite query's: the state of the
+ * query it shows, its options, and `asObserver`, which runs `act` on its
+ * behalf with the live options (see createQueryObserver).
  *
  * @internal
  */
@@ -99,12 +100,17 @@ export interface QueryObserver<
   result: QueryResult<TData, TError>
   destroy: () => void
   state: Signal<InternalQueryState<TData, TError>>
-  // Reading it throws while optionsFn throws.
+  /**
+   * The options that the effects go by, with the defaults filled in. Reading
+   * it throws while optionsFn throws.
+   */
   options: Signal<
     DefaultedObserverOptions<TOptions, TData, TError, TQueryFnData>
   >
-  // Gives what `act` gives, or undefined without running it while the owner
-  // asks for no query with the observer.
+  /**
+   * Gives what `act` gives, or, while the observer is unlisted (see
+   * createQueryObserver), undefined without running it.
+   */
   asObserver: <R>(
     act: (on: {
       q: Query<TData, TError, TQueryFnData>
@@ -131,12 +137,15 @@ export interface QueryObserver<
  * `effect()` called directly in that context.
  *
  * Every fetch made on behalf of the observer runs with what `fetchArgs` builds
- * from the live options (see FetchArgsBuilder): those that `liveOptionsFn`
- * gives right now, or, without it, those that `optionsFn` gives. An owner
- * whose `optionsFn` may lag behind passes `liveOptionsFn`, like injectQueries
- * does: it hands each query's observer its options from an effect, which runs
- * only at change detection. While `liveOptionsFn` gives null, the owner asks
- * for no query with the observer, and nothing is fetched on its behalf.
+ * from the live options (see FetchArgsBuilder): what `liveOptionsFn` gives
+ * right now, or, without it, what `optionsFn` gives. An owner whose
+ * `optionsFn` may lag behind passes `liveOptionsFn`. injectQueries does: it
+ * hands each query's observer its options from an effect, which runs only at
+ * change detection.
+ *
+ * While `liveOptionsFn` gives null, the observer is unlisted: its owner asks
+ * for no query with it, like injectQueries for a key that has left its list,
+ * and nothing is fetched on its behalf.
  *
  * @internal
  */
@@ -182,9 +191,9 @@ export function createQueryObserver<
   // Single source of truth for the options that the effects go by.
   const defaultedOptions = computed(() => withDefaults(optionsFn()))
 
-  // The live options, with the defaults filled in: null while the owner asks
-  // for no query with the observer (see liveOptionsFn). Without
-  // liveOptionsFn, this is defaultedOptions itself.
+  // The live options, with the defaults filled in, which every fetch goes
+  // by: null while the observer is unlisted. Without liveOptionsFn, this is
+  // defaultedOptions itself.
   const live: Signal<ReturnType<typeof defaultedOptions> | null> = liveOptionsFn
     ? computed(() => {
         const options = liveOptionsFn()
@@ -192,6 +201,19 @@ export function createQueryObserver<
         return options === null ? null : withDefaults(options)
       })
     : defaultedOptions
+
+  // The observer holds its query in several places, each for its own reader:
+  // - switched: the query that the key or follow effect last moved it to;
+  // - query: the query that the result signals read: switched, or, before
+  //   the key effect first runs, the current key's query, resolved on the
+  //   spot;
+  // - shown: the query the subscriber is registered with, which catches up
+  //   with query when the subscriber effect runs;
+  // - cached: the cache's entry for the key right now, undefined after
+  //   removeQueries;
+  // - since: the query that resolve() turned the observer to last, with its
+  //   fetchedCount, isFetchedAfterMount's baseline (switchedSince holds
+  //   since as it was at the last switch).
 
   // A query the observer turned to, and how many times something had landed
   // in it by then.
@@ -213,23 +235,21 @@ export function createQueryObserver<
   let switchedSince: TurnedTo | undefined
 
   // Resolves the query for a key, seeding one with no data yet with the
-  // initialData of `options` (see applyInitialData), each time the key is
-  // resolved. `options` are those that the effects go by, unless a fetch
-  // made on the observer's behalf passes the live ones that it fetches with,
-  // like asObserver and the poll do. It writes signals (the cache's entries,
-  // the query's state, since), so callers run it untracked: reached from a
-  // computed, a tracked write throws NG0600.
+  // initialData of `options` (see applyInitialData). `options` are those
+  // that the effects go by, unless a fetch made on the observer's behalf
+  // passes the live ones that it fetches with, like asObserver and the poll
+  // do. It writes signals (the cache's entries, the query's state, since),
+  // so callers run it untracked: reached from a computed, a tracked write
+  // throws NG0600.
   //
-  // A query other than the one it resolved last is one the observer turns
-  // to: the first one, the next key's, a key it comes back to, or a new
-  // entry for the key after removeQueries or clear(), which its own refetch
-  // or poll makes, or which something else makes and the follow effect
-  // below moves it to: a write, another component's fetch, a prefetch.
-  // Turning to it notes how many times something has landed in it so far;
-  // for the query the effects last switched to, it goes on from what it
-  // noted then (see switchedSince). Each fetch that the observer asks for
-  // resolves its query here first, so a response that comes back at once
-  // lands after that, whenever the effects catch up.
+  // When it gives another query than last time (the first one, a new key's,
+  // a key coming back, a new entry after removeQueries or clear()), the
+  // observer turns to that query: since records it with its fetchedCount,
+  // isFetchedAfterMount's baseline. For the query the effects last switched
+  // to, since takes back the baseline noted at the switch (switchedSince).
+  // Each fetch that the observer asks for resolves its query here first, so
+  // a response that comes back at once counts as landing after the
+  // baseline, however late the effects catch up.
   const resolve = (
     key: QueryKey,
     options: ReturnType<typeof defaultedOptions> = untracked(defaultedOptions),
@@ -304,6 +324,8 @@ export function createQueryObserver<
     switchedSince = untracked(since)
   }
 
+  // Key effect: moves the observer to the query of the key that the options
+  // give.
   track(() => {
     const key = defaultedOptions().queryKey
 
@@ -317,14 +339,14 @@ export function createQueryObserver<
     cache.find<TData, TError, TQueryFnData>(defaultedOptions().queryKey),
   )
 
-  // After removeQueries the observer keeps the query the cache dropped and
-  // shows what it had: the removal refetches nothing, as in TanStack. The key
-  // comes back with a write, a refetch, another component, a poll, or the
-  // next run of optionsFn, after which the key effect above resolves the key
-  // into a new entry and the fetch effect fetches it. Whatever else brings it
-  // back, the observer follows it there as on a key change: resolve() seeds
-  // initialData into an entry still pending. Without this, it would see the
-  // new entry only on the next run of optionsFn.
+  // Follow effect: moves the observer to a new entry for its key. After
+  // removeQueries the observer keeps the query the cache dropped and shows
+  // what it had: the removal refetches nothing, which matches TanStack. On
+  // the next run of optionsFn, the key effect resolves the key into a new
+  // entry, and the fetch effect fetches it. Whatever brings the key back
+  // before that, like a write, a refetch, a poll or another component, this
+  // effect moves the observer there the way a key change does, and resolve()
+  // seeds initialData into an entry still pending.
   track(() => {
     const entry = cached()
 
@@ -333,10 +355,11 @@ export function createQueryObserver<
     switchTo(untracked(() => resolve(entry.key)))
   })
 
-  // The live options for the library's own reads, made from someone else's
-  // call: null while they throw, and while the owner asks for no query with
-  // the observer. The owner's effects still report such an error to Angular,
-  // and a read like this mustn't fail the caller or interrupt other queries.
+  // An untracked read of live that gives null instead of throwing, for the
+  // library's own reads made from someone else's call, like an
+  // invalidation's: null while the options throw, and while the observer is
+  // unlisted. The owner's effects still report such an error to Angular, and
+  // a read like this mustn't fail the caller or interrupt other queries.
   const liveOptions = (): ReturnType<typeof defaultedOptions> | null => {
     try {
       return untracked(live)
@@ -345,11 +368,11 @@ export function createQueryObserver<
     }
   }
 
-  // How this observer would refetch q by hand, as refetch() does, enabled or
-  // not, from the live options; null while there are none (see liveOptions),
-  // or once the key has moved on. Before the key effect above catches up,
-  // queryFn already fetches the next query's data, so q must not be fetched
-  // with it.
+  // How this observer would refetch q by hand, like refetch() does, enabled
+  // or not, from the live options; null while there are none (see
+  // liveOptions), or once the key has moved on. Before the key effect above
+  // catches up, queryFn already fetches the next query's data, so q must not
+  // be fetched with it.
   const refetchOptionsFor = (
     q: Query<TData, TError, TQueryFnData>,
   ): ReturnType<
@@ -370,23 +393,24 @@ export function createQueryObserver<
   }
 
   // How this observer would fetch q right now, and when it wants q
-  // refetched: what refetchOptionsFor(q) gives while it is enabled, null
-  // while it is disabled. Polling goes by it, and so does every fetch that
-  // the query makes for this observer through the subscriber below: the
-  // refetch that invalidateQueries() or refetchQueries() asks for, one on
-  // window focus or on reconnect, the refetch an invalidation queues during a
-  // first load, and the queryFn of each request after the first one of a
-  // fetch, a retry's included. Only refetch(), the refetch it queues, and the
-  // later requests of a fetch that it asked for last (see Query#nextQueryFn)
-  // go by the options whether the observer is enabled or not.
+  // refetched: refetchOptionsFor(q) while it is enabled, null while it is
+  // disabled. Polling goes by it, and so does every fetch that the query
+  // makes for this observer through the subscriber below:
+  // - the refetch that invalidateQueries() or refetchQueries() asks for;
+  // - a refetch on window focus or on reconnect;
+  // - the refetch an invalidation queues during a first load;
+  // - the queryFn of each request after a fetch's first, a retry's included.
+  // Only refetch() fetches whether the observer is enabled or not, and so do
+  // the refetch it queues and the later requests of a fetch that it asked
+  // for last (see Query#nextQueryFn).
   const fetchOptionsFor = (
     q: Query<TData, TError, TQueryFnData>,
   ): ReturnType<
     QuerySubscriber<TData, TError, TQueryFnData>['fetchOptions']
   > => (liveOptions()?.enabled === false ? null : refetchOptionsFor(q))
 
-  // The query the subscriber below is registered with, set by the effect that
-  // registers it. Not query(): on a key change, that is the next query before
+  // The query the subscriber below is registered with, set by the subscriber
+  // effect. Not query(): on a key change, that is the next query before
   // the effect moves the subscriber there, and on Angular 19 effects outside
   // components may run in between, such as one that invalidates the query
   // being left: answered with the next query's options, it would get the next
@@ -397,14 +421,15 @@ export function createQueryObserver<
   // queryFn fetches none on the handle's behalf (see subscriber.fetches).
   let destroyed = false
 
-  // This observer as the query it shows sees it. One handle, moved from query
-  // to query along with the observer: each fetch it asks for hands it over to
-  // say who asks.
+  // The handle this observer registers with the query it shows
+  // (Query#addObserver), moved from query to query along with the observer.
+  // Each fetch the observer asks for passes it as `by`, so the query knows
+  // who asks.
   const subscriber: QuerySubscriber<TData, TError, TQueryFnData> = {
     fetchOptions: () => (shown ? fetchOptionsFor(shown) : null),
     refetchOptions: () => (shown ? refetchOptionsFor(shown) : null),
-    // Reads live itself, not through liveOptions(): that gives null both while
-    // the options throw and while the owner asks for no query, and asksFor
+    // Reads live itself, not through liveOptions(), which gives null both
+    // while the options throw and while the observer is unlisted: asksFor
     // answers the two differently (see QuerySubscriber.asksFor).
     asksFor: (queryHash) => {
       try {
@@ -422,12 +447,12 @@ export function createQueryObserver<
   // Runs `act` on behalf of this observer, on the query that the live options
   // ask for: `act` gets that query, the options, the fetch args built from
   // them, and the subscriber that tells the query who asks. The key, the
-  // initialData that a new query is seeded with and the fetch args come from
-  // one read of the options, so a fetch can't go to another key's query, nor
-  // seed its query from older options, whatever order the effects run in. While the owner asks for no
-  // query with the observer, it runs nothing and gives undefined. Untracked,
-  // like the client's methods: called from an effect, it mustn't make the
-  // effect depend on the options or on the query.
+  // initialData that a new query is seeded with and the fetch args all come
+  // from one read of the options, so a fetch can't go to another key's
+  // query, nor seed its query from older options, whatever order the effects
+  // run in. While the observer is unlisted, it runs nothing and gives
+  // undefined. Untracked, like the client's methods: called from an effect,
+  // it mustn't make the effect depend on the options or on the query.
   const asObserver: QueryObserver<
     TData,
     TError,
@@ -447,6 +472,8 @@ export function createQueryObserver<
       })
     })
 
+  // Subscriber effect: registers the subscriber with the query the observer
+  // shows, and moves it there on a switch.
   track((cleanup) => {
     const q = query()
 
@@ -468,18 +495,18 @@ export function createQueryObserver<
   // the fetch and polling effects.
   const enabled = computed(() => defaultedOptions().enabled !== false)
 
-  // Fetch when the observed query switches (key change) or when it becomes
-  // enabled — not on every re-evaluation of the options. defaultQueryOptions()
-  // builds a fresh object each time, so tracking it whole would refetch stale
-  // data whenever any signal read in optionsFn changes, even one unrelated to
-  // the key. queryFn, staleTime and the retry policy only parameterise the
-  // fetch and are read untracked (TanStack's shouldFetchOptionally).
-  // Invalidation isn't a trigger: invalidateQueries() refetches each active
-  // query once itself. A query it skipped (unobserved, or its observers
-  // disabled) stays invalidated, so it fetches here once observed or enabled:
-  // shouldFetch sees the flag. A fetch from before the invalidation that still
-  // runs is joined, not replaced; the flag outlives it, so the next trigger
-  // refetches.
+  // Fetch effect: fetches when the observed query switches (key change) or
+  // when it becomes enabled, not on every re-evaluation of the options.
+  // defaultQueryOptions() builds a fresh object each time, so tracking it
+  // whole would refetch stale data whenever any signal read in optionsFn
+  // changes, even one unrelated to the key. queryFn, staleTime and the retry
+  // policy only parameterise the fetch and are read untracked (TanStack's
+  // shouldFetchOptionally). Invalidation isn't a trigger: invalidateQueries()
+  // refetches each active query once itself. A query it skipped (unobserved,
+  // or its observers disabled) stays invalidated, so it fetches here once
+  // observed or enabled: shouldFetch sees isInvalidated. A fetch from before
+  // the invalidation that still runs is joined, not replaced; isInvalidated
+  // outlives it, so the next trigger refetches.
   track(() => {
     query()
 
@@ -510,12 +537,12 @@ export function createQueryObserver<
   // Angular's zone, which the polling timer stays out of.
   const zone = injector.get(NgZone)
 
-  // Polling: refetch on an interval, independent of staleTime. The timer
-  // restarts when the observed query switches, or when enabled or the interval
-  // changes, as in TanStack's setOptions. It doesn't restart on every
-  // re-evaluation of the options: defaultQueryOptions() builds a fresh object
-  // each time, so tracking it whole would restart the timer whenever any
-  // signal read in optionsFn changes. One that changes faster than the
+  // Polling effect: refetches on an interval, independent of staleTime. The
+  // timer restarts when the observed query switches, or when enabled or the
+  // interval changes, like TanStack's setOptions does. It doesn't restart on
+  // every re-evaluation of the options: defaultQueryOptions() builds a fresh
+  // object each time, so tracking it whole would restart the timer whenever
+  // any signal read in optionsFn changes. One that changes faster than the
   // interval would keep it from ever firing.
   //
   // Each poll comes ms after the query's last update, as in TanStack, whose
@@ -633,9 +660,9 @@ export function createQueryObserver<
     // intent — get current data): a fetch in flight is replaced, or, with no
     // data yet, let land first (see Query#refetch). However the fetch ends,
     // the signals show it, so the promise resolves with their data and error
-    // and never rejects. While the owner asks for no query with the
-    // observer, nothing is fetched (see asObserver), and it resolves with
-    // them right away.
+    // and never rejects. While the observer is unlisted, nothing is fetched
+    // (see asObserver), and it resolves with them right away. While the
+    // options throw, it throws their error, like mutate() does.
     refetch: () =>
       Promise.resolve(
         asObserver(({ q, args, by }) => q.refetch(args, { by, byHand: true })),

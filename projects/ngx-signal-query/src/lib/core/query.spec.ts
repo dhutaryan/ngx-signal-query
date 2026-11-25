@@ -632,7 +632,7 @@ describe('Query', () => {
         query.fetch({ queryFn, retry: 1, retryDelay: 10, behavior: resuming })
 
         const refetched = settled(
-          query.refetch({ queryFn, behavior: resuming }, { by: 'caller' }),
+          query.refetch({ queryFn, behavior: resuming }, { by: 'client' }),
         )
 
         tick(10)
@@ -1534,7 +1534,7 @@ describe('Query', () => {
       const load = new Subject<number>()
 
       query.fetch({ queryFn: () => load })
-      query.refetch({ queryFn: () => new Subject<number>() }, { by: 'caller' })
+      query.refetch({ queryFn: () => new Subject<number>() }, { by: 'client' })
 
       load.next(1)
       load.complete()
@@ -1554,7 +1554,7 @@ describe('Query', () => {
         .and.returnValue(new Subject<number>())
 
       query.fetch({ queryFn: () => load })
-      query.refetch({ queryFn: refetch }, { by: 'caller' })
+      query.refetch({ queryFn: refetch }, { by: 'client' })
 
       expect(refetch).not.toHaveBeenCalled()
 

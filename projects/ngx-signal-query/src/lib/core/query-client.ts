@@ -708,12 +708,13 @@ export class QueryClient {
         return Promise.resolve(query.state().data as TData)
       }
 
-      // A fetch asked for by a caller, not a component: it runs with this
-      // call's options, and gets the data as the call's behavior says.
+      // A fetch asked for by this call, not by a component ('client'): it
+      // runs with this call's options, and gets the data as the call's
+      // behavior says.
       const args = { ...fetchArgsOf(defaulted), behavior }
 
       return cancelRefetch
-        ? query.refetch(args, { by: 'caller' })
+        ? query.refetch(args, { by: 'client' })
         : query.fetch(args)
     })
   }
