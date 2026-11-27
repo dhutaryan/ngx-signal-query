@@ -3,6 +3,7 @@ import {
   type EffectRef,
   type Injector,
   type Signal,
+  ErrorHandler,
   NgZone,
   computed,
   effect,
@@ -573,6 +574,13 @@ export function createQueryObserver<
     // to keep polling there, as in TanStack: nobody sees the data, and coming
     // back refetches it if it's stale. The timer keeps its schedule, so the
     // poll due next goes out once the page shows again.
+    //
+    // Resolving the key seeds initialData into a query that has no data yet,
+    // so an initialData or initialDataUpdatedAt function that throws, throws
+    // here. Then the poll fetches nothing, and the error goes to the
+    // ErrorHandler that `injector` gives, outside Angular's zone, like the
+    // poll itself. The timer keeps its schedule even if the handler throws
+    // (see startPolling).
     const poll = (): void => {
       const options = fetchOptionsFor(q)
       const current = liveOptions()
@@ -580,7 +588,11 @@ export function createQueryObserver<
       if (!options || !current) return
 
       if (current.refetchIntervalInBackground || pageVisible()) {
-        resolve(q.key, current).fetch(options, { by: subscriber })
+        try {
+          resolve(q.key, current).fetch(options, { by: subscriber })
+        } catch (error) {
+          injector.get(ErrorHandler).handleError(error)
+        }
       }
     }
 

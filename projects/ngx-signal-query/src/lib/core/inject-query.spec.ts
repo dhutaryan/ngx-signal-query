@@ -5023,6 +5023,76 @@ describe('injectQuery', () => {
       flush()
     }))
 
+    // Before it fetches, a poll seeds initialData into a query that has no
+    // data yet, such as one whose fetch failed. So an initialData function
+    // that throws, throws during the poll.
+    it('keeps its schedule when initialData throws during a poll', fakeAsync(() => {
+      spyOn(TestBed.inject(ErrorHandler), 'handleError')
+
+      const queryFn = jasmine
+        .createSpy('queryFn')
+        .and.returnValue(throwError(() => new Error('offline')))
+      let corrupt = false
+      const { fixture } = mount(() => ({
+        queryKey: ['status'],
+        queryFn,
+        retry: false,
+        refetchInterval: 100,
+        // Seeds nothing, and throws once, like a parse of corrupt stored data.
+        initialData: (): string | undefined => {
+          if (!corrupt) return undefined
+
+          corrupt = false
+          throw new SyntaxError('Unexpected token')
+        },
+      }))
+
+      expect(queryFn).toHaveBeenCalledTimes(1)
+
+      corrupt = true
+
+      // The next poll fetches nothing, and the one after it comes on time.
+      expect(() => tick(100)).not.toThrow()
+      expect(queryFn).toHaveBeenCalledTimes(1)
+
+      tick(100)
+
+      expect(queryFn).toHaveBeenCalledTimes(2)
+
+      fixture.destroy()
+      flush()
+    }))
+
+    it("hands what initialData throws during a poll to the app's ErrorHandler, outside Angular's zone", fakeAsync(() => {
+      const error = new SyntaxError('Unexpected token')
+      const inZone: boolean[] = []
+      const handleError = spyOn(
+        TestBed.inject(ErrorHandler),
+        'handleError',
+      ).and.callFake(() => inZone.push(NgZone.isInAngularZone()))
+      let corrupt = false
+      const { fixture } = mount(() => ({
+        queryKey: ['status'],
+        queryFn: () => throwError(() => new Error('offline')),
+        retry: false,
+        refetchInterval: 100,
+        initialData: (): string | undefined => {
+          if (corrupt) throw error
+
+          return undefined
+        },
+      }))
+
+      corrupt = true
+
+      expect(() => tick(100)).not.toThrow()
+      expect(handleError).toHaveBeenCalledOnceWith(error)
+      expect(inZone).toEqual([false])
+
+      fixture.destroy()
+      flush()
+    }))
+
     // The timer restarts when the observed query, enabled or the interval
     // changes, not whenever the options re-evaluate.
     describe('timer restarts', () => {
