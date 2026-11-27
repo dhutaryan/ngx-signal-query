@@ -1,7 +1,10 @@
 /**
  * Calls `poll` every `ms`, but never sooner than `ms` after `updatedAt()`:
  * when the timer comes due earlier, it waits out the rest of the interval
- * from then. Returns a function that stops polling.
+ * from then. Returns a function that stops polling, even when a poll calls it.
+ *
+ * A poll that throws doesn't end polling: what it throws comes out of its
+ * timer, and the next poll comes on time.
  *
  * @internal
  */
@@ -22,8 +25,10 @@ export function startPolling(
         return
       }
 
-      poll()
+      // The next poll's timer is set first: if this poll throws, polling goes
+      // on, and if it calls stop(), stop() clears that timer.
       wait(ms)
+      poll()
     }, delay)
   }
 
